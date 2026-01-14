@@ -1,5 +1,6 @@
-const express = require("express");
-const { errorMiddleware } = require('./common/middlewares/error.middleware');
+import express from "express";
+import { errorMiddleware } from "./common/middlewares/error.middleware.js";
+
 const app = express();
 
 app.use(express.json());
@@ -10,5 +11,4 @@ app.get("/", (req, res) => {
 });
 
 export default app;
-
 
