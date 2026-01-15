@@ -8,8 +8,10 @@ const env = {
   PORT: Number(process.env.PORT) || 5000,
 
   // MongoDB
+  MONGO_URI: process.env.MONGO_URI,
   MONGO_USERNAME: process.env.MONGO_USERNAME,
   MONGO_PASSWORD: process.env.MONGO_PASSWORD,
+  MONGO_URI: process.env.MONGO_URI || "mongodb://localhost:27017/testportal",
 
   // Cloudinary
   CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
