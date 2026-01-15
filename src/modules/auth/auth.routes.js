@@ -1,21 +1,18 @@
-import { Router } from 'express';
-import { validateMiddleware } from '../../common/middlewares/validate.middleware.js';
-import { loginSchema } from './schemas/login.schema.js';
-import { registerSchema } from './schemas/register.schema.js';
-import { login, register } from './auth.controller.js';
+import express from "express";
+import { registerController, loginController, logoutController, refreshTokenController, meController } from "./auth.controller.js";
+import { authMiddleware, roleMiddleware } from "../../common/middlewares/auth.middleware.js";
 
-const router = Router();
+const router = express.Router();
 
-router.post(
-  '/login',
-  validateMiddleware(loginSchema),
-  login
-);
+router.post("/register", registerController);
+router.post("/login", loginController);
+router.post("/logout", logoutController);
+router.post("/refresh-token", refreshTokenController);
+router.get("/me", authMiddleware, meController);
 
-router.post(
-  '/register',
-  validateMiddleware(registerSchema),
-  register
-);
+// Example of admin-only route
+router.get("/admin", authMiddleware, roleMiddleware("admin"), (req, res) => {
+  res.json({ message: "Admin route access granted" });
+});
 
 export default router;
