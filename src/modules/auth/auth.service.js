@@ -1,24 +1,27 @@
 import bcrypt from "bcryptjs";
-import { authRepository } from "./repositories/auth.repository.js";
+import User from "../../models/user.model.js"; // import your User model
+import { createUser, findUserByEmail, findUserById } from "./repositories/auth.repository.js";
 import { generateAccessToken, generateRefreshToken } from "./services/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
 
-export const register = async ({ email, password, role = "user" }) => {
-  const existingUser = await authRepository.findByEmail(email);
-  if (existingUser) throw new AuthError("User already exists");
+/** Register user */
+export const register = async (userData) => {
+  if (!userData.firstName || !userData.lastName || !userData.email || !userData.password) {
+    throw new AuthError("firstName, lastName, email, and password are required");
+  }
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const user = await authRepository.create({ email, password: hashedPassword, role });
+  const hashedPassword = await bcrypt.hash(userData.password, 10);
+  const user = await createUser({ ...userData, password: hashedPassword });
 
-  return {
-    user,
-    accessToken: generateAccessToken({ id: user.id, role: user.role }),
-    refreshToken: generateRefreshToken({ id: user.id }),
-  };
+  const accessToken = generateAccessToken({ id: user._id, role: user.role });
+  const refreshToken = generateRefreshToken({ id: user._id, role: user.role });
+
+  return { user, accessToken, refreshToken };
 };
 
+/** Login user */
 export const login = async ({ email, password }) => {
-  const user = await authRepository.findByEmail(email);
+  const user = await findUserByEmail(email);
   if (!user) throw new AuthError("Invalid credentials");
 
   const isMatch = await bcrypt.compare(password, user.password);
@@ -26,7 +29,8 @@ export const login = async ({ email, password }) => {
 
   return {
     user,
-    accessToken: generateAccessToken({ id: user.id, role: user.role }),
-    refreshToken: generateRefreshToken({ id: user.id }),
+    accessToken: generateAccessToken({ id: user._id, role: user.role }),
+    refreshToken: generateRefreshToken({ id: user._id, role: user.role }),
   };
 };
+

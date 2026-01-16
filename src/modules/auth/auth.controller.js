@@ -1,19 +1,39 @@
-import { login, register } from "./auth.service.js";
+import { register as registerService } from "./auth.service.js";
+import { login as loginService } from "./auth.service.js";
 import { accessCookieOptions, refreshCookieOptions } from "../../config/cookie.js";
 import { verifyRefreshToken, generateAccessToken } from "./services/token.service.js";
-import { authRepository } from "./repositories/auth.repository.js";
+import { createUser, findUserByEmail, findUserById } from "./repositories/auth.repository.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
 
 /** Register */
 export const registerController = async (req, res) => {
   try {
-    const { user, accessToken, refreshToken } = await register(req.body);
+    // Make sure we extract only the fields we need
+    const { firstName, lastName, email, password, phone, role, plan, organizationId } = req.body;
+
+    // Call service with clean data
+    const { user, accessToken, refreshToken } = await registerService({
+      firstName,
+      lastName,
+      email,
+      password,
+      phone,
+      role,
+      plan,
+      organizationId,
+    });
+
+    // Set cookies and respond
     res
       .cookie("accessToken", accessToken, accessCookieOptions)
       .cookie("refreshToken", refreshToken, refreshCookieOptions)
       .status(201)
-      .json({ message: "Registration successful", user: { id: user.id, email: user.email, role: user.role } });
+      .json({
+        message: "Registration successful",
+        user: { id: user._id, email: user.email, role: user.role },
+      });
   } catch (err) {
+    console.error("Register error:", err);
     res.status(400).json({ message: err.message });
   }
 };
@@ -21,12 +41,25 @@ export const registerController = async (req, res) => {
 /** Login */
 export const loginController = async (req, res) => {
   try {
-    const { user, accessToken, refreshToken } = await login(req.body);
+    const { email, password } = req.body;
+
+    // Call login service
+    const { user, accessToken, refreshToken } = await loginService({ email, password });
+
+    // Set cookies
     res
       .cookie("accessToken", accessToken, accessCookieOptions)
       .cookie("refreshToken", refreshToken, refreshCookieOptions)
-      .json({ message: "Login successful", user: { id: user.id, email: user.email, role: user.role } });
+      .json({
+        message: "Login successful",
+        user: {
+          id: user._id,       // _id instead of id for Mongoose
+          email: user.email,
+          role: user.role,
+        },
+      });
   } catch (err) {
+    console.error("Login error:", err);
     res.status(401).json({ message: err.message });
   }
 };
