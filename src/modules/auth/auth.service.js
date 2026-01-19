@@ -3,6 +3,8 @@ import User from "../../models/user.model.js"; // import your User model
 import { createUser, findUserByEmail, findUserById } from "./repositories/auth.repository.js";
 import { generateAccessToken, generateRefreshToken } from "./services/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
+import { sendVerifyEmail } from "./services/email.service.js";
+import { generateVerifyToken } from "./services/token.service.js";
 
 /** Register user */
 export const register = async (userData) => {
@@ -33,4 +35,22 @@ export const login = async ({ email, password }) => {
     refreshToken: generateRefreshToken({ id: user._id, role: user.role }),
   };
 };
+
+//email
+
+
+export const registerUser = async (data) => {
+  const user = await authRepository.create(data);
+
+  const token = generateVerifyToken(user._id);
+
+  await sendVerifyEmail(user, token); // ✅ dynamic user
+
+  return user;
+};
+
+
+
+
+
 

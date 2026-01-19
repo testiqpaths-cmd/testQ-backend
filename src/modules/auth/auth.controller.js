@@ -4,7 +4,7 @@ import { accessCookieOptions, refreshCookieOptions } from "../../config/cookie.j
 import { verifyRefreshToken, generateAccessToken } from "./services/token.service.js";
 import { createUser, findUserByEmail, findUserById } from "./repositories/auth.repository.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
-
+import * as authService from "./auth.service.js";
 /** Register */
 export const registerController = async (req, res) => {
   try {
@@ -98,4 +98,16 @@ export const meController = async (req, res) => {
   } catch (err) {
     res.status(404).json({ message: err.message });
   }
+};
+
+
+
+// email
+export const register = async (req, res) => {
+  await authService.registerUser(req.body);
+
+  res.status(201).json({
+    success: true,
+    message: "Verification email sent",
+  });
 };

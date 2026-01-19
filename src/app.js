@@ -11,6 +11,7 @@ const app = express();
 app.use(express.json());
 app.use(cookieParser());
 
+
 // CORS with credentials (for JWT cookies)
 app.use(
   cors({
@@ -29,5 +30,8 @@ app.get("/", (req, res) => {
 
 // Error middleware (after routes)
 app.use(errorMiddleware);
+
+// Use main routes for mail
+app.use("/", routes);
 
 export default app;
