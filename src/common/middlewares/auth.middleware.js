@@ -1,4 +1,4 @@
-import { verifyAccessToken } from "../../modules/auth/services/token.service.js";
+import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../exceptions/AuthError.js";
 
 /** Protect routes */

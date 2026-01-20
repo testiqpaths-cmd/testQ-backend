@@ -54,6 +54,42 @@ const userSchema = new Schema(
       enum: ["FREE", "PAID"],
       default: "FREE",
     },
+
+    address: {
+      line1: { type: String, trim: true },
+      line2: { type: String, trim: true },
+      city: { type: String, trim: true },
+      state: { type: String, trim: true },
+      country: { type: String, trim: true },
+      zipCode: { type: String, trim: true },
+    },
+
+    // 📧 Email Verification
+    isEmailVerified: {
+      type: Boolean,
+      default: false,
+    },
+
+    emailVerifiedAt: {
+      type: Date,
+      default: null,
+    },
+
+    emailOtp: {
+      code: {
+        type: Number,
+        required: null,
+      },
+      expiresIn: {
+        type: Number, // seconds
+        required: null,
+      },
+      createdAt: {
+        type: Date,
+        default: null,
+      },
+    },
+
     // Soft Delete Fields
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },
@@ -62,7 +98,7 @@ const userSchema = new Schema(
   },
   {
     timestamps: true,
-  }
+  },
 );
 
 // Export model
