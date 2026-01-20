@@ -39,25 +39,33 @@ export const registerController = async (req, res) => {
   }
 };
 
-// generateotpconroller
-export const generateOtpController = async (req,res,next)=>{
-  try{
+// generateOtpController
+export const generateOtpController = async (req, res, next) => {
+  try {
     const userId = req.params.id;
 
-    //call service
-    const {email,otp,expiresIn} = await generateOtpService(userId);
+    if (!userId) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    // Call service to generate OTP and send email
+    const { email, otp, expiresIn } = await generateOtpService(userId);
 
     res.status(200).json({
-      success:true,
-      message:`OTP generated and sent to ${email}`,
+      success: true,
+      message: `OTP generated and sent to ${email}`,
       data: {
         email,
-        otp,        // for testing, remove in production
-        expiresIn,  // timestamp in ms
+        otp,        // For testing purposes, remove in production
+        expiresIn,  // Timestamp in ms
       },
     });
-  } catch (err){
-    next(err);
+  } catch (err) {
+    console.error("generateOtpController error:", err);
+    next(err); // Will be handled by your error middleware
   }
 };
 

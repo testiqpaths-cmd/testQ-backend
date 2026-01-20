@@ -20,7 +20,7 @@ const renderTemplate = (templateName, data) => {
   const filePath = path.join(
     process.cwd(),
     "src/modules/auth/templates",
-    `${templateName}.html`
+    `${templateName}.html`,
   );
 
   const source = fs.readFileSync(filePath, "utf-8");
@@ -41,12 +41,13 @@ export const sendVerifyEmail = async (user, otp) => {
 
   // Render template
   const html = renderTemplate("verify-email", {
-    name,
-    verifyLink: `Your OTP: ${otp}`,
+    firstName: user.firstName,
+    otp,
     expiry: 5, // minutes
   });
 
   console.log("Sending email to:", email);
+  
 
   await transporter.sendMail({
     from: env.MAIL_FROM,

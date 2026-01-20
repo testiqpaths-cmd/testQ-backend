@@ -77,11 +77,7 @@ export const generateOtpService = async (userId) => {
     .replace("{{expiry}}", "5");
 
   // 7️⃣ Send email
-  await sendVerifyEmail({
-    to: email,
-    subject: "Your OTP Code",
-    html,
-  });
+  await sendVerifyEmail(user, otp);
 
   // 8️⃣ Return info (for testing)
   return { email, otp, expiresIn };
