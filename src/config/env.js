@@ -8,8 +8,10 @@ const env = {
   PORT: Number(process.env.PORT) || 5000,
 
   // MongoDB
+  MONGO_URI: process.env.MONGO_URI,
   MONGO_USERNAME: process.env.MONGO_USERNAME,
   MONGO_PASSWORD: process.env.MONGO_PASSWORD,
+  MONGO_URI: process.env.MONGO_URI || "mongodb://localhost:27017/testportal",
 
   // Cloudinary
   CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME,
@@ -21,6 +23,13 @@ const env = {
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
   JWT_ACCESS_EXPIRES_IN: process.env.JWT_ACCESS_EXPIRES_IN,
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN,
+
+    // Mail
+  MAIL_HOST: process.env.MAIL_HOST,
+  MAIL_PORT: Number(process.env.MAIL_PORT),
+  MAIL_USER: process.env.MAIL_USER,
+  MAIL_PASS: process.env.MAIL_PASS,
+  MAIL_FROM: process.env.MAIL_FROM,
 
   // Cookies
   COOKIE_SECURE: process.env.COOKIE_SECURE === "true",

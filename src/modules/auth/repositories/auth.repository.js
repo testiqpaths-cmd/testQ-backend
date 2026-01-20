@@ -1,7 +1,18 @@
-import User from "../../../database/models/user.model.js"; // assume a mongoose model
+import User from "../../../models/user.model.js";
 
-export const authRepository = {
-  create: (data) => User.create(data),
-  findByEmail: (email) => User.findOne({ email }),
-  findById: (id) => User.findById(id),
+
+/** Create a new user */
+export const createUser = async (data) => {
+  return await User.create(data);
 };
+
+/** Find a user by email */
+export const findUserByEmail = async (email) => {
+  return await User.findOne({ email });
+};
+/** Find a user by ID */
+export const findUserById = async (id) => {
+  return await User.findById(id);
+};
+
+
