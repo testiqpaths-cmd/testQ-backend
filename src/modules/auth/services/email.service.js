@@ -4,9 +4,10 @@ import path from "path";
 import handlebars from "handlebars";
 import env from "../../../config/env.js";
 
+// Create transporter
 const transporter = nodemailer.createTransport({
   host: env.MAIL_HOST,
-  port: env.MAIL_PORT,
+  port: Number(env.MAIL_PORT),
   secure: false,
   auth: {
     user: env.MAIL_USER,
@@ -14,6 +15,7 @@ const transporter = nodemailer.createTransport({
   },
 });
 
+// Render email template
 const renderTemplate = (templateName, data) => {
   const filePath = path.join(
     process.cwd(),
@@ -26,19 +28,32 @@ const renderTemplate = (templateName, data) => {
   return compiled(data);
 };
 
-export const sendVerifyEmail = async (user, token) => {
-  const verifyLink = `${env.FRONTEND_URL}/verify-email?token=${token}`;
+// Send verification email (OTP)
+export const sendVerifyEmail = async (user, otp) => {
+  // Accept email from user.email or user.to
+  const email = user.email || user.to;
+  const name = user.firstName || user.name || "User";
 
+  if (!email) {
+    console.error("sendVerifyEmail: recipient email is missing", user);
+    throw new Error("User email is required to send verification email");
+  }
+
+  // Render template
   const html = renderTemplate("verify-email", {
-    name: user.name,
-    verifyLink,
-    expiry: 15,
+    name,
+    verifyLink: `Your OTP: ${otp}`,
+    expiry: 5, // minutes
   });
+
+  console.log("Sending email to:", email);
 
   await transporter.sendMail({
     from: env.MAIL_FROM,
-    to: user.email,      // ✅ dynamic user email
-    subject: "Verify your email",
+    to: email,
+    subject: "Your OTP Code",
     html,
   });
+
+  console.log("Verification email sent successfully to:", email);
 };

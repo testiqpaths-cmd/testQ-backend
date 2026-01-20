@@ -1,7 +1,7 @@
 import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
-import env  from "./config/env.js";
+import env from "./config/env.js";
 import routes from "./routes/index.js";
 import { errorMiddleware } from "./common/middlewares/error.middleware.js";
 
@@ -10,7 +10,6 @@ const app = express();
 // Middleware
 app.use(express.json());
 app.use(cookieParser());
-
 
 // CORS with credentials (for JWT cookies)
 app.use(
@@ -30,8 +29,5 @@ app.get("/", (req, res) => {
 
 // Error middleware (after routes)
 app.use(errorMiddleware);
-
-// Use main routes for mail
-app.use("/", routes);
 
 export default app;
