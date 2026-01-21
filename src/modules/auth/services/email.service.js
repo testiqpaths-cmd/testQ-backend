@@ -5,13 +5,13 @@ import handlebars from "handlebars";
 import env from "../../../config/env.js";
 
 // Create transporter
-const transporter = nodemailer.createTransport({
+export const transporter = nodemailer.createTransport({
   host: env.MAIL_HOST,
   port: Number(env.MAIL_PORT),
-  secure: false,
+  secure: false, // TLS for 587
   auth: {
-    user: env.MAIL_USER,
-    pass: env.MAIL_PASS,
+    user: env.MAIL_USER, // snehasasthi@gmail.com
+    pass: env.MAIL_PASS, // app password
   },
 });
 
@@ -28,33 +28,31 @@ const renderTemplate = (templateName, data) => {
   return compiled(data);
 };
 
-// Send verification email (OTP)
 export const sendVerifyEmail = async (user, otp) => {
-  // Accept email from user.email or user.to
   const email = user.email || user.to;
-  const name = user.firstName || user.name || "User";
-
   if (!email) {
     console.error("sendVerifyEmail: recipient email is missing", user);
     throw new Error("User email is required to send verification email");
   }
 
-  // Render template
   const html = renderTemplate("verify-email", {
-    firstName: user.firstName,
+    firstName: user.firstName || "User",
     otp,
-    expiry: 5, // minutes
+    expiry: 5,
   });
 
-  console.log("Sending email to:", email);
-  
+  try {
+    const info = await transporter.sendMail({
+      from: env.MAIL_FROM,        // must match MAIL_USER
+      to: email,
+      subject: "Your OTP Code",
+      html,
+    });
 
-  await transporter.sendMail({
-    from: env.MAIL_FROM,
-    to: email,
-    subject: "Your OTP Code",
-    html,
-  });
-
-  console.log("Verification email sent successfully to:", email);
+    console.log("Verification email sent successfully:", info.messageId);
+  } catch (err) {
+    console.error("sendVerifyEmail failed:", err);
+    throw new Error("Failed to send OTP email: " + err.message);
+  }
 };
+
