@@ -64,6 +64,30 @@ const userSchema = new Schema(
       zipCode: { type: String, trim: true },
     },
 
+    // 🎓 Education Details
+    education: {
+      qualification: {
+        type: String,
+        trim: true,
+      },
+
+      stream: {
+        type: String,
+        trim: true,
+      },
+
+      passingYear: {
+        type: Number,
+        min: 1950,
+        max: new Date().getFullYear() + 5,
+      },
+
+      college: {
+        type: String,
+        trim: true,
+      },
+    },
+
     // 📧 Email Verification
     isEmailVerified: {
       type: Boolean,
