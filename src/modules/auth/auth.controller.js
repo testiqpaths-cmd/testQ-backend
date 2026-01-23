@@ -75,8 +75,10 @@ export const registerController = async (req, res) => {
 
 export const generateOtpController = async (req, res, next) => {
   try {
-    const { id: userId } = req.params; // 🔑 fix here
+    
 
+    const { id: userId } = req.params; // 🔑 fix here
+    console.log("OTP SAVED FOR USER:", userId);
     if (!userId) {
       return res.status(400).json({
         success: false,
@@ -106,7 +108,7 @@ export const generateOtpController = async (req, res, next) => {
       message: `OTP generated and sent to ${user.email}`,
       data: {
         email: user.email,
-        otp, // remove in production
+        //  otp remove in production
         expiresIn: Date.now() + 5 * 60 * 1000,
       },
     });
@@ -133,21 +135,24 @@ export const verifyOtpController = async (req, res, next) => {
       });
     }
 
-    // Verify OTP using Redis
+    console.log("Verifying OTP for user:", userId, "OTP:", otp);
+
     await verifyOtp(userId, otp);
 
-    // OTP verified, you can now generate access/refresh tokens here
     res.status(200).json({
       success: true,
       message: "OTP verified successfully",
     });
   } catch (err) {
+    console.error("OTP verification error:", err);
+
     res.status(400).json({
       success: false,
-      message: err.message,
+      message: err?.message || String(err) || "Server error",
     });
   }
 };
+
 
 /** Login */
 export const loginController = async (req, res) => {

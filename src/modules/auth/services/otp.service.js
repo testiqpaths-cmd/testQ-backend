@@ -21,13 +21,14 @@ export const checkOtpRateLimit = async (userId) => {
 // ==============================
 // Save OTP in Redis
 export const saveOtp = async (userId, otp) => {
-  await redisClient.set(`otp:${userId}`, otp, { EX: 300 }); // 5 min expiry
+  await redisClient.set(`otp:${userId}`, otp.toString(), { EX: 300 }); // 5 min expiry
 };
 
 // ==============================
 // Verify OTP from Redis
 export const verifyOtp = async (userId, otp) => {
   const savedOtp = await redisClient.get(`otp:${userId}`);
+  console.log("Saved OTP from Redis:", savedOtp); // <-- check Redis value
   if (!savedOtp) throw new Error("OTP expired or not found");
   if (savedOtp !== otp.toString()) throw new Error("Invalid OTP");
 
