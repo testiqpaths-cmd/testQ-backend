@@ -19,7 +19,10 @@ export const transporter = nodemailer.createTransport({
 const renderTemplate = (templateName, data) => {
   const filePath = path.join(
     process.cwd(),
-    "src/modules/auth/templates",
+    "src",
+    "modules",
+    "auth",
+    "templates",
     `${templateName}.html`,
   );
 
@@ -27,6 +30,7 @@ const renderTemplate = (templateName, data) => {
   const compiled = handlebars.compile(source);
   return compiled(data);
 };
+
 
 export const sendVerifyEmail = async (user, otp) => {
   const email = user.email || user.to;

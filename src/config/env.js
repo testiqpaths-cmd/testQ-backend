@@ -37,12 +37,12 @@ const env = {
   COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || "localhost",
     
   // Redis
-  // //   REDIS_HOST: process.env.REDIS_HOST,
-  // //   REDIS_PORT: Number(process.env.REDIS_PORT),
-  // //   REDIS_PASSWORD: process.env.REDIS_PASSWORD,
+    REDIS_HOST: process.env.REDIS_HOST,
+    REDIS_PORT: Number(process.env.REDIS_PORT),
+    REDIS_PASSWORD: process.env.REDIS_PASSWORD,
 
   // CORS
-  CORS_ORIGIN: process.env.CORS_ORIGIN || "http://localhost:5000",
+  CORS_ORIGIN: process.env.CORS_ORIGIN ,
 };
 
 export default env;

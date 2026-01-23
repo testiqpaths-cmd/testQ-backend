@@ -31,6 +31,7 @@ import { sendVerifyEmail } from "./services/email.service.js";
 /** Register */
 export const registerController = async (req, res) => {
   try {
+    console.log("REGISTER BODY 👉", req.body);
     // Make sure we extract only the fields we need
     const {
       firstName,
@@ -74,8 +75,10 @@ export const registerController = async (req, res) => {
 
 export const generateOtpController = async (req, res, next) => {
   try {
-    const userId = req.params.id;
+    
 
+    const { id: userId } = req.params; // 🔑 fix here
+    console.log("OTP SAVED FOR USER:", userId);
     if (!userId) {
       return res.status(400).json({
         success: false,
@@ -83,16 +86,11 @@ export const generateOtpController = async (req, res, next) => {
       });
     }
 
-    // 1️⃣ Rate limit
     await checkOtpRateLimit(userId);
 
-    // 2️⃣ Generate OTP
     const otp = Math.floor(100000 + Math.random() * 900000);
-
-    // 3️⃣ Save OTP in Redis
     await saveOtp(userId, otp);
 
-    // 4️⃣ Get user
     const user = await User.findById(userId);
     if (!user) {
       return res.status(404).json({
@@ -101,7 +99,6 @@ export const generateOtpController = async (req, res, next) => {
       });
     }
 
-    // 🔴 5️⃣ SEND EMAIL (THIS WAS MISSING)
     await sendVerifyEmail(user, otp);
 
     console.log(`📧 OTP email sent to ${user.email}`);
@@ -111,7 +108,7 @@ export const generateOtpController = async (req, res, next) => {
       message: `OTP generated and sent to ${user.email}`,
       data: {
         email: user.email,
-        otp, // remove in production
+        //  otp remove in production
         expiresIn: Date.now() + 5 * 60 * 1000,
       },
     });
@@ -121,11 +118,14 @@ export const generateOtpController = async (req, res, next) => {
   }
 };
 
+
 // ==============================
 // Verify OTP Controller
 // ==============================
 export const verifyOtpController = async (req, res, next) => {
   try {
+    console.log("Received body:", req.body);
+
     const { userId, otp } = req.body;
 
     if (!userId || !otp) {
@@ -135,21 +135,24 @@ export const verifyOtpController = async (req, res, next) => {
       });
     }
 
-    // Verify OTP using Redis
+    console.log("Verifying OTP for user:", userId, "OTP:", otp);
+
     await verifyOtp(userId, otp);
 
-    // OTP verified, you can now generate access/refresh tokens here
     res.status(200).json({
       success: true,
       message: "OTP verified successfully",
     });
   } catch (err) {
+    console.error("OTP verification error:", err);
+
     res.status(400).json({
       success: false,
-      message: err.message,
+      message: err?.message || String(err) || "Server error",
     });
   }
 };
+
 
 /** Login */
 export const loginController = async (req, res) => {
