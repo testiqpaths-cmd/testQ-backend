@@ -28,7 +28,7 @@ export const register = async (userData) => {
   const user = await createUser({
     ...userData,
     password: hashedPassword,
-    isVerified: false,
+    isEmailVerified: false,
   });
 
   return user;
