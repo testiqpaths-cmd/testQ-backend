@@ -9,7 +9,7 @@ router.post("/login", loginController);
 router.post("/logout", logoutController);
 router.post("/refresh-token", refreshTokenController);
 router.get("/me", authMiddleware, meController);
-router.post("/generate-otp/:id", generateOtpController);
+router.get("/generate-otp/:id", generateOtpController);
 router.post("/verify-otp", verifyOtpController);
 
 // router.post("/register", register);
