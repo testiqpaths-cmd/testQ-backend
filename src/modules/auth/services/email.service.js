@@ -8,12 +8,19 @@ import env from "../../../config/env.js";
 export const transporter = nodemailer.createTransport({
   host: env.MAIL_HOST,
   port: Number(env.MAIL_PORT),
-  secure: false, // TLS for 587
+  secure: false, // true only for 465
   auth: {
-    user: env.MAIL_USER, // snehasasthi@gmail.com
-    pass: env.MAIL_PASS, // app password
+    user: env.MAIL_USER,
+    pass: env.MAIL_PASS,
+  },
+  connectionTimeout: 10000, // ⬅️ add
+  greetingTimeout: 10000,   // ⬅️ add
+  socketTimeout: 10000,     // ⬅️ add
+  tls: {
+    rejectUnauthorized: false, // ⬅️ add
   },
 });
+
 
 // Render email template
 const renderTemplate = (templateName, data) => {
