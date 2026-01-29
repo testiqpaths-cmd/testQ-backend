@@ -16,12 +16,11 @@ import { updateQuestionSchema } from "./schemas/update-question.schema.js";
 
 const router = Router();
 
-router.post("/", authMiddleware, validate(createQuestionSchema), createQuestion);
-router.put("/:id", authMiddleware, validate(updateQuestionSchema), updateQuestion);
-router.delete("/:id", authMiddleware, deleteQuestion);
+router.post("/createManual",  createQuestion);
+router.put("/update/:id",  updateQuestion);
+router.delete("/delete/:id",  deleteQuestion);
 router.post(
   "/upload-excel",
-  authMiddleware,
   upload.single("file"),
   uploadQuestionsExcel
 );

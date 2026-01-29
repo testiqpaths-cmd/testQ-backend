@@ -41,29 +41,19 @@ const renderTemplate = (templateName, data) => {
 
 export const sendVerifyEmail = async (user, otp) => {
   const email = user.email || user.to;
-  if (!email) {
-    console.error("sendVerifyEmail: recipient email is missing", user);
-    throw new Error("User email is required to send verification email");
-  }
-
-  const html = renderTemplate("verify-email", {
-    firstName: user.firstName || "User",
-    otp,
-    expiry: 5,
-  });
+  if (!email) return console.error("Recipient email missing", user);
 
   try {
-    const info = await transporter.sendMail({
-      from: env.MAIL_FROM,        // must match MAIL_USER
+    await transporter.sendMail({
+      from: env.MAIL_FROM,    // must match MAIL_USER
       to: email,
       subject: "Your OTP Code",
-      html,
+      html: `<p>Hello ${user.firstName || 'User'},</p><p>Your OTP is <b>${otp}</b> (expires in 5 minutes)</p>`,
     });
 
-    console.log("Verification email sent successfully:", info.messageId);
+    console.log("Verification email sent successfully to", email);
   } catch (err) {
-    console.error("sendVerifyEmail failed:", err);
-    throw new Error("Failed to send OTP email: " + err.message);
+    console.error("Failed to send OTP email:", err.message);
+    // Important: don't throw here to prevent 500 error
   }
 };
-

@@ -40,11 +40,14 @@ const questionSchema = new mongoose.Schema({
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: true,
+    default: null,  
+    required: false, //no authmiddleware
   },
   organizationId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Organization",
+    default: null,
+    required: false, //no authmiddleware
   },
   createdAt: {
     type: Date,

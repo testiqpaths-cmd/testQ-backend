@@ -40,6 +40,8 @@ export const register = async (userData) => {
 export const login = async ({ email, password }) => {
   const user = await findUserByEmail(email);
   if (!user) throw new AuthError("Invalid credentials");
+  console.log("🔐 BEFORE LOGIN CHECK:", user.email, user.isEmailVerified);
+
 
   // ✅ Check if email is verified
   if (!user.isEmailVerified) {
