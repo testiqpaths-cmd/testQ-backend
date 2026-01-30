@@ -1,5 +1,6 @@
 // src/database/models/user.model.js
 import mongoose from "mongoose";
+import { optional } from "zod";
 
 const { Schema, model } = mongoose;
 
@@ -14,7 +15,7 @@ const userSchema = new Schema(
 
     lastName: {
       type: String,
-      required: true,
+      required: optional,
       trim: true,
     },
 
@@ -41,6 +42,13 @@ const userSchema = new Schema(
       type: String,
       enum: ["STUDENT", "ORGANIZATION", "IQPATH_ADMIN"],
       default: "STUDENT",
+    },
+
+    status: {
+      type: String,
+      enum: ["ACTIVE", "INACTIVE", "SUSPENDED", "PENDING"],
+      default: "PENDING",
+      index: true,
     },
 
     organizationId: {

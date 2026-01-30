@@ -27,6 +27,7 @@ app.use(cookieParser());
 // Routes
 app.use("/api", routes);
 
+
 // Default route
 app.get("/", (req, res) => {
   res.send("API is running...");

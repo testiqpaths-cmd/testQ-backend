@@ -1,25 +1,25 @@
-import { ZodError } from 'zod';
+// src/common/middlewares/validate.middleware.js
+import { ZodError } from "zod";
 
-export const validateMiddleware =
-  (schema) => (req, res, next) => {
-    try {
-      schema.parse({
-        body: req.body,
-        params: req.params,
-        query: req.query,
+export const validate = (schema) => (req, res, next) => {
+  try {
+    schema.parse({
+      body: req.body,
+      params: req.params,
+      query: req.query,
+    });
+    next();
+  } catch (error) {
+    if (error instanceof ZodError) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: error.errors.map((err) => ({
+          field: err.path.join("."),
+          message: err.message,
+        })),
       });
-      next();
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: error.errors.map(err => ({
-            field: err.path.join('.'),
-            message: err.message,
-          })),
-        });
-      }
-      next(error);
     }
-  };
+    next(error);
+  }
+};

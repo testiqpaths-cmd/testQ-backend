@@ -73,50 +73,53 @@ export const registerController = async (req, res) => {
 
 
 
-export const generateOtpController = async (req, res, next) => {
-  try {
-    
+  export const generateOtpController = async (req, res, next) => {
+    try {
+      const { id: userId } = req.params;
 
-    const { id: userId } = req.params; // 🔑 fix here
-    console.log("OTP SAVED FOR USER:", userId);
-    if (!userId) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
+      if (!userId) {
+        return res.status(400).json({
+          success: false,
+          message: "User ID is required",
+        });
+      }
+
+      await checkOtpRateLimit(userId);
+
+      const otp = Math.floor(100000 + Math.random() * 900000);
+      console.log("🔥 GENERATED OTP:", otp, "for user:", userId);
+      await saveOtp(userId, otp);
+
+      const user = await User.findById(userId);
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+
+      // Try sending email (don’t break flow)
+      try {
+        await sendVerifyEmail(user, otp);
+      } catch (e) {
+        console.error("Email failed:", e.message);
+      }
+
+      return res.status(200).json({
+        success: true,
+        message: "OTP generated",
+        data: {
+          email: user.email,
+          otp: process.env.NODE_ENV !== "production" ? otp : undefined, // 👈 key line
+          expiresIn: 5 * 60, // seconds
+        },
       });
+
+    } catch (err) {
+      next(err);
     }
+  };
 
-    await checkOtpRateLimit(userId);
-
-    const otp = Math.floor(100000 + Math.random() * 900000);
-    await saveOtp(userId, otp);
-
-    const user = await User.findById(userId);
-    if (!user) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    await sendVerifyEmail(user, otp);
-
-    console.log(`📧 OTP email sent to ${user.email}`);
-
-    res.status(200).json({
-      success: true,
-      message: `OTP generated and sent to ${user.email}`,
-      data: {
-        email: user.email,
-        //  otp remove in production
-        expiresIn: Date.now() + 5 * 60 * 1000,
-      },
-    });
-  } catch (err) {
-    console.error("generateOtpController error:", err);
-    next(err);
-  }
-};
 
 
 // ==============================
@@ -124,8 +127,6 @@ export const generateOtpController = async (req, res, next) => {
 // ==============================
 export const verifyOtpController = async (req, res, next) => {
   try {
-    console.log("Received body:", req.body);
-
     const { userId, otp } = req.body;
 
     if (!userId || !otp) {
@@ -135,23 +136,25 @@ export const verifyOtpController = async (req, res, next) => {
       });
     }
 
-    console.log("Verifying OTP for user:", userId, "OTP:", otp);
+    // ✅ call the service that updates DB + tokens
+    const result = await verifyOtpService(userId, otp);
 
-    await verifyOtp(userId, otp);
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: "OTP verified successfully",
+      data: result, // includes user + accessToken + refreshToken
     });
   } catch (err) {
     console.error("OTP verification error:", err);
 
-    res.status(400).json({
+    return res.status(400).json({
       success: false,
-      message: err?.message || String(err) || "Server error",
+      message: err?.message || "Server error",
+      errors: null,
     });
   }
 };
+
 
 
 /** Login */

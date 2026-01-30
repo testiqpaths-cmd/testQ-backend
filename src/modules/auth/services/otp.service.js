@@ -1,7 +1,10 @@
 import User from "../../../models/user.model.js";
 import { sendVerifyEmail } from "./email.service.js";
-import { generateAccessToken, generateRefreshToken } from "../utils/token.service.js";
-import redisClient from '../../../config/redis.js';
+import {
+  generateAccessToken,
+  generateRefreshToken,
+} from "../utils/token.service.js";
+import redisClient from "../../../config/redis.js";
 
 // ==============================
 // Rate-limit OTP requests (max 3 per 10 min)
@@ -43,25 +46,30 @@ export const generateOtpService = async (userId) => {
   const user = await User.findById(userId);
   if (!user) throw new Error("User not found");
 
-  // 1️⃣ Rate limit check
   await checkOtpRateLimit(userId);
 
-  // 2️⃣ Generate OTP
-  const otp = Math.floor(100000 + Math.random() * 900000);
+  // force remove old otp so you never reuse it
+  await redisClient.del(`otp:${userId}`);
 
-  // 3️⃣ Save OTP in Redis
+  const otp = Math.floor(100000 + Math.random() * 900000);
+  console.log("🔥 GENERATED OTP:", otp);
+
   await saveOtp(userId, otp);
 
-  // 4️⃣ Send email
-  await sendVerifyEmail(user, otp);
+  // Email may fail, don't crash OTP generation
+  try {
+    await sendVerifyEmail(user, otp);
+  } catch (e) {
+    console.error("Email failed:", e.message);
+  }
 
-  // 5️⃣ Return safe response
   return {
     email: user.email,
-    expiresIn: Date.now() + 5 * 60 * 1000,
-    otp, // For testing only
+    expiresIn: 300,
+    otp: process.env.NODE_ENV !== "production" ? otp : undefined, // dev only
   };
 };
+
 
 // ==============================
 // Verify OTP Service
@@ -83,6 +91,8 @@ export const verifyOtpService = async (userId, otp) => {
   // 4️⃣ Store refresh token in DB
   user.refreshToken = refreshToken;
   await user.save();
+  const fresh = await User.findById(userId);
+  console.log("✅ AFTER VERIFY DB:", fresh.email, fresh.isEmailVerified);
 
   return {
     user: {
