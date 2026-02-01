@@ -1,5 +1,6 @@
 // src/database/models/user.model.js
 import mongoose from "mongoose";
+import { optional } from "zod";
 
 const { Schema, model } = mongoose;
 
@@ -14,7 +15,7 @@ const userSchema = new Schema(
 
     lastName: {
       type: String,
-      required: true,
+      required: optional,
       trim: true,
     },
 
@@ -43,6 +44,13 @@ const userSchema = new Schema(
       default: "STUDENT",
     },
 
+    status: {
+      type: String,
+      enum: ["ACTIVE", "INACTIVE", "SUSPENDED", "PENDING"],
+      default: "PENDING",
+      index: true,
+    },
+
     organizationId: {
       type: Schema.Types.ObjectId,
       ref: "Organization",
@@ -62,6 +70,30 @@ const userSchema = new Schema(
       state: { type: String, trim: true },
       country: { type: String, trim: true },
       zipCode: { type: String, trim: true },
+    },
+
+    // 🎓 Education Details
+    education: {
+      qualification: {
+        type: String,
+        trim: true,
+      },
+
+      stream: {
+        type: String,
+        trim: true,
+      },
+
+      passingYear: {
+        type: Number,
+        min: 1950,
+        max: new Date().getFullYear() + 5,
+      },
+
+      college: {
+        type: String,
+        trim: true,
+      },
     },
 
     // 📧 Email Verification

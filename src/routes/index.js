@@ -1,5 +1,7 @@
 import express from "express";
 import authRoutes from "../modules/auth/auth.routes.js";
+import questionsRoutes from "../modules/questions/questions.routes.js";
+
 import testRoutes from "../modules/test-management/test.routes.js";
 // import userRoutes from "../modules/user/user.routes.js"; // future module
 import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
@@ -13,6 +15,7 @@ router.get("/", (req, res) => {
 
 // Auth routes
 router.use("/auth", authRoutes);
+router.use("/questions", questionsRoutes);
 
 // Other future routes
 // router.use("/user", userRoutes);

@@ -7,20 +7,26 @@ import { errorMiddleware } from "./common/middlewares/error.middleware.js";
 
 const app = express();
 
+const corsOptions = {
+  origin: "http://localhost:5173",
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
+
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
+
+
 // Middleware
 app.use(express.json());
 app.use(cookieParser());
 
-// CORS with credentials (for JWT cookies)
-app.use(
-  cors({
-    origin: env.CORS_ORIGIN,
-    credentials: true,
-  })
-);
+
 
 // Routes
 app.use("/api", routes);
+
 
 // Default route
 app.get("/", (req, res) => {

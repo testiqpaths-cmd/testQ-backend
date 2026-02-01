@@ -5,21 +5,31 @@ import handlebars from "handlebars";
 import env from "../../../config/env.js";
 
 // Create transporter
-const transporter = nodemailer.createTransport({
+export const transporter = nodemailer.createTransport({
   host: env.MAIL_HOST,
   port: Number(env.MAIL_PORT),
-  secure: false,
+  secure: false, // true only for 465
   auth: {
     user: env.MAIL_USER,
     pass: env.MAIL_PASS,
   },
+  connectionTimeout: 10000, // ⬅️ add
+  greetingTimeout: 10000,   // ⬅️ add
+  socketTimeout: 10000,     // ⬅️ add
+  tls: {
+    rejectUnauthorized: false, // ⬅️ add
+  },
 });
+
 
 // Render email template
 const renderTemplate = (templateName, data) => {
   const filePath = path.join(
     process.cwd(),
-    "src/modules/auth/templates",
+    "src",
+    "modules",
+    "auth",
+    "templates",
     `${templateName}.html`,
   );
 
@@ -28,33 +38,22 @@ const renderTemplate = (templateName, data) => {
   return compiled(data);
 };
 
-// Send verification email (OTP)
+
 export const sendVerifyEmail = async (user, otp) => {
-  // Accept email from user.email or user.to
   const email = user.email || user.to;
-  const name = user.firstName || user.name || "User";
+  if (!email) return console.error("Recipient email missing", user);
 
-  if (!email) {
-    console.error("sendVerifyEmail: recipient email is missing", user);
-    throw new Error("User email is required to send verification email");
+  try {
+    await transporter.sendMail({
+      from: env.MAIL_FROM,    // must match MAIL_USER
+      to: email,
+      subject: "Your OTP Code",
+      html: `<p>Hello ${user.firstName || 'User'},</p><p>Your OTP is <b>${otp}</b> (expires in 5 minutes)</p>`,
+    });
+
+    console.log("Verification email sent successfully to", email);
+  } catch (err) {
+    console.error("Failed to send OTP email:", err.message);
+    // Important: don't throw here to prevent 500 error
   }
-
-  // Render template
-  const html = renderTemplate("verify-email", {
-    firstName: user.firstName,
-    otp,
-    expiry: 5, // minutes
-  });
-
-  console.log("Sending email to:", email);
-  
-
-  await transporter.sendMail({
-    from: env.MAIL_FROM,
-    to: email,
-    subject: "Your OTP Code",
-    html,
-  });
-
-  console.log("Verification email sent successfully to:", email);
 };
