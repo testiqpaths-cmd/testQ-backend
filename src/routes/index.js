@@ -1,6 +1,8 @@
 import express from "express";
 import authRoutes from "../modules/auth/auth.routes.js";
+import testRoutes from "../modules/test-management/test.routes.js";
 // import userRoutes from "../modules/user/user.routes.js"; // future module
+import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
 
 const router = express.Router();
 
@@ -15,4 +17,24 @@ router.use("/auth", authRoutes);
 // Other future routes
 // router.use("/user", userRoutes);
 
+
+ // Test management routes
+ router.use("/test", testRoutes);
+
+
+/**
+ * Example:
+ *
+ */
+router.use("/test-series", testSeriesRoutes);
+
+
+
+
+
+
 export default router;
+
+
+
+
