@@ -5,6 +5,7 @@ import env from "./config/env.js";
 import routes from "./routes/index.js";
 import { errorMiddleware } from "./common/middlewares/error.middleware.js";
 
+
 const app = express();
 
 const corsOptions = {
@@ -35,5 +36,9 @@ app.get("/", (req, res) => {
 
 // Error middleware (after routes)
 app.use(errorMiddleware);
+
+
+
+
 
 export default app;
