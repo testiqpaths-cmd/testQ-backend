@@ -8,21 +8,21 @@ const router = Router();
 
 router.post(
   "/test-series",
-  authMiddleware,
-  roleMiddleware("ADMIN", "ORG"),
-  (req, res, next) => {
-    try {
-      createTestSeriesSchema.parse(req.body);
-      next();
-    } catch (err) {
-      return res.status(400).json({
-        success: false,
-        errors: err.errors,
-      });
-    }
-  },
-  createSeries
+ createSeries
 );
+// router.post(
+//   "/",
+//   createSeries
+// );
+
+
+// router.post(
+//   "/test-series",
+//   authMiddleware,
+//   roleMiddleware("IQPATH_ADMIN"),
+//   createSeries
+// );
+
 
 router.get(
   "/test-series/:id",
@@ -34,7 +34,7 @@ router.get(
 router.put(
   "/test-series/:id",
   authMiddleware,
-  roleMiddleware("ADMIN", "ORG"),
+  roleMiddleware("IQPATH_ADMIN", "ORG"),
   loadSeries,
   updateSeries
 );
@@ -42,7 +42,7 @@ router.put(
 router.delete(
   "/test-series/:id",
   authMiddleware,
-  roleMiddleware("ADMIN"),
+  roleMiddleware("IQPATH_ADMIN"),
   loadSeries,
   deleteSeries
 );

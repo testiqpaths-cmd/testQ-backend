@@ -8,20 +8,11 @@ import { createTestSchema } from "./schemas/test.schema.js";
 import { createTest, getTest, updateTest, deleteTest } from "./test.controller.js";
 
 const router = Router();
-// router.post(
-//   "/tests",
-//   authMiddleware,
-//   roleMiddleware("ADMIN", "ORG"),
-//   (req, res, next) => {
-//     createTestSchema.parse(req.body);
-//     next();
-//   },
-//   createTest
-// );
+
 router.post(
   "/tests",
   authMiddleware,
-  roleMiddleware("ADMIN", "ORG"),
+  roleMiddleware("IQPATH_ADMIN", "ORG"),
   (req, res, next) => {
     try {
       createTestSchema.parse(req.body);
@@ -49,7 +40,7 @@ router.get(
 router.put(
   "/tests/:id",
   authMiddleware,
-  roleMiddleware("ADMIN", "ORG"),
+  roleMiddleware("IQPATH_ADMIN", "ORG"),
   loadTest,
   updateTest
 );
@@ -57,7 +48,7 @@ router.put(
 router.delete(
   "/tests/:id",
   authMiddleware,
-  roleMiddleware("ADMIN"),
+  roleMiddleware("IQPATH_ADMIN"),
   loadTest,
   deleteTest
 );

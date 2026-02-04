@@ -25,10 +25,7 @@ router.use("/questions", questionsRoutes);
  router.use("/test", testRoutes);
 
 
-/**
- * Example:
- *
- */
+//test-series
 router.use("/test-series", testSeriesRoutes);
 
 

@@ -1,10 +1,34 @@
+// import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
+// import { AuthError } from "../exceptions/AuthError.js";
+
+// /** Protect routes */
+// export const authMiddleware = (req, res, next) => {
+//   const token = req.cookies.accessToken;
+//   if (!token) throw new AuthError("Authentication required");
+
+//   try {
+//     const decoded = verifyAccessToken(token);
+//     req.user = decoded; // { id, role }
+//     next();
+//   } catch {
+//     throw new AuthError("Invalid or expired token");
+//   }
+// };
+
+// /** Role-based access control */
+// export const roleMiddleware = (...allowedRoles) => (req, res, next) => {
+//   if (!req.user) throw new AuthError("Unauthorized");
+//   if (!allowedRoles.includes(req.user.role)) throw new AuthError("Forbidden");
+//   next();
+// };
 import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../exceptions/AuthError.js";
-import User from "../../models/user.model.js";
 
 /** Protect routes */
-export const authMiddleware = async (req, res, next) => {
-  const token = req.cookies.accessToken;
+export const authMiddleware = (req, res, next) => {
+  const token =
+    req.cookies?.accessToken ||
+    req.headers.authorization?.split(" ")[1];
 
   if (!token) {
     return next(new AuthError("Authentication required"));
@@ -13,17 +37,15 @@ export const authMiddleware = async (req, res, next) => {
   try {
     const decoded = verifyAccessToken(token); // { id, role }
 
-    const user = await User.findById(decoded.id)
-      .select("_id role organizationId");
+    // ✅ normalize user object for services
+    req.user = {
+      _id: decoded.id,
+      role: decoded.role,
+    };
 
-    if (!user) {
-      return next(new AuthError("User not found"));
-    }
-
-    req.user = user;
     next();
   } catch (err) {
-    next(new AuthError("Invalid or expired token"));
+    return next(new AuthError("Invalid or expired token"));
   }
 };
 

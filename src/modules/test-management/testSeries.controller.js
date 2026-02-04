@@ -3,7 +3,10 @@ import * as service from "./testSeries.service.js";
 export const createSeries = async (req, res) => {
   const series = await service.createSeries(req.body, req.user);
   res.status(201).json({ success: true, data: series });
+  
 };
+
+
 
 export const updateSeries = async (req, res) => {
   const series = await service.updateSeries(req.params.id, req.body);

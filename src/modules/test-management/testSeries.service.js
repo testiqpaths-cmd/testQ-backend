@@ -1,7 +1,9 @@
 import TestSeries from "../../models/testSeries.model.js";
 import crypto from "crypto";
 
+
 export const createSeries = async (data, user) => {
+  console.log(user);
   const seriesCode =
     data.visibility === "LINK_ONLY"
       ? crypto.randomBytes(4).toString("hex")
@@ -10,7 +12,10 @@ export const createSeries = async (data, user) => {
   return TestSeries.create({
     ...data,
     seriesCode,
-    createdBy: { userId: user.userId, role: user.role },
+    createdBy: {
+      userId: new mongoose.Types.ObjectId(req.user._id),   // ✅ FIXED
+      role: user.role,
+    },
   });
 };
 
