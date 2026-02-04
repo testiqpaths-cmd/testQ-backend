@@ -1,20 +1,23 @@
 import jwt from "jsonwebtoken";
-import env  from "../../../config/env.js"
+import env from "../../../config/env.js";
+
 export const generateAccessToken = (user) =>
   jwt.sign(
-    { id: user.id, role: user.role },
+    {
+      id: user._id?.toString() || user.id,     // ✅ always set id properly
+      role: user.role,
+      
+    },
     env.JWT_ACCESS_SECRET,
-    { expiresIn: env.JWT_ACCESS_EXPIRES_IN } // from env.js
+    { expiresIn: env.JWT_ACCESS_EXPIRES_IN }
   );
-
 
 export const generateRefreshToken = (user) =>
   jwt.sign(
-    { id: user.id },
+    { id: user._id?.toString() || user.id },   // ✅ same fix
     env.JWT_REFRESH_SECRET,
-    { expiresIn: env.JWT_REFRESH_EXPIRES_IN } // from env.js
+    { expiresIn: env.JWT_REFRESH_EXPIRES_IN }
   );
-
 
 export const verifyAccessToken = (token) =>
   jwt.verify(token, env.JWT_ACCESS_SECRET);
@@ -22,12 +25,11 @@ export const verifyAccessToken = (token) =>
 export const verifyRefreshToken = (token) =>
   jwt.verify(token, env.JWT_REFRESH_SECRET);
 
-
-//verify email
+// verify email
 export const generateVerifyToken = (userId) => {
   return jwt.sign(
     { userId },
-    process.env.JWT_ACCESS_SECRET,
+    env.JWT_ACCESS_SECRET, // ✅ use env, not process.env
     { expiresIn: env.JWT_REFRESH_EXPIRES_IN }
   );
 };

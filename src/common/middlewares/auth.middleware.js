@@ -1,29 +1,38 @@
 import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../exceptions/AuthError.js";
 import User from "../../models/user.model.js";
-
+import jwt from "jsonwebtoken";
+import env from "../../config/env.js";
 /** Protect routes */
-export const authMiddleware = async (req, res, next) => {
-  const token = req.cookies.accessToken;
-
-  if (!token) {
-    return next(new AuthError("Authentication required"));
-  }
-
+export const authMiddleware = (req, res, next) => {
   try {
-    const decoded = verifyAccessToken(token); // { id, role }
+    const token = req.cookies?.accessToken; // ✅ IMPORTANT (match login cookie)
 
-    const user = await User.findById(decoded.id)
-      .select("_id role organizationId");
-
-    if (!user) {
-      return next(new AuthError("User not found"));
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+        errors: null,
+      });
     }
 
-    req.user = user;
+    const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET);
+    //console.log("decoded:", decoded);
+
+
+    // ✅ set req.user (include orgId if you have it in token)
+    req.user = {
+      _id: decoded.id,              // or decoded._id depending on your token payload
+      role: decoded.role,
+    };
+
     next();
   } catch (err) {
-    next(new AuthError("Invalid or expired token"));
+    return res.status(401).json({
+      success: false,
+      message: "Invalid or expired token",
+      errors: null,
+    });
   }
 };
 
