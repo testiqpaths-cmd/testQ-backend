@@ -55,11 +55,20 @@ export const createTestSchema = z
       });
     }
 
-    if (data.questionMode === "RANDOM" && !data.randomConfig) {
-      ctx.addIssue({
-        path: ["randomConfig"],
-        message: "RANDOM mode requires randomConfig",
-      });
+    // if (data.questionMode === "RANDOM" && !data.randomConfig) {
+    //   ctx.addIssue({
+    //     path: ["randomConfig"],
+    //     message: "RANDOM mode requires randomConfig",
+    //   });
+    // }
+    // ✅ TEMP: allow RANDOM without randomConfig (for frontend integration / hardcoded questions)
+    if (data.questionMode === "RANDOM" && data.randomConfig) {
+      if (!data.randomConfig.totalQuestions) {
+        ctx.addIssue({
+          path: ["randomConfig", "totalQuestions"],
+          message: "totalQuestions is required in randomConfig",
+        });
+      }
     }
 
     /* Schedule rules */
@@ -70,10 +79,7 @@ export const createTestSchema = z
       });
     }
 
-    if (
-      data.scheduleType === "FIXED" &&
-      (!data.startTime || !data.endTime)
-    ) {
+    if (data.scheduleType === "FIXED" && (!data.startTime || !data.endTime)) {
       ctx.addIssue({
         path: ["startTime"],
         message: "FIXED schedule requires startTime and endTime",
