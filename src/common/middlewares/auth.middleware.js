@@ -23,19 +23,21 @@
 // };
 import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../exceptions/AuthError.js";
-
+import User from "../../models/user.model.js";
+import jwt from "jsonwebtoken";
+import env from "../../config/env.js";
 /** Protect routes */
 export const authMiddleware = (req, res, next) => {
-  const token =
-    req.cookies?.accessToken ||
-    req.headers.authorization?.split(" ")[1];
-
-  if (!token) {
-    return next(new AuthError("Authentication required"));
-  }
-
   try {
-    const decoded = verifyAccessToken(token); // { id, role }
+    const token = req.cookies?.accessToken; // ✅ IMPORTANT (match login cookie)
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication required",
+        errors: null,
+      });
+    }
 
     // ✅ normalize user object for services
     req.user = {

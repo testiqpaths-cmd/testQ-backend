@@ -2,7 +2,7 @@ import env  from "./env.js";
 
 export const accessCookieOptions = {
   httpOnly: true,
-  secure: env.COOKIE_SECURE,
+  secure: false,
   sameSite: env.COOKIE_SAME_SITE,
   maxAge: 15 * 60 * 1000, // 15 minutes
   domain: env.COOKIE_DOMAIN,

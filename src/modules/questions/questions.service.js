@@ -7,16 +7,10 @@ import {
 } from "./repositories/questions.repository.js";
 import { validateQuestionByType } from "./utils/question.validator.js";
 
-export const createQuestionService = async (payload, user = null) => {
+export const createQuestionService = async (payload) => {
   validateQuestionByType(payload);
-
-  return createQuestionRepo({
-    ...payload,
-    createdBy: user?._id ?? null,
-    organizationId: user?.organizationId ?? null,
-  });
+  return createQuestionRepo(payload);
 };
-
 
 export const updateQuestionService = async (id, payload) => {
   validateQuestionByType(payload);
@@ -28,12 +22,13 @@ export const deleteQuestionService = async (id) => {
 };
 
 // modules/questions/questions.service.js
-export const bulkUploadQuestionsService = async (questions, user = null) => {
+export const bulkUploadQuestionsService = async (questions,user=null) => {
+  console.log(user," from bulk upload service");
   // validate...
   const mapped = questions.map(({ __row, ...q }) => ({
     ...q,
-    createdBy: user?._id ?? null,
-    organizationId: user?.organizationId ?? null,
+    createdBy:user?._id ?? null,
+   
   }));
 
   return bulkInsertQuestionsRepo(mapped);
