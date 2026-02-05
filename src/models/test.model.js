@@ -6,7 +6,7 @@ const testSchema = new Schema({
   description: { type: String },
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
-    role: { type: String, enum:["IQPATH_ADMIN", "ORG_ADMIN", "STUDENT"], required: true },
+    role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATIONS", "STUDENT"], required: true },
   },
   visibility: { type: String, enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY"], required: true },
   allowedOrganizations: [{ type: Types.ObjectId }],

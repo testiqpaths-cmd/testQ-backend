@@ -9,6 +9,7 @@ export const createTestSeriesSchema = z.object({
   visibility: z.enum(["PUBLIC", "ORG_ONLY", "LINK_ONLY"]),
 
   allowedOrganizations: z.array(objectId).optional(),
+  
 
   tests: z.array(objectId).optional(),
 });

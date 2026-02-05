@@ -17,7 +17,7 @@ export const createTest = async (req, res) => {
     // 🔴 TEMP FIX: manually inject createdBy
     const createdBy = {
       userId: req.user?._id || req.user?.id,
-      role: req.user?.role || "IQPATH_ADMIN",
+      role: req.user?.role || "IQPATH_ADMIN" || "ORG", // default to a valid role if missing
     };
 
     if (!createdBy.userId) {
@@ -83,3 +83,8 @@ export async function deleteTest(req, res, next) {
     next(e);
   }
 }
+
+export const getAllTests = async (req, res) => {
+  const tests = await Test.find().sort({ createdAt: -1 }); // adjust model
+  return res.json({ success: true, data: tests });
+};

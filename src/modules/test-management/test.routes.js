@@ -8,8 +8,9 @@ import schedule from "./middlewares/schedule.middleware.js";
 import visibility from "./middlewares/visibility.middleware.js";
 
 import { createTestSchema } from "./schemas/test.schema.js";
-import { createTest, getTest, updateTest, deleteTest } from "./test.controller.js";
+import { createTest, getTest, updateTest, deleteTest ,getAllTests } from "./test.controller.js";
 import { ZodError } from "zod";
+
 
 const router = Router();
 
@@ -36,7 +37,7 @@ router.post(
   },
   createTest
 );
-
+//get one
 router.get("/tests/:id", authMiddleware, loadTest, visibility, schedule, getTest);
 
 router.put(
@@ -55,6 +56,13 @@ router.delete(
   deleteTest
 );
 
+// ✅ Get ALL Tests
+router.get(
+  "/",
+  authMiddleware,
+  // roleMiddleware("IQPATH_ADMIN", "ORG"), // optional
+  getAllTests
+);
 
 
 export default router;

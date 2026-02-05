@@ -69,8 +69,8 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     difficulty: String(row.difficulty || "").trim(),
   }));
 
-  console.log("📄 Sheet:", sheetName);
-  console.log("🧾 First 3 mapped questions:", questions.slice(0, 3));
+  // console.log("📄 Sheet:", sheetName);
+  // console.log("🧾 First 3 mapped questions:", questions.slice(0, 3));
 
   // ✅ no auth → no user passed
   // console.log("User in request:", req.user);
