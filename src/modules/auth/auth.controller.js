@@ -80,8 +80,9 @@ export const loginController = async (req, res) => {
           email: user.email,
           role: user.role,
         },
-      });
-  } catch (err) {
+    
+  });
+}catch (err) {
     console.error("Login error:", err);
     res.status(401).json({ success: false, message: err.message });
   }

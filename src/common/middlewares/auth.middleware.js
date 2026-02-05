@@ -1,3 +1,26 @@
+// import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
+// import { AuthError } from "../exceptions/AuthError.js";
+
+// /** Protect routes */
+// export const authMiddleware = (req, res, next) => {
+//   const token = req.cookies.accessToken;
+//   if (!token) throw new AuthError("Authentication required");
+
+//   try {
+//     const decoded = verifyAccessToken(token);
+//     req.user = decoded; // { id, role }
+//     next();
+//   } catch {
+//     throw new AuthError("Invalid or expired token");
+//   }
+// };
+
+// /** Role-based access control */
+// export const roleMiddleware = (...allowedRoles) => (req, res, next) => {
+//   if (!req.user) throw new AuthError("Unauthorized");
+//   if (!allowedRoles.includes(req.user.role)) throw new AuthError("Forbidden");
+//   next();
+// };
 import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../exceptions/AuthError.js";
 import User from "../../models/user.model.js";
@@ -16,23 +39,15 @@ export const authMiddleware = (req, res, next) => {
       });
     }
 
-    const decoded = jwt.verify(token, env.JWT_ACCESS_SECRET);
-    //console.log("decoded:", decoded);
-
-
-    // ✅ set req.user (include orgId if you have it in token)
+    // ✅ normalize user object for services
     req.user = {
-      _id: decoded.id,              // or decoded._id depending on your token payload
+      _id: decoded.id,
       role: decoded.role,
     };
 
     next();
   } catch (err) {
-    return res.status(401).json({
-      success: false,
-      message: "Invalid or expired token",
-      errors: null,
-    });
+    return next(new AuthError("Invalid or expired token"));
   }
 };
 
