@@ -23,7 +23,7 @@ export const createSeries = async (req, res, next) => {
       mongoose.Types.ObjectId.isValid(id),
     );
 
-    const allowedRoles = ["IQPATH_ADMIN", "ORG"];
+    const allowedRoles = ["IQPATH_ADMIN", "ORGANIZATION","STUDENT"];
     const series = await TestSeries.create({
       title: title.trim(),
       description: description?.trim() || "",

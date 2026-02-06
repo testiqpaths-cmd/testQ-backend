@@ -17,7 +17,7 @@ export const createTest = async (req, res) => {
     // 🔴 TEMP FIX: manually inject createdBy
     const createdBy = {
       userId: req.user?._id || req.user?.id,
-      role: req.user?.role || "IQPATH_ADMIN" || "ORG", // default to a valid role if missing
+      role: req.user?.role || "IQPATH_ADMIN" || "ORGANIZATION" ||"STUDENT", // default to a valid role if missing
     };
 
     if (!createdBy.userId) {

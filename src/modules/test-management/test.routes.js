@@ -17,7 +17,7 @@ const router = Router();
 router.post(
   "/tests",
   authMiddleware,
-  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION","STUDENT"),
   (req, res, next) => {
     try {
       const parsed = createTestSchema.parse(req.body);

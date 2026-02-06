@@ -15,7 +15,7 @@ const router = Router();
 router.post(
   "/",
   authMiddleware,                 // enable later if needed
-  roleMiddleware("IQPATH_ADMIN","ORGANIZATION"),  // enable later if needed
+  roleMiddleware("IQPATH_ADMIN","ORGANIZATION","STUDENT"),  // enable later if needed
   createSeries
 );
 
