@@ -15,7 +15,7 @@ const router = Router();
 router.post(
   "/",
   authMiddleware,                 // enable later if needed
-  roleMiddleware("IQPATH_ADMIN","Org"),  // enable later if needed
+  roleMiddleware("IQPATH_ADMIN","ORGANIZATION"),  // enable later if needed
   createSeries
 );
 
@@ -31,7 +31,7 @@ router.get(
 router.put(
   "/:id",
   authMiddleware,
-  roleMiddleware("IQPATH_ADMIN", "ORG"),
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
   loadSeries,
   updateSeries
 );
