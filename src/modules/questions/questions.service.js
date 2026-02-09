@@ -23,7 +23,7 @@ export const deleteQuestionService = async (id) => {
 
 // modules/questions/questions.service.js
 export const bulkUploadQuestionsService = async (questions,user=null) => {
-  console.log(user," from bulk upload service");
+  //console.log(user," from bulk upload service");
   // validate...
   const mapped = questions.map(({ __row, ...q }) => ({
     ...q,

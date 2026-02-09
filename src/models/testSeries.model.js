@@ -7,7 +7,7 @@ const TestSeriesSchema = new mongoose.Schema(
 
     createdBy: {
       userId: { type: mongoose.Schema.Types.ObjectId, required: true },
-      role: { type: String, enum: ["IQPATH_ADMIN", "ORG"], required: true }
+      role: { type: String, enum: ["IQPATH_ADMIN", "ORGANIZATION","STUDENT"], required: true }
     },
 
     visibility: {

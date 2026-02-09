@@ -1,51 +1,48 @@
 import { Router } from "express";
 import { authMiddleware, roleMiddleware } from "../../common/middlewares/auth.middleware.js";
 import loadSeries from "./middlewares/loadSeries.middleware.js";
-import { createTestSeriesSchema } from "./schemas/testSeries.schema.js";
-import { createSeries, getSeries, updateSeries, deleteSeries } from "./testSeries.controller.js";
+import mongoose from "mongoose";
+import {
+  createSeries,
+  getSeries,
+  updateSeries,
+  deleteSeries,
+} from "./testSeries.controller.js";
 
 const router = Router();
 
+// ✅ CREATE: POST /api/test-series
 router.post(
-  "/test-series",
- createSeries
+  "/",
+  authMiddleware,                 // enable later if needed
+  roleMiddleware("IQPATH_ADMIN","ORGANIZATION","STUDENT"),  // enable later if needed
+  createSeries
 );
-// router.post(
-//   "/",
-//   createSeries
-// );
 
-
-// router.post(
-//   "/test-series",
-//   authMiddleware,
-//   roleMiddleware("IQPATH_ADMIN"),
-//   createSeries
-// );
-
-
+// ✅ GET ONE: GET /api/test-series/:id
 router.get(
-  "/test-series/:id",
+  "/:id",
   authMiddleware,
   loadSeries,
   getSeries
 );
 
+// ✅ UPDATE: PUT /api/test-series/:id
 router.put(
-  "/test-series/:id",
+  "/:id",
   authMiddleware,
-  roleMiddleware("IQPATH_ADMIN", "ORG"),
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
   loadSeries,
   updateSeries
 );
 
+// ✅ DELETE: DELETE /api/test-series/:id
 router.delete(
-  "/test-series/:id",
+  "/:id",
   authMiddleware,
   roleMiddleware("IQPATH_ADMIN"),
   loadSeries,
   deleteSeries
 );
 
-// ✅ Default export fixes the import
 export default router;
