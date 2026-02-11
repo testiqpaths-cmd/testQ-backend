@@ -6,7 +6,8 @@ import testRoutes from "../modules/test-management/test.routes.js";
 // import userRoutes from "../modules/user/user.routes.js"; // future module
 import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
 import testAttemptRoutes from "../modules/analytics/test-attempt/testAttempt.routes.js";
-import testStatsRoutes from "../modules/analytics/test-attempt/testStats.routes.js";
+import testStatsRoutes from "../modules/analytics/test-statistics/testStats.routes.js";
+
 const router = express.Router();
 
 // Health check
