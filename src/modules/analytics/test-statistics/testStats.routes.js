@@ -10,7 +10,7 @@ const router = express.Router();
 router.get(
   "/analytics/tests/:testId",
   authMiddleware,
-  roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"),
+  roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"), // ✅ only org + admin allowed
   getTestStatsController
 );
 

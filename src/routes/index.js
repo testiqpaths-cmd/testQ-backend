@@ -32,10 +32,10 @@ router.use("/test-series", testSeriesRoutes);
 
 
 // testattempt
-router.use(testAttemptRoutes);
+router.use("/results",testAttemptRoutes);
 
 //testStats
-router.use(testStatsRoutes);
+router.use("/analytics",testStatsRoutes);
 
 
 export default router;

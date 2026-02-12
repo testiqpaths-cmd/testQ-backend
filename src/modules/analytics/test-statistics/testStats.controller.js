@@ -13,21 +13,15 @@ export const getTestStatsController = async (req, res, next) => {
 
     const stats = await fetchTestWiseStats(testId);
 
-    if (!stats) {
-      return res.status(404).json({
-        success: false,
-        message: "No attempts found for this test",
-      });
-    }
-
     res.status(200).json({
       success: true,
       data: {
         testId,
         totalAttempts: stats.totalAttempts ?? 0,
-        averageScore: stats.averageScore
-          ? Number(stats.averageScore.toFixed(2))
-          : 0,
+        averageScore:
+          stats.averageScore !== null && stats.averageScore !== undefined
+            ? Number(stats.averageScore.toFixed(2))
+            : 0,
         highestScore: stats.highestScore ?? 0,
         lowestScore: stats.lowestScore ?? 0,
         passCount: stats.passCount ?? 0,
@@ -35,6 +29,7 @@ export const getTestStatsController = async (req, res, next) => {
       },
     });
   } catch (err) {
+    // Ensure errors are passed to centralized error handler
     next(err);
   }
 };

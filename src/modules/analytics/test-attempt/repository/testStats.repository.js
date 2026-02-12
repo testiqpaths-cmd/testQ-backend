@@ -2,7 +2,7 @@ import mongoose from "mongoose";
 import TestAttempt from "../../../../models/testAttempt.model.js";
 
 export const getTestWiseStats = async (testId) => {
-  return TestAttempt.aggregate([
+  const stats = await TestAttempt.aggregate([
     {
       $match: {
         testId: new mongoose.Types.ObjectId(testId),
@@ -28,4 +28,14 @@ export const getTestWiseStats = async (testId) => {
       },
     },
   ]);
+
+  // Handle empty results gracefully
+  return stats[0] || {
+    totalAttempts: 0,
+    averageScore: null,
+    highestScore: null,
+    lowestScore: null,
+    passCount: 0,
+    failCount: 0,
+  };
 };
