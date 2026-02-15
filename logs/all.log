@@ -1,0 +1,183 @@
+2026-02-15 14:41:36:4136 info: MongoDB connected successfully
+2026-02-15 14:41:36:4136 info: Server running on port 5000
+2026-02-15 14:42:21:4221 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:42:22:4222 info: MongoDB connected successfully
+2026-02-15 14:42:22:4222 info: MongoDB connected successfully
+2026-02-15 14:42:22:4222 info: Server running on port 5000
+2026-02-15 14:42:28:4228 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:42:29:4229 info: MongoDB connected successfully
+2026-02-15 14:42:29:4229 info: MongoDB connected successfully
+2026-02-15 14:42:29:4229 info: Server running on port 5000
+2026-02-15 14:42:33:4233 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:42:34:4234 info: MongoDB connected successfully
+2026-02-15 14:42:34:4234 info: MongoDB connected successfully
+2026-02-15 14:42:34:4234 info: Server running on port 5000
+2026-02-15 14:42:43:4243 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:42:47:4247 info: MongoDB connected successfully
+2026-02-15 14:42:47:4247 info: MongoDB connected successfully
+2026-02-15 14:42:47:4247 info: Server running on port 5000
+2026-02-15 14:42:53:4253 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:42:53:4253 info: MongoDB connected successfully
+2026-02-15 14:42:53:4253 info: MongoDB connected successfully
+2026-02-15 14:42:53:4253 info: Server running on port 5000
+2026-02-15 14:43:01:431 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:43:02:432 info: MongoDB connected successfully
+2026-02-15 14:43:02:432 info: MongoDB connected successfully
+2026-02-15 14:43:02:432 info: Server running on port 5000
+2026-02-15 14:43:12:4312 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:43:13:4313 info: MongoDB connected successfully
+2026-02-15 14:43:13:4313 info: MongoDB connected successfully
+2026-02-15 14:43:13:4313 info: Server running on port 5000
+2026-02-15 14:43:20:4320 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:43:22:4322 info: MongoDB connected successfully
+2026-02-15 14:43:22:4322 info: MongoDB connected successfully
+2026-02-15 14:43:22:4322 info: Server running on port 5000
+2026-02-15 14:44:09:449 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:44:12:4412 info: MongoDB connected successfully
+2026-02-15 14:44:12:4412 info: MongoDB connected successfully
+2026-02-15 14:44:12:4412 info: Server running on port 5000
+2026-02-15 14:45:12:4512 http: ::1 - - [15/Feb/2026:09:15:12 +0000] "POST /api/subject-topic/subjects HTTP/1.1" 201 236 "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0" 446.361 ms
+2026-02-15 14:47:13:4713 http: ::1 - - [15/Feb/2026:09:17:13 +0000] "GET /api/subject-topic/subjects HTTP/1.1" 200 511 "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0" 442.296 ms
+2026-02-15 14:48:20:4820 http: ::1 - - [15/Feb/2026:09:18:20 +0000] "POST /api/subject-topic/topics HTTP/1.1" 201 277 "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0" 523.650 ms
+2026-02-15 14:50:04:504 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:50:06:506 info: MongoDB connected successfully
+2026-02-15 14:50:06:506 info: MongoDB connected successfully
+2026-02-15 14:50:06:506 info: Server running on port 5000
+2026-02-15 14:50:08:508 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:50:09:509 info: MongoDB connected successfully
+2026-02-15 14:50:09:509 info: MongoDB connected successfully
+2026-02-15 14:50:09:509 info: Server running on port 5000
+2026-02-15 14:50:14:5014 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:50:15:5015 info: MongoDB connected successfully
+2026-02-15 14:50:15:5015 info: MongoDB connected successfully
+2026-02-15 14:50:15:5015 info: Server running on port 5000
+2026-02-15 14:50:28:5028 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:50:29:5029 info: MongoDB connected successfully
+2026-02-15 14:50:29:5029 info: MongoDB connected successfully
+2026-02-15 14:50:29:5029 info: Server running on port 5000
+2026-02-15 14:50:32:5032 info: 
+📥 API REQUEST
+2026-02-15 14:50:32:5032 info: Method: GET
+2026-02-15 14:50:32:5032 info: URL: /api/subject-topic/subjects
+2026-02-15 14:50:32:5032 info: Headers: {
+  "host": "localhost:5000",
+  "connection": "keep-alive",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0",
+  "accept": "application/json, text/plain, */*",
+  "sec-ch-ua": "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Microsoft Edge\";v=\"144\"",
+  "sec-ch-ua-mobile": "?0",
+  "origin": "http://localhost:5173",
+  "sec-fetch-site": "same-site",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:5173/",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "[REDACTED]",
+  "if-none-match": "W/\"1ff-DzgShzsYEYENXtAdjcl3kEzys9A\""
+}
+2026-02-15 14:50:33:5033 info: 
+📤 API RESPONSE
+2026-02-15 14:50:33:5033 info: Status: 200
+2026-02-15 14:50:33:5033 info: Response: {
+  "success": true,
+  "data": [
+    {
+      "_id": "69917bf8dc0de2b5bee67619",
+      "name": "programming language",
+      "description": "",
+      "createdBy": {
+        "_id": "69916045add2a04ea2874e62",
+        "email": "demo@gmail.com"
+      },
+      "createdAt": "2026-02-15T07:55:36.612Z",
+      "updatedAt": "2026-02-15T07:55:36.612Z",
+      "__v": 0
+    },
+    {
+      "_id": "69918ea0f18fd2d2425817a7",
+      "name": "database management system",
+      "description": "",
+      "createdBy": {
+        "_id": "69916045add2a04ea2874e62",
+        "email": "demo@gmail.com"
+      },
+      "createdAt": "2026-02-15T09:15:12.358Z",
+      "updatedAt": "2026-02-15T09:15:12.359Z",
+      "__v": 0
+    }
+  ]
+}
+2026-02-15 14:50:33:5033 http: ::1 - - [15/Feb/2026:09:20:33 +0000] "GET /api/subject-topic/subjects HTTP/1.1" 304 - "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0" 231.078 ms
+2026-02-15 14:51:13:5113 info: 
+📥 API REQUEST
+2026-02-15 14:51:13:5113 info: Method: POST
+2026-02-15 14:51:13:5113 info: URL: /api/subject-topic/subjects
+2026-02-15 14:51:13:5113 info: Headers: {
+  "host": "localhost:5000",
+  "connection": "keep-alive",
+  "content-length": "44",
+  "sec-ch-ua-platform": "\"Windows\"",
+  "user-agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0",
+  "accept": "application/json, text/plain, */*",
+  "sec-ch-ua": "\"Not(A:Brand\";v=\"8\", \"Chromium\";v=\"144\", \"Microsoft Edge\";v=\"144\"",
+  "content-type": "application/json",
+  "sec-ch-ua-mobile": "?0",
+  "origin": "http://localhost:5173",
+  "sec-fetch-site": "same-site",
+  "sec-fetch-mode": "cors",
+  "sec-fetch-dest": "empty",
+  "referer": "http://localhost:5173/",
+  "accept-encoding": "gzip, deflate, br, zstd",
+  "accept-language": "en-US,en;q=0.9",
+  "cookie": "[REDACTED]"
+}
+2026-02-15 14:51:13:5113 info: Body: {
+  "name": "Maths",
+  "description": "mathematics"
+}
+2026-02-15 14:51:13:5113 info: 
+📤 API RESPONSE
+2026-02-15 14:51:13:5113 info: Status: 201
+2026-02-15 14:51:13:5113 info: Response: {
+  "success": true,
+  "data": {
+    "name": "Maths",
+    "description": "mathematics",
+    "createdBy": "69916045add2a04ea2874e62",
+    "_id": "6991900943628a4b147183f3",
+    "createdAt": "2026-02-15T09:21:13.292Z",
+    "updatedAt": "2026-02-15T09:21:13.292Z",
+    "__v": 0
+  }
+}
+2026-02-15 14:51:13:5113 http: ::1 - - [15/Feb/2026:09:21:13 +0000] "POST /api/subject-topic/subjects HTTP/1.1" 201 226 "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0" 370.639 ms
+2026-02-15 14:52:32:5232 info: Connecting to MongoDB: mongodb+srv://testiqpaths_db_user:kfn2U9XELbvWAeof@testq.9iglkop.mongodb.net/testportal
+2026-02-15 14:52:36:5236 info: MongoDB connected successfully
+2026-02-15 14:52:36:5236 info: MongoDB connected successfully
+2026-02-15 14:52:36:5236 info: Server running on port 5000
+2026-02-15 14:52:49:5249 info: 
+📥 API REQUEST
+2026-02-15 14:52:49:5249 info: Method: POST
+2026-02-15 14:52:49:5249 info: URL: /api/subject-topic/subjects
+2026-02-15 14:52:49:5249 info: Body: {
+  "name": "Histroy",
+  "description": ""
+}
+2026-02-15 14:52:50:5250 info: 
+📤 API RESPONSE
+2026-02-15 14:52:50:5250 info: Status: 201
+2026-02-15 14:52:50:5250 info: Response: {
+  "success": true,
+  "data": {
+    "name": "Histroy",
+    "description": "",
+    "createdBy": "69916045add2a04ea2874e62",
+    "_id": "6991906ac609685c5385db9f",
+    "createdAt": "2026-02-15T09:22:50.065Z",
+    "updatedAt": "2026-02-15T09:22:50.065Z",
+    "__v": 0
+  }
+}
+2026-02-15 14:52:50:5250 http: ::1 - - [15/Feb/2026:09:22:50 +0000] "POST /api/subject-topic/subjects HTTP/1.1" 201 217 "http://localhost:5173/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36 Edg/144.0.0.0" 461.431 ms

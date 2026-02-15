@@ -4,6 +4,7 @@ import * as service from "./questions.service.js";
 import XLSX from "xlsx";
 import Question from "../../models/question.model.js";
 import mongoose from "mongoose";
+import logger from "../../config/logger.js";
 
 
 export const createQuestion = asyncHandler(async (req, res) => {
@@ -59,8 +60,8 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
 
   const questions = rows.map((row, idx) => ({
     __row: idx + 2,
-    topic: String(row.topic || "").trim(),
-    subTopic: String(row.subTopic || "").trim(),
+    subjectId: String(row.subjectId || "").trim(),
+    topicId: String(row.topicId || "").trim(),
     questionText: String(row.questionText || "").trim(),
     type: String(row.type || "").trim(),
     options: parseOptions(row.options),
@@ -82,7 +83,7 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     message: `${questions.length} questions uploaded`,
   });
 }catch(err){
-  console.error("Error during bulk upload:", err);
+  logger.error(`Error during bulk upload: ${err.message}`);
   res.status(500).json({
     success: false,
     message: "An error occurred during bulk upload",
@@ -94,28 +95,34 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
 export const getAllQuestionsController = async (req, res) => {
   try {
     const {
-      topic,
-      subTopic,
+      subjectId,
+      topicId,
       type,
       difficulty,
       organizationId,
       page = 1,
-      limit = 10,
+      limit,
+      quantity,
       sort = "-createdAt",
     } = req.query;
 
+    // Build filters object - only add if value exists
     const filters = {};
-    if (topic) filters.topic = topic;
-    if (subTopic) filters.subTopic = subTopic;
+    if (subjectId) filters.subjectId = subjectId;
+    if (topicId) filters.topicId = topicId;
     if (type) filters.type = type;
     if (difficulty) filters.difficulty = difficulty;
     if (organizationId) filters.organizationId = organizationId;
 
     const pageNum = Math.max(1, Number(page));
-    const limitNum = Math.min(100, Math.max(1, Number(limit)));
+    const resolvedLimit = limit ?? quantity ?? 10;
+    const limitNum = Math.min(100, Math.max(1, Number(resolvedLimit)));
 
     const [items, total] = await Promise.all([
       Question.find(filters)
+        .populate("subjectId", "name description")
+        .populate("topicId", "name description")
+        .populate("createdBy", "name email")
         .sort(sort)
         .skip((pageNum - 1) * limitNum)
         .limit(limitNum),
@@ -126,6 +133,7 @@ export const getAllQuestionsController = async (req, res) => {
       success: true,
       message: "Questions fetched",
       data: items,
+      filters: filters, // Return applied filters for clarity
       meta: {
         total,
         page: pageNum,
@@ -149,7 +157,10 @@ export const getQuestionsByUserIdController = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid userId" });
     }
 
-    const questions = await Question.find({ createdBy: userId }).sort("-createdAt");
+    const questions = await Question.find({ createdBy: userId })
+      .populate("subjectId", "name description")
+      .populate("topicId", "name description")
+      .sort("-createdAt");
 
     return res.status(200).json({
       success: true,
@@ -172,7 +183,10 @@ export const getQuestionByIdController = async (req, res) => {
       return res.status(400).json({ success: false, message: "Invalid questionId" });
     }
 
-    const question = await Question.findById(questionId);
+    const question = await Question.findById(questionId)
+      .populate("subjectId", "name description")
+      .populate("topicId", "name description")
+      .populate("createdBy", "name email");
 
     if (!question) {
       return res.status(404).json({ success: false, message: "Question not found" });
@@ -187,6 +201,100 @@ export const getQuestionByIdController = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: err.message || "Failed to fetch question",
+    });
+  }
+};
+
+// Get questions by subject ID
+export const getQuestionsBySubjectController = async (req, res) => {
+  try {
+    const { subjectId } = req.params;
+    const { page = 1, limit = 10, sort = "-createdAt", type, difficulty } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(subjectId)) {
+      return res.status(400).json({ success: false, message: "Invalid subjectId" });
+    }
+
+    const filters = { subjectId };
+    if (type) filters.type = type;
+    if (difficulty) filters.difficulty = difficulty;
+
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.min(100, Math.max(1, Number(limit)));
+
+    const [items, total] = await Promise.all([
+      Question.find(filters)
+        .populate("subjectId", "name description")
+        .populate("topicId", "name description")
+        .populate("createdBy", "name email")
+        .sort(sort)
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum),
+      Question.countDocuments(filters),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Questions by subject fetched",
+      data: items,
+      meta: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to fetch questions by subject",
+    });
+  }
+};
+
+// Get questions by topic ID
+export const getQuestionsByTopicController = async (req, res) => {
+  try {
+    const { topicId } = req.params;
+    const { page = 1, limit = 10, sort = "-createdAt", type, difficulty } = req.query;
+
+    if (!mongoose.Types.ObjectId.isValid(topicId)) {
+      return res.status(400).json({ success: false, message: "Invalid topicId" });
+    }
+
+    const filters = { topicId };
+    if (type) filters.type = type;
+    if (difficulty) filters.difficulty = difficulty;
+
+    const pageNum = Math.max(1, Number(page));
+    const limitNum = Math.min(100, Math.max(1, Number(limit)));
+
+    const [items, total] = await Promise.all([
+      Question.find(filters)
+        .populate("subjectId", "name description")
+        .populate("topicId", "name description")
+        .populate("createdBy", "name email")
+        .sort(sort)
+        .skip((pageNum - 1) * limitNum)
+        .limit(limitNum),
+      Question.countDocuments(filters),
+    ]);
+
+    return res.status(200).json({
+      success: true,
+      message: "Questions by topic fetched",
+      data: items,
+      meta: {
+        total,
+        page: pageNum,
+        limit: limitNum,
+        pages: Math.ceil(total / limitNum),
+      },
+    });
+  } catch (err) {
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Failed to fetch questions by topic",
     });
   }
 };

@@ -4,6 +4,7 @@ const { Schema, model, Types } = mongoose;
 const testSchema = new Schema({
   title: { type: String, required: true },
   description: { type: String },
+  subjectId: { type: Types.ObjectId, ref: "Subject", required: true },
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
@@ -11,14 +12,11 @@ const testSchema = new Schema({
   visibility: { type: String, enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY"], required: true },
   allowedOrganizations: [{ type: Types.ObjectId }],
   testCode: { type: String },
-  questionMode: { type: String, enum: ["MANUAL", "RANDOM"], required: true },
-  questions: [{ type: Types.ObjectId }],
-  randomConfig: {
-    totalQuestions: { type: Number },
-    topic: [{ type: String }],
-    difficulty: [{ type: String }],
-    type: [{ type: String }],
-  },
+  totalQuestions: { type: Number, required: true },
+  subjectIds: [{ type: Types.ObjectId, ref: "Subject", required: true }],
+  topicIds: [{ type: Types.ObjectId, ref: "Topic" }],
+  difficulty: [{ type: String }],
+  type: [{ type: String }],
   duration: { type: Number, required: true },
   totalMarks: { type: Number, required: true },
   scheduleType: { type: String, enum: ["IMMEDIATE", "DELAYED", "FIXED"], required: true },
