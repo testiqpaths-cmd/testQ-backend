@@ -1,4 +1,5 @@
 import * as service from "./testSeries.service.js";
+import logger from "../../config/logger.js";
 import mongoose from "mongoose";
 import TestSeries from "../../models/testSeries.model.js";
 
@@ -41,7 +42,7 @@ export const createSeries = async (req, res, next) => {
       data: series,
     });
   } catch (err) {
-    console.error("createSeries error:", err); // ✅ you will see real reason now
+    logger.error(`createSeries error: ${err.message}`);
     return res.status(500).json({
       success: false,
       message: err.message || "Internal Server Error",

@@ -1,9 +1,10 @@
 import TestSeries from "../../models/testSeries.model.js";
 import crypto from "crypto";
+import logger from "../../config/logger.js";
 
 
 export const createSeries = async (data, user) => {
-  console.log(user);
+  logger.debug(`Creating series for user: ${JSON.stringify(user)}`);
   const seriesCode =
     data.visibility === "LINK_ONLY"
       ? crypto.randomBytes(4).toString("hex")

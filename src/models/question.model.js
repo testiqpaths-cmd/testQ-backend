@@ -2,14 +2,15 @@
 import mongoose from "mongoose";
 
 const questionSchema = new mongoose.Schema({
-  topic: {
-    type: String,
+  subjectId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Subject",
     required: true,
-    trim: true,
   },
-  subTopic: {
-    type: String,
-    trim: true,
+  topicId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Topic",
+    required: true,
   },
   questionText: {
     type: String,
@@ -40,7 +41,7 @@ const questionSchema = new mongoose.Schema({
   createdBy: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "User",
-    required: true, //no authmiddleware
+    required: true,
   },
   
   createdAt: {
