@@ -1,7 +1,8 @@
 // modules/testAttempts/testAttempt.controller.js
 import mongoose from "mongoose";
 import Test from "../../models/test.model.js"; // adjust path
-import TestAttempt from "../../models/testAttempt.model.js"; // adjust path
+import TestAttempt from "../../models/testAttempt.model.js"; // adjust path"; 
+import { computeAttemptTiming } from "../test-attempts/utils/attemptTimer.util.js";
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -46,6 +47,8 @@ export const startTestAttemptController = async (req, res, next) => {
     // 4) Prevent multiple attempts (fast check)
     const existing = await TestAttempt.findOne({ testId, studentId }).lean();
     if (existing) {
+      // Calculate timing for existing attempt
+      const existingTiming = computeAttemptTiming(existing);
       return res.status(409).json({
         success: false,
         message: "Attempt already exists for this test",
@@ -54,6 +57,9 @@ export const startTestAttemptController = async (req, res, next) => {
           status: existing.status,
           startedAt: existing.startedAt,
           endsAt: existing.endsAt,
+          duration: existing.duration,
+          maxScore: existing.maxScore,
+          timing: existingTiming, // ✅ backend remaining time
         },
       });
     }
@@ -93,6 +99,7 @@ export const startTestAttemptController = async (req, res, next) => {
       answers: [],
     });
 
+    const timing = computeAttemptTiming(attempt);
     return res.status(201).json({
       success: true,
       message: "Test attempt started",
@@ -105,6 +112,7 @@ export const startTestAttemptController = async (req, res, next) => {
         endsAt: attempt.endsAt,
         duration: attempt.duration,
         maxScore: attempt.maxScore,
+        timing, // ✅ backend remaining time
       },
     });
   } catch (err) {
@@ -118,3 +126,190 @@ export const startTestAttemptController = async (req, res, next) => {
     return next(err);
   }
 };
+
+
+// src/modules/testAttempts/controllers/testAttempt.controller.js
+export const getAttemptController = async (req, res, next) => {
+  try {
+    const attempt = req.attempt;
+    const timing = req.timing;
+
+    // Return timing and attempt status to frontend
+    return res.json({
+      success: true,
+      message: "Attempt retrieved",
+      data: {
+        attempt: {
+          _id: attempt._id,
+          testId: attempt.testId,
+          studentId: attempt.studentId,
+          status: attempt.status,
+          startedAt: attempt.startedAt,
+          endsAt: attempt.endsAt,
+          duration: attempt.duration,
+          submittedAt: attempt.submittedAt,
+          expireReason: attempt.expireReason,
+          answers: attempt.answers,
+          maxScore: attempt.maxScore,
+          totalScore: attempt.totalScore,
+          percentage: attempt.percentage,
+          resultStatus: attempt.resultStatus,
+        },
+        timing: {
+          remainingSeconds: timing.remainingSeconds,
+          remainingMs: timing.remainingMs,
+          expired: timing.expired,
+          // ✅ Backend-only: frontend cannot modify timeouts
+          serverNow: timing.serverNow,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+
+export const saveAnswerController = async (req, res, next) => {
+  try {
+    const attempt = req.attempt;
+    const timing = req.timing;
+
+    // ✅ Middleware already expired it if needed
+    // Prevent saving answers after expiration
+    if (attempt.status !== "IN_PROGRESS") {
+      return res.status(403).json({
+        success: false,
+        message: `Cannot save answer - attempt is ${attempt.status.toLowerCase()}`,
+        data: {
+          status: attempt.status,
+          expireReason: attempt.expireReason,
+          timing: {
+            remainingSeconds: timing.remainingSeconds,
+            remainingMs: timing.remainingMs,
+            expired: timing.expired,
+            serverNow: timing.serverNow,
+          },
+        },
+      });
+    }
+
+    const { questionId, selectedOption, answerText } = req.body;
+
+    if (!questionId) {
+      return res.status(400).json({
+        success: false,
+        message: "questionId is required",
+      });
+    }
+
+    // ✅ Upsert answer (no duplicates)
+    const idx = attempt.answers.findIndex(
+      (a) => a.questionId.toString() === String(questionId)
+    );
+
+    if (idx >= 0) {
+      attempt.answers[idx].selectedOption =
+        selectedOption ?? attempt.answers[idx].selectedOption;
+      attempt.answers[idx].textAnswer = answerText ?? attempt.answers[idx].textAnswer;
+      attempt.answers[idx].answeredAt = new Date();
+    } else {
+      attempt.answers.push({
+        questionId,
+        selectedOption,
+        textAnswer: answerText,
+        answeredAt: new Date(),
+      });
+    }
+
+    await attempt.save();
+
+    return res.json({
+      success: true,
+      message: "Answer saved successfully",
+      data: {
+        attemptId: attempt._id,
+        questionId: questionId,
+        timing: {
+          remainingSeconds: timing.remainingSeconds,
+          remainingMs: timing.remainingMs,
+          expired: timing.expired,
+          serverNow: timing.serverNow,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+
+export const submitAttemptController = async (req, res, next) => {
+  try {
+    const attempt = req.attempt;
+    const timing = req.timing;
+
+    // ✅ If timer expired, middleware already set EXPIRED
+    // Return clear message that time is up
+    if (attempt.status === "EXPIRED") {
+      return res.json({
+        success: true,
+        message: "Attempt auto-expired due to time over",
+        data: {
+          status: "EXPIRED",
+          expireReason: attempt.expireReason,
+          submittedAt: attempt.submittedAt,
+          timing: {
+            remainingSeconds: 0,
+            remainingMs: 0,
+            expired: true,
+            serverNow: timing.serverNow,
+          },
+        },
+      });
+    }
+
+    // Prevent submission if not in progress and not already expired
+    if (attempt.status !== "IN_PROGRESS") {
+      return res.status(409).json({
+        success: false,
+        message: `Cannot submit attempt - status is ${attempt.status.toLowerCase()}`,
+        data: {
+          status: attempt.status,
+          submittedAt: attempt.submittedAt,
+          timing: {
+            remainingSeconds: timing.remainingSeconds,
+            remainingMs: timing.remainingMs,
+            expired: timing.expired,
+            serverNow: timing.serverNow,
+          },
+        },
+      });
+    }
+
+    // ✅ Manually submit before time expires
+    attempt.status = "SUBMITTED";
+    attempt.submittedAt = new Date();
+    attempt.expireReason = "MANUAL_SUBMIT";
+    await attempt.save();
+
+    return res.json({
+      success: true,
+      message: "Test submitted successfully",
+      data: {
+        status: "SUBMITTED",
+        submittedAt: attempt.submittedAt,
+        timing: {
+          remainingSeconds: Math.max(0, timing.remainingSeconds),
+          remainingMs: Math.max(0, timing.remainingMs),
+          expired: false,
+          serverNow: timing.serverNow,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+

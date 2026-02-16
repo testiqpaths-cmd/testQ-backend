@@ -3,7 +3,7 @@ const { Schema, model, Types } = mongoose;
 
 const testSchema = new Schema({
   title: { type: String, required: true },
-  description: { type: String },
+  description: { type: String },  
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
