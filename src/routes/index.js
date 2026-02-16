@@ -7,6 +7,7 @@ import testRoutes from "../modules/test-management/test.routes.js";
 import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
 import testAttemptRoutes from "../modules/analytics/test-attempt/testAttempt.routes.js";
 import testStatsRoutes from "../modules/analytics/test-statistics/testStats.routes.js";
+import organizationRoutes from "../modules/analytics/organization/organization.routes.js";
 
 const router = express.Router();
 
@@ -36,6 +37,10 @@ router.use("/results",testAttemptRoutes);
 
 //testStats
 router.use("/analytics",testStatsRoutes);
+
+//Organization Analystics
+router.use("/organizations", organizationRoutes);
+
 
 
 export default router;
