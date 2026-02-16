@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import Test from "../../models/test.model.js"; // adjust path
 import TestAttempt from "../../models/testAttempt.model.js"; // adjust path"; 
 import { computeAttemptTiming } from "../test-attempts/utils/attemptTimer.util.js";
+import { saveAnswerSchema } from "./schemas/saveAnswer.schema.js";
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -173,77 +174,76 @@ export const getAttemptController = async (req, res, next) => {
 
 export const saveAnswerController = async (req, res, next) => {
   try {
-    const attempt = req.attempt;
-    const timing = req.timing;
+    const attempt = req.attempt;     // from loadAttempt
+    const timing = req.timing;       // from enforceAttemptTimer
 
-    // ✅ Middleware already expired it if needed
-    // Prevent saving answers after expiration
+    // ✅ Block if not in progress (Acceptance Criteria)
     if (attempt.status !== "IN_PROGRESS") {
-      return res.status(403).json({
+      return res.status(409).json({
         success: false,
-        message: `Cannot save answer - attempt is ${attempt.status.toLowerCase()}`,
-        data: {
-          status: attempt.status,
-          expireReason: attempt.expireReason,
-          timing: {
-            remainingSeconds: timing.remainingSeconds,
-            remainingMs: timing.remainingMs,
-            expired: timing.expired,
-            serverNow: timing.serverNow,
-          },
-        },
+        message: "Attempt is not in progress",
+        errors: null,
       });
     }
 
-    const { questionId, selectedOption, answerText } = req.body;
-
-    if (!questionId) {
-      return res.status(400).json({
+    // ✅ If timer says expired, block (your middleware may auto-expire already)
+    if (timing?.expired) {
+      return res.status(409).json({
         success: false,
-        message: "questionId is required",
+        message: "Time expired. Attempt ended.",
+        errors: null,
       });
     }
 
-    // ✅ Upsert answer (no duplicates)
+    // ✅ Validate request body
+    const parsed = saveAnswerSchema.parse(req.body);
+    const questionId = new mongoose.Types.ObjectId(parsed.questionId);
+
+    // ✅ Upsert by questionId (no duplicates)
     const idx = attempt.answers.findIndex(
-      (a) => a.questionId.toString() === String(questionId)
+      (a) => a.questionId.toString() === questionId.toString()
     );
 
+    const updatedAnswer = {
+      questionId,
+      selectedOption: parsed.selectedOption ?? null,
+      textAnswer: parsed.textAnswer ?? null,
+      answeredAt: new Date(),
+    };
+
     if (idx >= 0) {
-      attempt.answers[idx].selectedOption =
-        selectedOption ?? attempt.answers[idx].selectedOption;
-      attempt.answers[idx].textAnswer = answerText ?? attempt.answers[idx].textAnswer;
-      attempt.answers[idx].answeredAt = new Date();
+      // update existing entry
+      attempt.answers[idx].selectedOption = updatedAnswer.selectedOption;
+      attempt.answers[idx].textAnswer = updatedAnswer.textAnswer;
+      attempt.answers[idx].answeredAt = updatedAnswer.answeredAt;
     } else {
-      attempt.answers.push({
-        questionId,
-        selectedOption,
-        textAnswer: answerText,
-        answeredAt: new Date(),
-      });
+      // add new entry
+      attempt.answers.push(updatedAnswer);
     }
 
     await attempt.save();
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       message: "Answer saved successfully",
       data: {
         attemptId: attempt._id,
-        questionId: questionId,
-        timing: {
-          remainingSeconds: timing.remainingSeconds,
-          remainingMs: timing.remainingMs,
-          expired: timing.expired,
-          serverNow: timing.serverNow,
-        },
+        questionId: parsed.questionId,
+        timing: req.timing,
       },
     });
   } catch (err) {
-    next(err);
+    // Zod error
+    if (err?.errors) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: err.errors,
+      });
+    }
+    return next(err);
   }
 };
-
 
 export const submitAttemptController = async (req, res, next) => {
   try {
