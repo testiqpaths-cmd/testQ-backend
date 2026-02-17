@@ -52,11 +52,13 @@ export const enforceAttemptTimer = async (req, res, next) => {
 
     // If attempt is not in progress, skip expiry check
     if (attempt.status !== "IN_PROGRESS") {
+      const isActuallyExpired = attempt.status === "EXPIRED";
+
       req.timing = {
         remainingSeconds: 0,
         remainingMs: 0,
-        expired: false, // ✅ not time-expired; it's just ended
-        ended: true, // ✅ attempt ended (SUBMITTED/EXPIRED/etc.)
+        expired: isActuallyExpired, // ✅ FIX: true if status is EXPIRED
+        ended: true,
         endReason: attempt.expireReason || attempt.status,
         serverNow: new Date(),
       };
@@ -82,6 +84,8 @@ export const enforceAttemptTimer = async (req, res, next) => {
       remainingSeconds: 0,
       remainingMs: 0,
       expired: true,
+      ended: true,
+      endReason: updated.expireReason || "TIME_EXPIRED",
       serverNow: new Date(),
     };
 
