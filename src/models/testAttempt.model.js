@@ -12,6 +12,10 @@ const testAttemptSchema = new mongoose.Schema(
       ref: "Test",
       required: true,
     },
+    organizationId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Organization",
+    },
     totalScore: Number,
     maxScore: Number,
     percentage: Number,
@@ -27,10 +31,12 @@ const testAttemptSchema = new mongoose.Schema(
     },
     evaluatedAt: Date,
   },
-  { timestamps: true }
+  { timestamps: true } // ✅ adds createdAt + updatedAt automatically
 );
 
-// performance (important)
+// ✅ Performance Indexes (define only once here)
+testAttemptSchema.index({ createdAt: 1 });
 testAttemptSchema.index({ testId: 1 });
+testAttemptSchema.index({ organizationId: 1 });
 
 export default mongoose.model("TestAttempt", testAttemptSchema);

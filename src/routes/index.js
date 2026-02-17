@@ -8,6 +8,7 @@ import testAttemptRoutes from "../modules/analytics/test-attempt/testAttempt.rou
 import testStatsRoutes from "../modules/analytics/test-statistics/testStats.routes.js";
 import organizationRoutes from "../modules/analytics/organization/organization.routes.js";
 import adminRoutes from "../modules/analytics/admin-analytics/admin.routes.js";
+import timeBasedRoutes from "../modules/analytics/time-based-analytics/timeBased.routes.js";
 const router = express.Router();
 
 // Health check
@@ -43,6 +44,8 @@ router.use("/organizations", organizationRoutes);
 //IQ-pathAdmin Analystics
 router.use("/admin", adminRoutes);
 
+//time-based analytics
+router.use("/trends", timeBasedRoutes);
 export default router;
 
 
