@@ -1,14 +1,13 @@
 import express from "express";
 import authRoutes from "../modules/auth/auth.routes.js";
 import questionsRoutes from "../modules/questions/questions.routes.js";
-
 import testRoutes from "../modules/test-management/test.routes.js";
 // import userRoutes from "../modules/user/user.routes.js"; // future module
 import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
 import testAttemptRoutes from "../modules/analytics/test-attempt/testAttempt.routes.js";
 import testStatsRoutes from "../modules/analytics/test-statistics/testStats.routes.js";
 import organizationRoutes from "../modules/analytics/organization/organization.routes.js";
-
+import adminRoutes from "../modules/analytics/admin-analytics/admin.routes.js";
 const router = express.Router();
 
 // Health check
@@ -41,7 +40,8 @@ router.use("/analytics",testStatsRoutes);
 //Organization Analystics
 router.use("/organizations", organizationRoutes);
 
-
+//IQ-pathAdmin Analystics
+router.use("/admin", adminRoutes);
 
 export default router;
 
