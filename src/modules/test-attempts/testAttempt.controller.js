@@ -1,9 +1,10 @@
 // modules/testAttempts/testAttempt.controller.js
 import mongoose from "mongoose";
 import Test from "../../models/test.model.js"; // adjust path
-import TestAttempt from "../../models/testAttempt.model.js"; // adjust path"; 
+import TestAttempt from "../../models/testAttempt.model.js"; // adjust path";
 import { computeAttemptTiming } from "../test-attempts/utils/attemptTimer.util.js";
 import { saveAnswerSchema } from "./schemas/saveAnswer.schema.js";
+import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempts.service.js";
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -11,13 +12,17 @@ export const startTestAttemptController = async (req, res, next) => {
     const studentId = req.user?._id;
 
     if (!mongoose.Types.ObjectId.isValid(testId)) {
-      return res.status(400).json({ success: false, message: "Invalid testId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid testId" });
     }
 
     // 1) Load test
     const test = await Test.findById(testId).lean();
     if (!test) {
-      return res.status(404).json({ success: false, message: "Test not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Test not found" });
     }
 
     // 2) Validate visibility (adapt to your rules)
@@ -128,7 +133,6 @@ export const startTestAttemptController = async (req, res, next) => {
   }
 };
 
-
 // src/modules/testAttempts/controllers/testAttempt.controller.js
 export const getAttemptController = async (req, res, next) => {
   try {
@@ -170,12 +174,10 @@ export const getAttemptController = async (req, res, next) => {
   }
 };
 
-
-
 export const saveAnswerController = async (req, res, next) => {
   try {
-    const attempt = req.attempt;     // from loadAttempt
-    const timing = req.timing;       // from enforceAttemptTimer
+    const attempt = req.attempt; // from loadAttempt
+    const timing = req.timing; // from enforceAttemptTimer
 
     // ✅ Block if not in progress (Acceptance Criteria)
     if (attempt.status !== "IN_PROGRESS") {
@@ -201,7 +203,7 @@ export const saveAnswerController = async (req, res, next) => {
 
     // ✅ Upsert by questionId (no duplicates)
     const idx = attempt.answers.findIndex(
-      (a) => a.questionId.toString() === questionId.toString()
+      (a) => a.questionId.toString() === questionId.toString(),
     );
 
     const updatedAnswer = {
@@ -294,12 +296,16 @@ export const submitAttemptController = async (req, res, next) => {
     attempt.expireReason = "MANUAL_SUBMIT";
     await attempt.save();
 
+    const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
+
     return res.json({
       success: true,
       message: "Test submitted successfully",
       data: {
-        status: "SUBMITTED",
-        submittedAt: attempt.submittedAt,
+        status: evaluatedAttempt?.status || "SUBMITTED",
+        submittedAt: evaluatedAttempt?.submittedAt || attempt.submittedAt,
+        totalScore: evaluatedAttempt?.totalScore ?? 0,
+        percentage: evaluatedAttempt?.percentage ?? 0,
         timing: {
           remainingSeconds: Math.max(0, timing.remainingSeconds),
           remainingMs: Math.max(0, timing.remainingMs),
@@ -312,4 +318,3 @@ export const submitAttemptController = async (req, res, next) => {
     next(err);
   }
 };
-
