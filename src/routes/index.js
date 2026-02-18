@@ -9,6 +9,10 @@ import testStatsRoutes from "../modules/analytics/test-statistics/testStats.rout
 import organizationRoutes from "../modules/analytics/organization/organization.routes.js";
 import adminRoutes from "../modules/analytics/admin-analytics/admin.routes.js";
 import timeBasedRoutes from "../modules/analytics/time-based-analytics/timeBased.routes.js";
+//import studentReportRoutes from "./modules/analytics/reports/student/studentReport.routes.js";
+import studentReportRoutes from "../modules/analytics/reports/student/studentReport.routes.js";
+
+
 const router = express.Router();
 
 // Health check
@@ -46,6 +50,10 @@ router.use("/admin", adminRoutes);
 
 //time-based analytics
 router.use("/trends", timeBasedRoutes);
+
+//student result report
+router.use("/reports", studentReportRoutes);
+
 export default router;
 
 
