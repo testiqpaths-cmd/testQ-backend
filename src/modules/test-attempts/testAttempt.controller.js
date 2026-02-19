@@ -5,6 +5,8 @@ import TestAttempt from "../../models/testAttempt.model.js"; // adjust path";
 import { computeAttemptTiming } from "../test-attempts/utils/attemptTimer.util.js";
 import { saveAnswerSchema } from "./schemas/saveAnswer.schema.js";
 import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempts.service.js";
+import { manualEvaluateAttempt } from "./services/manualEvaluateAttempt.service.js";
+import { evaluateAttemptSchema } from "./schemas/evaluateAttempt.schema.js";
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -316,5 +318,40 @@ export const submitAttemptController = async (req, res, next) => {
     });
   } catch (err) {
     next(err);
+  }
+};
+
+
+export const evaluateAttemptController = async (req, res, next) => {
+  try {
+    
+
+    const parsed = evaluateAttemptSchema.parse(req.body);
+    const { attemptId } = req.params;
+    const { evaluations } = parsed;     // ✅
+
+
+    const result = await manualEvaluateAttempt(attemptId, evaluations);
+
+    if (result?.error) {
+      return res.status(result.status || 400).json({
+        success: false,
+        message: result.error,
+        errors: null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Attempt evaluated successfully",
+      data: {
+        attemptId: result.attempt._id,
+        status: result.attempt.status,
+        totalScore: result.attempt.totalScore,
+        percentage: result.attempt.percentage,
+      },
+    });
+  } catch (err) {
+    return next(err);
   }
 };
