@@ -11,7 +11,7 @@ const router = express.Router();
 router.get(
   "/analytics/trends",
   authMiddleware,
-  roleMiddleware(["ORGANIZATION", "IQPATH_ADMIN"]),
+  roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"),
   getTimeBasedAnalytics
 );
 
