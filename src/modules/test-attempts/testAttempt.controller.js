@@ -349,6 +349,8 @@ export const evaluateAttemptController = async (req, res, next) => {
         status: result.attempt.status,
         totalScore: result.attempt.totalScore,
         percentage: result.attempt.percentage,
+        maxScore: result.attempt.maxScore,
+        resultStatus: result.attempt.resultStatus,
       },
     });
   } catch (err) {

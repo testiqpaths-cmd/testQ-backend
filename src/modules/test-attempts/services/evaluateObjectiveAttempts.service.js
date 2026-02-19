@@ -52,6 +52,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
     ans.isCorrect = null;
     ans.marksObtained = ans.marksObtained ?? 0;
+    totalScore += ans.marksObtained; 
     return ans;
   });
 
@@ -61,8 +62,16 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       ? Math.round((totalScore / attempt.maxScore) * 100)
       : 0;
 
-  // ✅ Only mark EVALUATED if no subjective questions exist in the attempt
-  attempt.status = hasSubjective ? "SUBMITTED" : "EVALUATED";
+  // ✅ Only finalize if no subjective questions exist
+  if (hasSubjective) {
+    attempt.status = "SUBMITTED";     // waiting manual eval
+    attempt.resultStatus = null;      // not final yet
+  } else {
+    attempt.status = "EVALUATED";     // ✅ SCRUM-23 done here
+    attempt.resultStatus =
+      attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+  }
+
 
   await attempt.save();
   return attempt;
