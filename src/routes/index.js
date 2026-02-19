@@ -11,7 +11,7 @@ import adminRoutes from "../modules/analytics/admin-analytics/admin.routes.js";
 import timeBasedRoutes from "../modules/analytics/time-based-analytics/timeBased.routes.js";
 import studentReportRoutes from "../modules/analytics/reports/student/studentReport.routes.js";
 import orgReportRoutes from "../modules/analytics/reports/organization/orgReport.routes.js";
-
+import platformReportsRoutes from "../modules/analytics/reports/platform-analytics/platformReports.routes.js";
 const router = express.Router();
 
 // Health check
@@ -55,6 +55,7 @@ router.use("/reports", studentReportRoutes);
 
 router.use("/reports", orgReportRoutes);
 
+router.use("/reports", platformReportsRoutes);
 export default router;
 
 
