@@ -10,10 +10,40 @@ import {
  * Load attempt from database
  * Validates that the attempt exists and belongs to the authenticated user
  */
+// export const loadAttempt = async (req, res, next) => {
+//   try {
+//     const { attemptId } = req.params;
+//     const userId = req.user?._id;
+
+//     const attempt = await TestAttempt.findById(attemptId);
+
+//     if (!attempt) {
+//       return res.status(404).json({
+//         success: false,
+//         message: "Attempt not found",
+//       });
+//     }
+
+//     // Verify ownership (optional but recommended for security)
+//     if (attempt.studentId.toString() !== userId.toString()) {
+//       return res.status(403).json({
+//         success: false,
+//         message: "Unauthorized: This is not your attempt",
+//       });
+//     }
+
+//     req.attempt = attempt;
+//     return next();
+//   } catch (err) {
+//     return next(err);
+//   }
+// };
+
 export const loadAttempt = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
     const userId = req.user?._id;
+    const userRole = req.user?.role;
 
     const attempt = await TestAttempt.findById(attemptId);
 
@@ -24,8 +54,12 @@ export const loadAttempt = async (req, res, next) => {
       });
     }
 
-    // Verify ownership (optional but recommended for security)
-    if (attempt.studentId.toString() !== userId.toString()) {
+    // ✅ Allow student only for own attempt
+    // ✅ Allow ADMIN / ORG for any attempt
+    if (
+      userRole === "STUDENT" &&
+      attempt.studentId.toString() !== userId.toString()
+    ) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized: This is not your attempt",
@@ -33,9 +67,9 @@ export const loadAttempt = async (req, res, next) => {
     }
 
     req.attempt = attempt;
-    return next();
+    next();
   } catch (err) {
-    return next(err);
+    next(err);
   }
 };
 
@@ -52,11 +86,13 @@ export const enforceAttemptTimer = async (req, res, next) => {
 
     // If attempt is not in progress, skip expiry check
     if (attempt.status !== "IN_PROGRESS") {
+      const isActuallyExpired = attempt.status === "EXPIRED";
+
       req.timing = {
         remainingSeconds: 0,
         remainingMs: 0,
-        expired: false, // ✅ not time-expired; it's just ended
-        ended: true, // ✅ attempt ended (SUBMITTED/EXPIRED/etc.)
+        expired: isActuallyExpired, // ✅ FIX: true if status is EXPIRED
+        ended: true,
         endReason: attempt.expireReason || attempt.status,
         serverNow: new Date(),
       };
@@ -82,6 +118,8 @@ export const enforceAttemptTimer = async (req, res, next) => {
       remainingSeconds: 0,
       remainingMs: 0,
       expired: true,
+      ended: true,
+      endReason: updated.expireReason || "TIME_EXPIRED",
       serverNow: new Date(),
     };
 
