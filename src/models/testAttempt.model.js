@@ -99,7 +99,7 @@ const testAttemptSchema = new mongoose.Schema({
 
   expireReason: {
     type: String,
-    enum: ["TIME_EXPIRED", "MANUAL_SUBMIT", null],
+    enum: ["TIME_EXPIRED", "MANUAL_SUBMIT","TIME_EXPIRED_AUTO_SUBMIT", null],
     default: null,
   },
 

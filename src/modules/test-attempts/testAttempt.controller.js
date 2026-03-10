@@ -1,9 +1,13 @@
 // modules/testAttempts/testAttempt.controller.js
 import mongoose from "mongoose";
 import Test from "../../models/test.model.js"; // adjust path
-import TestAttempt from "../../models/testAttempt.model.js"; // adjust path"; 
+import TestAttempt from "../../models/testAttempt.model.js"; // adjust path";
 import { computeAttemptTiming } from "../test-attempts/utils/attemptTimer.util.js";
 import { saveAnswerSchema } from "./schemas/saveAnswer.schema.js";
+import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempts.service.js";
+import { manualEvaluateAttempt } from "./services/manualEvaluateAttempt.service.js";
+import { evaluateAttemptSchema } from "./schemas/evaluateAttempt.schema.js";
+import { getAttemptResult } from "./services/getAttemptResult.service.js";
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -11,13 +15,17 @@ export const startTestAttemptController = async (req, res, next) => {
     const studentId = req.user?._id;
 
     if (!mongoose.Types.ObjectId.isValid(testId)) {
-      return res.status(400).json({ success: false, message: "Invalid testId" });
+      return res
+        .status(400)
+        .json({ success: false, message: "Invalid testId" });
     }
 
     // 1) Load test
     const test = await Test.findById(testId).lean();
     if (!test) {
-      return res.status(404).json({ success: false, message: "Test not found" });
+      return res
+        .status(404)
+        .json({ success: false, message: "Test not found" });
     }
 
     // 2) Validate visibility (adapt to your rules)
@@ -128,7 +136,6 @@ export const startTestAttemptController = async (req, res, next) => {
   }
 };
 
-
 // src/modules/testAttempts/controllers/testAttempt.controller.js
 export const getAttemptController = async (req, res, next) => {
   try {
@@ -170,12 +177,10 @@ export const getAttemptController = async (req, res, next) => {
   }
 };
 
-
-
 export const saveAnswerController = async (req, res, next) => {
   try {
-    const attempt = req.attempt;     // from loadAttempt
-    const timing = req.timing;       // from enforceAttemptTimer
+    const attempt = req.attempt; // from loadAttempt
+    const timing = req.timing; // from enforceAttemptTimer
 
     // ✅ Block if not in progress (Acceptance Criteria)
     if (attempt.status !== "IN_PROGRESS") {
@@ -201,7 +206,7 @@ export const saveAnswerController = async (req, res, next) => {
 
     // ✅ Upsert by questionId (no duplicates)
     const idx = attempt.answers.findIndex(
-      (a) => a.questionId.toString() === questionId.toString()
+      (a) => a.questionId.toString() === questionId.toString(),
     );
 
     const updatedAnswer = {
@@ -294,12 +299,16 @@ export const submitAttemptController = async (req, res, next) => {
     attempt.expireReason = "MANUAL_SUBMIT";
     await attempt.save();
 
+    const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
+
     return res.json({
       success: true,
       message: "Test submitted successfully",
       data: {
-        status: "SUBMITTED",
-        submittedAt: attempt.submittedAt,
+        status: evaluatedAttempt?.status || "SUBMITTED",
+        submittedAt: evaluatedAttempt?.submittedAt || attempt.submittedAt,
+        totalScore: evaluatedAttempt?.totalScore ?? 0,
+        percentage: evaluatedAttempt?.percentage ?? 0,
         timing: {
           remainingSeconds: Math.max(0, timing.remainingSeconds),
           remainingMs: Math.max(0, timing.remainingMs),
@@ -313,3 +322,109 @@ export const submitAttemptController = async (req, res, next) => {
   }
 };
 
+
+export const evaluateAttemptController = async (req, res, next) => {
+  try {
+    
+
+    const parsed = evaluateAttemptSchema.parse(req.body);
+    const { attemptId } = req.params;
+    const { evaluations } = parsed;     // ✅
+
+
+    const result = await manualEvaluateAttempt(attemptId, evaluations);
+
+    if (result?.error) {
+      return res.status(result.status || 400).json({
+        success: false,
+        message: result.error,
+        errors: null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Attempt evaluated successfully",
+      data: {
+        attemptId: result.attempt._id,
+        status: result.attempt.status,
+        totalScore: result.attempt.totalScore,
+        percentage: result.attempt.percentage,
+        maxScore: result.attempt.maxScore,
+        resultStatus: result.attempt.resultStatus,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const getAttemptResultController = async (req, res, next) => {
+  try {
+    const { attemptId } = req.params;
+
+    const attempt = await getAttemptResult(attemptId);
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: "Attempt not found",
+        errors: null,
+      });
+    }
+
+    // ✅ Student can view own results only
+    const requesterId = String(req.user?._id);
+    const ownerId = String(attempt.studentId);
+
+    if (requesterId !== ownerId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to view this result",
+        errors: null,
+      });
+    }
+
+    // ✅ Results visible after evaluation only
+    if (attempt.status !== "EVALUATED") {
+      return res.status(409).json({
+        success: false,
+        message: "Result is not available yet. Attempt not evaluated.",
+        errors: null,
+      });
+    }
+
+    // ✅ Build response without exposing correct answers
+    const answers = (attempt.answers || []).map((a) => ({
+      questionId: a.questionId?._id,
+      questionText: a.questionId?.questionText,
+      type: a.questionId?.type,
+      marks: a.questionId?.marks,
+
+      // student's response
+      selectedOption: a.selectedOption ?? null,
+      textAnswer: a.textAnswer ?? null,
+
+      // evaluation output
+      marksObtained: a.marksObtained ?? 0,
+      isCorrect: a.isCorrect, // ok to show (doesn't reveal correctAnswer itself)
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Result fetched successfully",
+      data: {
+        attemptId: attempt._id,
+        testId: attempt.testId,
+        status: attempt.status,
+        totalScore: attempt.totalScore,
+        maxScore: attempt.maxScore,
+        percentage: attempt.percentage,
+        resultStatus: attempt.resultStatus,
+        submittedAt: attempt.submittedAt,
+        answers,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
