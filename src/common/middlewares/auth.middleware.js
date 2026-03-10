@@ -15,6 +15,7 @@ export const authMiddleware = (req, res, next) => {
       });
     }
 
+    
     // ✅ YOU MISSED THIS LINE
     const decoded = verifyAccessToken(token); // { id, role }
 
@@ -29,19 +30,4 @@ export const authMiddleware = (req, res, next) => {
   } catch (err) {
     return next(new AuthError("Invalid or expired token"));
   }
-};
-
-/** Role-based access control */
-export const roleMiddleware = (...allowedRoles) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return next(new AuthError("Unauthorized"));
-    }
-
-    if (!allowedRoles.includes(req.user.role)) {
-      return next(new AuthError("Forbidden"));
-    }
-
-    next();
-  };
 };
