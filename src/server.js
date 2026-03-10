@@ -2,6 +2,7 @@ import app from "./app.js";
 import env  from "./config/env.js";
 import { connectDB } from "./config/db.js";
 import logger from "./config/logger.js";
+import { startAutoSubmitJob } from "./modules/test-attempts/jobs/autoSubmitAttempts.job.js";
 
 const PORT = env.PORT || 5000;
 
@@ -10,6 +11,10 @@ const startServer = async () => {
     // Connect to MongoDB
     await connectDB();
     logger.info("MongoDB connected successfully");
+    console.log("MongoDB connected successfully");
+
+    // ✅ Start cron/background job AFTER DB is ready
+    startAutoSubmitJob();
 
     // Start Express server
     app.listen(PORT, () => {

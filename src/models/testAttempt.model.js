@@ -59,6 +59,11 @@ const testAttemptSchema = new mongoose.Schema({
         default: null,
       },
 
+      answeredAt: {
+        type: Date,
+        default: Date.now,
+      },
+
       marksObtained: {
         type: Number,
         default: 0,
@@ -89,6 +94,12 @@ const testAttemptSchema = new mongoose.Schema({
   resultStatus: {
     type: String,
     enum: ["PASS", "FAIL"],
+    default: null,
+  },
+
+  expireReason: {
+    type: String,
+    enum: ["TIME_EXPIRED", "MANUAL_SUBMIT","TIME_EXPIRED_AUTO_SUBMIT", null],
     default: null,
   },
 
