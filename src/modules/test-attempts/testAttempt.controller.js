@@ -7,6 +7,7 @@ import { saveAnswerSchema } from "./schemas/saveAnswer.schema.js";
 import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempts.service.js";
 import { manualEvaluateAttempt } from "./services/manualEvaluateAttempt.service.js";
 import { evaluateAttemptSchema } from "./schemas/evaluateAttempt.schema.js";
+import { getAttemptResult } from "./services/getAttemptResult.service.js";
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -349,6 +350,78 @@ export const evaluateAttemptController = async (req, res, next) => {
         status: result.attempt.status,
         totalScore: result.attempt.totalScore,
         percentage: result.attempt.percentage,
+        maxScore: result.attempt.maxScore,
+        resultStatus: result.attempt.resultStatus,
+      },
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const getAttemptResultController = async (req, res, next) => {
+  try {
+    const { attemptId } = req.params;
+
+    const attempt = await getAttemptResult(attemptId);
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: "Attempt not found",
+        errors: null,
+      });
+    }
+
+    // ✅ Student can view own results only
+    const requesterId = String(req.user?._id);
+    const ownerId = String(attempt.studentId);
+
+    if (requesterId !== ownerId) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to view this result",
+        errors: null,
+      });
+    }
+
+    // ✅ Results visible after evaluation only
+    if (attempt.status !== "EVALUATED") {
+      return res.status(409).json({
+        success: false,
+        message: "Result is not available yet. Attempt not evaluated.",
+        errors: null,
+      });
+    }
+
+    // ✅ Build response without exposing correct answers
+    const answers = (attempt.answers || []).map((a) => ({
+      questionId: a.questionId?._id,
+      questionText: a.questionId?.questionText,
+      type: a.questionId?.type,
+      marks: a.questionId?.marks,
+
+      // student's response
+      selectedOption: a.selectedOption ?? null,
+      textAnswer: a.textAnswer ?? null,
+
+      // evaluation output
+      marksObtained: a.marksObtained ?? 0,
+      isCorrect: a.isCorrect, // ok to show (doesn't reveal correctAnswer itself)
+    }));
+
+    return res.status(200).json({
+      success: true,
+      message: "Result fetched successfully",
+      data: {
+        attemptId: attempt._id,
+        testId: attempt.testId,
+        status: attempt.status,
+        totalScore: attempt.totalScore,
+        maxScore: attempt.maxScore,
+        percentage: attempt.percentage,
+        resultStatus: attempt.resultStatus,
+        submittedAt: attempt.submittedAt,
+        answers,
       },
     });
   } catch (err) {
