@@ -3,12 +3,8 @@ import { ZodError } from "zod";
 
 export const validate = (schema) => (req, res, next) => {
   try {
-    schema.parse({
-      body: req.body,
-      params: req.params,
-      query: req.query,
-    });
-    next();
+    req.body = schema.parse(req.body); // ✅ parse only body
+    return next();
   } catch (error) {
     if (error instanceof ZodError) {
       return res.status(400).json({
@@ -20,6 +16,6 @@ export const validate = (schema) => (req, res, next) => {
         })),
       });
     }
-    next(error);
+    return next(error);
   }
 };
