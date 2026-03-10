@@ -1,52 +1,16 @@
 import * as service from "./test.service.js";
-import Test from "../../models/test.model.js";
-
-// export async function createTest(req, res, next) {
-//   try {
-//     const test = await service.createTest(req.body, req.user);
-//     res.status(201).json({ success: true, data: test });
-//   } catch (e) {
-//     next(e);
-//   }
-// }
+import logger from "../../config/logger.js";
 
 export const createTest = async (req, res) => {
   try {
-    const data = req.body;
-
-    // 🔴 TEMP FIX: manually inject createdBy
-    const createdBy = {
-      userId: req.user?._id || req.user?.id,
-      role: req.user?.role || "IQPATH_ADMIN" || "ORGANIZATION" ||"STUDENT", // default to a valid role if missing
-    };
-
-    if (!createdBy.userId) {
+    if (!req.user?._id && !req.user?.id) {
       return res.status(401).json({
         success: false,
         message: "User not authenticated",
       });
     }
 
-    // 🔴 TEMP FIX: FORCE MANUAL MODE (no randomConfig)
-    const testDoc = {
-      title: data.title,
-      description: data.description,
-      visibility: data.visibility,
-
-      questionMode: "MANUAL",
-      questions: data.questions || [], // can be empty for now
-
-      duration: data.duration,
-      totalMarks: data.totalMarks,
-
-      scheduleType: "FIXED",
-      startTime: data.startTime,
-      endTime: data.endTime,
-
-      createdBy,
-    };
-
-    const created = await Test.create(testDoc);
+    const created = await service.createTest(req.body, req.user);
 
     return res.status(201).json({
       success: true,
@@ -54,7 +18,7 @@ export const createTest = async (req, res) => {
       data: created,
     });
   } catch (err) {
-    console.error("❌ createTest error:", err);
+    logger.error(`createTest error: ${err.message}`);
     return res.status(500).json({
       success: false,
       message: err.message,

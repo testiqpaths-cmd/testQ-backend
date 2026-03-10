@@ -1,10 +1,12 @@
 import express from "express";
 import authRoutes from "../modules/auth/auth.routes.js";
 import questionsRoutes from "../modules/questions/questions.routes.js";
+import subjectTopicRoutes from "../modules/subject-topic/subject-topic.routes.js";
 
 import testRoutes from "../modules/test-management/test.routes.js";
 // import userRoutes from "../modules/user/user.routes.js"; // future module
 import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
+import testAttemptsRoutes from "../modules/test-attempts/testAttempt.routes.js";
 
 const router = express.Router();
 
@@ -16,6 +18,7 @@ router.get("/", (req, res) => {
 // Auth routes
 router.use("/auth", authRoutes);
 router.use("/questions", questionsRoutes);
+router.use("/subject-topic", subjectTopicRoutes);
 
 // Other future routes
 // router.use("/user", userRoutes);
@@ -28,8 +31,8 @@ router.use("/questions", questionsRoutes);
 //test-series
 router.use("/test-series", testSeriesRoutes);
 
-
-
+//test-attempts
+router.use("/test-attempts",testAttemptsRoutes);
 
 
 

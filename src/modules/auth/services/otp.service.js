@@ -5,6 +5,7 @@ import {
   generateRefreshToken,
 } from "../utils/token.service.js";
 import redisClient from "../../../config/redis.js";
+import logger from "../../../config/logger.js";
 
 // ==============================
 // Rate-limit OTP requests (max 3 per 10 min)
@@ -31,7 +32,7 @@ export const saveOtp = async (userId, otp) => {
 // Verify OTP from Redis
 export const verifyOtp = async (userId, otp) => {
   const savedOtp = await redisClient.get(`otp:${userId}`);
-  console.log("Saved OTP from Redis:", savedOtp); // <-- check Redis value
+  logger.debug(`Saved OTP from Redis: ${savedOtp}`);
   if (!savedOtp) throw new Error("OTP expired or not found");
   if (savedOtp !== otp.toString()) throw new Error("Invalid OTP");
 
@@ -52,7 +53,7 @@ export const generateOtpService = async (userId) => {
   await redisClient.del(`otp:${userId}`);
 
   const otp = Math.floor(100000 + Math.random() * 900000);
-  console.log("🔥 GENERATED OTP:", otp);
+  logger.debug(`GENERATED OTP: ${otp}`);
 
   await saveOtp(userId, otp);
 
@@ -60,7 +61,7 @@ export const generateOtpService = async (userId) => {
   try {
     await sendVerifyEmail(user, otp);
   } catch (e) {
-    console.error("Email failed:", e.message);
+    logger.error(`Email failed: ${e.message}`);
   }
 
   return {
@@ -92,7 +93,7 @@ export const verifyOtpService = async (userId, otp) => {
   user.refreshToken = refreshToken;
   await user.save();
   const fresh = await User.findById(userId);
-  console.log("✅ AFTER VERIFY DB:", fresh.email, fresh.isEmailVerified);
+  logger.debug(`AFTER VERIFY DB: ${fresh.email}, isEmailVerified: ${fresh.isEmailVerified}`);
 
   return {
     user: {
