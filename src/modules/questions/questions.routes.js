@@ -3,7 +3,13 @@ import { Router } from "express";
 import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
 import { validate } from "../../common/middlewares/validate.middleware.js";
 import { upload } from "../../common/middlewares/upload.middleware.js";
-import { getAllQuestionsController , getQuestionsByUserIdController , getQuestionByIdController } from "./questions.controller.js";
+import { 
+  getAllQuestionsController, 
+  getQuestionsByUserIdController, 
+  getQuestionByIdController,
+  getQuestionsBySubjectController,
+  getQuestionsByTopicController 
+} from "./questions.controller.js";
 import {
   createQuestion,
   updateQuestion,
@@ -16,8 +22,8 @@ import { updateQuestionSchema } from "./schemas/update-question.schema.js";
 
 const router = Router();
 
-router.post("/createManual",authMiddleware, createQuestion);
-router.put("/update/:id",authMiddleware, updateQuestion);
+router.post("/createManual", authMiddleware, validate(createQuestionSchema), createQuestion);
+router.put("/update/:id", authMiddleware, validate(updateQuestionSchema), updateQuestion);
 router.delete("/delete/:id",authMiddleware, deleteQuestion);
 router.post(
   "/upload-excel",
@@ -29,5 +35,7 @@ router.post(
 router.get("/getAllQuestion", getAllQuestionsController);
 router.get("/getQuestionsByUser/:userId", getQuestionsByUserIdController);
 router.get("/getQuestionById/:questionId", getQuestionByIdController);
+router.get("/getQuestionsBySubject/:subjectId", getQuestionsBySubjectController);
+router.get("/getQuestionsByTopic/:topicId", getQuestionsByTopicController);
 
 export default router;

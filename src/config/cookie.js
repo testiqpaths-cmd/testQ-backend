@@ -4,7 +4,7 @@ export const accessCookieOptions = {
   httpOnly: true,
   secure: false,
   sameSite: env.COOKIE_SAME_SITE,
-  maxAge: 15 * 60 * 1000, // 15 minutes
+  maxAge: 7 * 24 * 60 * 60 * 1000, 
   domain: env.COOKIE_DOMAIN,
 };
 

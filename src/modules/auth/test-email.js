@@ -1,4 +1,5 @@
 import { transporter } from "./services/email.service.js"; // adjust path if needed
+import logger from "../../config/logger.js";
 
 (async () => {
   try {
@@ -9,8 +10,8 @@ import { transporter } from "./services/email.service.js"; // adjust path if nee
       html: '<h1>Your OTP is: 123456</h1>',
     });
 
-    console.log('Email sent successfully:', info.messageId);
+    logger.info(`Email sent successfully: ${info.messageId}`);
   } catch (err) {
-    console.error('Email failed:', err);
+    logger.error(`Email failed: ${err.message}`);
   }
 })();
