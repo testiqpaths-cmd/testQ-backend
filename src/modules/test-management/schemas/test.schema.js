@@ -7,19 +7,16 @@ export const createTestSchema = z
     title: z.string().min(1, "Title is required"),
     description: z.string().optional(),
 
+    subjectId: objectId,
+
     visibility: z.enum(["PUBLIC", "ORG_ONLY", "LINK_ONLY"]),
     allowedOrganizations: z.array(objectId).optional(),
 
-    questionMode: z.enum(["MANUAL", "RANDOM"]),
-    questions: z.array(objectId).optional(),
-    randomConfig: z
-      .object({
-        totalQuestions: z.number().positive(),
-        topic: z.array(z.string()).optional(),
-        difficulty: z.array(z.string()).optional(),
-        type: z.array(z.string()).optional(),
-      })
-      .optional(),
+    totalQuestions: z.number().positive("Total questions must be > 0"),
+    subjectIds: z.array(objectId).min(1, "At least one subject is required"),
+    topicIds: z.array(objectId).optional(),
+    difficulty: z.array(z.string()).optional(),
+    type: z.array(z.string()).optional(),
 
     duration: z.number().positive("Duration must be > 0"),
     totalMarks: z.number().positive("Total marks must be > 0"),
@@ -42,33 +39,6 @@ export const createTestSchema = z
         path: ["allowedOrganizations"],
         message: "ORG_ONLY requires at least one organization",
       });
-    }
-
-    /* Question mode rules */
-    if (
-      data.questionMode === "MANUAL" &&
-      (!data.questions || data.questions.length === 0)
-    ) {
-      ctx.addIssue({
-        path: ["questions"],
-        message: "MANUAL mode requires questions",
-      });
-    }
-
-    // if (data.questionMode === "RANDOM" && !data.randomConfig) {
-    //   ctx.addIssue({
-    //     path: ["randomConfig"],
-    //     message: "RANDOM mode requires randomConfig",
-    //   });
-    // }
-    // ✅ TEMP: allow RANDOM without randomConfig (for frontend integration / hardcoded questions)
-    if (data.questionMode === "RANDOM" && data.randomConfig) {
-      if (!data.randomConfig.totalQuestions) {
-        ctx.addIssue({
-          path: ["randomConfig", "totalQuestions"],
-          message: "totalQuestions is required in randomConfig",
-        });
-      }
     }
 
     /* Schedule rules */

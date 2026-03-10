@@ -14,7 +14,7 @@ import { AuthError } from "../../common/exceptions/AuthError.js";
 /** Register */
 export const registerController = async (req, res) => {
   try {
-    console.log("REGISTER BODY 👉", req.body);
+    logger.debug(`REGISTER BODY: ${JSON.stringify(req.body)}`);
     // Make sure we extract only the fields we need
     const {
       firstName,
@@ -46,7 +46,7 @@ export const registerController = async (req, res) => {
       user: { id: user._id, email: user.email, role: user.role },
     });
   } catch (err) {
-    console.error("Register error:", err);
+    logger.error(`Register error: ${err.message}`);
     res.status(400).json({
       success: false,
       message: err.message,
@@ -83,7 +83,7 @@ export const loginController = async (req, res) => {
     
   });
 }catch (err) {
-    console.error("Login error:", err);
+    logger.error(`Login error: ${err.message}`);
     res.status(401).json({ success: false, message: err.message });
   }
 };

@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import handlebars from "handlebars";
 import env from "../../../config/env.js";
+import logger from "../../../config/logger.js";
 
 // Create transporter
 export const transporter = nodemailer.createTransport({
@@ -41,7 +42,10 @@ const renderTemplate = (templateName, data) => {
 
 export const sendVerifyEmail = async (user, otp) => {
   const email = user.email || user.to;
-  if (!email) return console.error("Recipient email missing", user);
+  if (!email) {
+    logger.error(`Recipient email missing for user: ${JSON.stringify(user)}`);
+    return;
+  }
 
   try {
     await transporter.sendMail({
@@ -51,9 +55,9 @@ export const sendVerifyEmail = async (user, otp) => {
       html: `<p>Hello ${user.firstName || 'User'},</p><p>Your OTP is <b>${otp}</b> (expires in 5 minutes)</p>`,
     });
 
-    console.log("Verification email sent successfully to", email);
+    logger.info(`Verification email sent successfully to ${email}`);
   } catch (err) {
-    console.error("Failed to send OTP email:", err.message);
+    logger.error(`Failed to send OTP email: ${err.message}`);
     // Important: don't throw here to prevent 500 error
   }
 };

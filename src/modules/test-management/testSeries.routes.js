@@ -1,6 +1,7 @@
 import { Router } from "express";
-import { authMiddleware, roleMiddleware } from "../../common/middlewares/auth.middleware.js";
+import { authMiddleware} from "../../common/middlewares/auth.middleware.js";
 import loadSeries from "./middlewares/loadSeries.middleware.js";
+import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
 import mongoose from "mongoose";
 import {
   createSeries,
