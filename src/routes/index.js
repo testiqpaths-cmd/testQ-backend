@@ -6,6 +6,7 @@ import subjectTopicRoutes from "../modules/subject-topic/subject-topic.routes.js
 import testRoutes from "../modules/test-management/test.routes.js";
 // import userRoutes from "../modules/user/user.routes.js"; // future module
 import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
+import testAttemptsRoutes from "../modules/test-attempts/testAttempt.routes.js";
 
 const router = express.Router();
 
@@ -30,8 +31,8 @@ router.use("/subject-topic", subjectTopicRoutes);
 //test-series
 router.use("/test-series", testSeriesRoutes);
 
-
-
+//test-attempts
+router.use("/test-attempts",testAttemptsRoutes);
 
 
 
