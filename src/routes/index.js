@@ -8,6 +8,14 @@ import testRoutes from "../modules/test-management/test.routes.js";
 import testSeriesRoutes from "../modules/test-management/testSeries.routes.js";
 import testAttemptsRoutes from "../modules/test-attempts/testAttempt.routes.js";
 
+import testAttemptRoutes from "../modules/analytics/test-attempt/testAttempt.routes.js";
+import testStatsRoutes from "../modules/analytics/test-statistics/testStats.routes.js";
+import organizationRoutes from "../modules/analytics/organization/organization.routes.js";
+import adminRoutes from "../modules/analytics/admin-analytics/admin.routes.js";
+import timeBasedRoutes from "../modules/analytics/time-based-analytics/timeBased.routes.js";
+import studentReportRoutes from "../modules/analytics/reports/student/studentReport.routes.js";
+import orgReportRoutes from "../modules/analytics/reports/organization/orgReport.routes.js";
+import platformReportsRoutes from "../modules/analytics/reports/platform-analytics/platformReports.routes.js";
 const router = express.Router();
 
 // Health check
@@ -36,6 +44,28 @@ router.use("/test-attempts",testAttemptsRoutes);
 
 
 
+
+// testattempt
+router.use("/results",testAttemptRoutes);
+
+//testStats
+router.use("/analytics",testStatsRoutes);
+
+//Organization Analystics
+router.use("/organizations", organizationRoutes);
+
+//IQ-pathAdmin Analystics
+router.use("/admin", adminRoutes);
+
+//time-based analytics
+router.use("/trends", timeBasedRoutes);
+
+//student result report
+router.use("/reports", studentReportRoutes);
+
+router.use("/reports", orgReportRoutes);
+
+router.use("/reports", platformReportsRoutes);
 export default router;
 
 
