@@ -1,8 +1,9 @@
 import { Router } from "express";
 import {
   authMiddleware,
-  roleMiddleware,
+  
 } from "../../common/middlewares/auth.middleware.js";
+import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
 import loadTest from "./middlewares/loadTest.middleware.js";
 import schedule from "./middlewares/schedule.middleware.js";
 import visibility from "./middlewares/visibility.middleware.js";
