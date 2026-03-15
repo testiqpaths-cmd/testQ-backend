@@ -1,14 +1,15 @@
+// attemptTimer.util.js
 export const computeAttemptTiming = (attempt) => {
-  const nowMs = Date.now();
-  const endsAtMs = new Date(attempt.endsAt).getTime();
-  const remainingMs = Math.max(0, endsAtMs - nowMs);
+  const serverNow = new Date();
+  const endsAt = new Date(attempt.endsAt);
 
-  const timeOver = nowMs >= endsAtMs; // true only if clock ended
+  const remainingMs = endsAt.getTime() - serverNow.getTime();
+  const remainingSeconds = Math.max(0, Math.floor(remainingMs / 1000));
 
   return {
-    serverNow: new Date(nowMs),
+    serverNow,
     remainingMs,
-    remainingSeconds: Math.floor(remainingMs / 1000),
-    timeOver,
+    remainingSeconds,
+    expired: remainingMs <= 0,
   };
 };

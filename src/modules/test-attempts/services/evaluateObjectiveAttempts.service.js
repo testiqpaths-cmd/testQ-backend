@@ -1,6 +1,8 @@
 import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js";
 
+const PASS_PERCENTAGE = 40;
+
 export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
@@ -14,7 +16,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   if (!attempt.answers || attempt.answers.length === 0) {
     attempt.totalScore = 0;
     attempt.percentage = 0;
-    // ✅ keep it SUBMITTED so manual evaluation can happen if needed
+    // keep it SUBMITTED so manual evaluation can happen if needed
     attempt.status = "SUBMITTED";
     await attempt.save();
     return attempt;
@@ -45,14 +47,13 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       return ans;
     }
 
-    // ✅ Subjective present => needs manual eval later
     if (q.type === "SHORT" || q.type === "LONG") {
       hasSubjective = true;
     }
 
     ans.isCorrect = null;
     ans.marksObtained = ans.marksObtained ?? 0;
-    totalScore += ans.marksObtained; 
+    totalScore += ans.marksObtained;
     return ans;
   });
 
@@ -62,16 +63,14 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       ? Math.round((totalScore / attempt.maxScore) * 100)
       : 0;
 
-  // ✅ Only finalize if no subjective questions exist
   if (hasSubjective) {
-    attempt.status = "SUBMITTED";     // waiting manual eval
-    attempt.resultStatus = null;      // not final yet
+    attempt.status = "SUBMITTED";
+    attempt.resultStatus = null;
   } else {
-    attempt.status = "EVALUATED";     // ✅ SCRUM-23 done here
+    attempt.status = "EVALUATED";
     attempt.resultStatus =
       attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
   }
-
 
   await attempt.save();
   return attempt;

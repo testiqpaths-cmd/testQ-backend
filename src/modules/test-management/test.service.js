@@ -25,3 +25,7 @@ export async function updateTest(test, payload) {
 export async function deleteTest(test) {
   await test.deleteOne();
 }
+
+export const getAllTests = async () => {
+  return await Test.find().sort({ createdAt: -1 });
+};
