@@ -2,9 +2,9 @@ import express from "express";
 import { getMyResultsController } from "./testAttempt.controller.js";
 import {
   authMiddleware,
-  roleMiddleware,
+  
 } from "../../../common/middlewares/auth.middleware.js";
-
+import { roleMiddleware } from "../../../common/middlewares/role.middleware.js";
 const router = express.Router();
 
 router.get(

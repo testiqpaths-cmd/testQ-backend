@@ -4,7 +4,7 @@ const { Schema, model, Types } = mongoose;
 const testSchema = new Schema({
   title: { type: String, required: true },
   description: { type: String },
-  subjectId: { type: Types.ObjectId, ref: "Subject", required: true },
+  subjectId: { type: Types.ObjectId, ref: "Subject"},
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },

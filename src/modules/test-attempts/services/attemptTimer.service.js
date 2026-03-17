@@ -8,8 +8,14 @@ import Test from "../../../models/test.model.js";
  * if (timeElapsed >= attempt.duration) autoSubmit()
  */
 export const checkAttemptExpiry = (attempt) => {
-  if (!attempt || attempt.status !== "IN_PROGRESS") {
-    return { isExpired: false };
+  if (!attempt) {
+    return {
+      isExpired: false,
+      remainingMs: 0,
+      remainingSeconds: 0,
+      timeElapsedMs: 0,
+      now: new Date(),
+    };
   }
 
   const now = new Date();
@@ -17,13 +23,25 @@ export const checkAttemptExpiry = (attempt) => {
   const endsAt = new Date(attempt.endsAt);
 
   const timeElapsedMs = now.getTime() - startedAt.getTime();
-  const durationMs = attempt.duration * 60 * 1000; // duration is in minutes
-  const remainingMs = endsAt.getTime() - now.getTime();
+  const durationMs = attempt.duration * 60 * 1000;
+  const rawRemainingMs = endsAt.getTime() - now.getTime();
+
+  const isClosedStatus = ["SUBMITTED", "EVALUATED", "EXPIRED"].includes(
+    attempt.status
+  );
+
+  const isExpired =
+    rawRemainingMs <= 0 ||
+    timeElapsedMs >= durationMs ||
+    attempt.expireReason === "TIME_EXPIRED_AUTO_SUBMIT" ||
+    isClosedStatus;
 
   return {
-    isExpired: now >= endsAt || timeElapsedMs >= durationMs,
-    remainingMs: Math.max(0, remainingMs),
-    remainingSeconds: Math.max(0, Math.floor(remainingMs / 1000)),
+    isExpired,
+    remainingMs: isClosedStatus ? 0 : Math.max(0, rawRemainingMs),
+    remainingSeconds: isClosedStatus
+      ? 0
+      : Math.max(0, Math.floor(rawRemainingMs / 1000)),
     timeElapsedMs,
     now,
   };
@@ -35,7 +53,7 @@ export const checkAttemptExpiry = (attempt) => {
  */
 export const autoExpireAttempt = async (attempt, reason = "TIME_EXPIRED") => {
   if (!attempt) return null;
-  
+
   // Only expire if currently in progress
   if (attempt.status !== "IN_PROGRESS") {
     return attempt;
@@ -52,7 +70,10 @@ export const autoExpireAttempt = async (attempt, reason = "TIME_EXPIRED") => {
 /**
  * Auto-expire by ID
  */
-export const autoExpireAttemptById = async (attemptId, reason = "TIME_EXPIRED") => {
+export const autoExpireAttemptById = async (
+  attemptId,
+  reason = "TIME_EXPIRED"
+) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
   return autoExpireAttempt(attempt, reason);

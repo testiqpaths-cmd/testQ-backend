@@ -49,6 +49,18 @@ export async function deleteTest(req, res, next) {
 }
 
 export const getAllTests = async (req, res) => {
-  const tests = await Test.find().sort({ createdAt: -1 }); // adjust model
-  return res.json({ success: true, data: tests });
+  try {
+    const tests = await service.getAllTests();
+
+    return res.json({
+      success: true,
+      data: tests
+    });
+  } catch (err) {
+    logger.error(`getAllTests error: ${err.message}`);
+    return res.status(500).json({
+      success: false,
+      message: err.message
+    });
+  }
 };

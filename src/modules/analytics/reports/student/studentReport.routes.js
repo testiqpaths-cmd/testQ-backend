@@ -2,8 +2,9 @@ import express from "express";
 import { generateStudentReport } from "./studentReport.controller.js";
 import {
   authMiddleware,
-  roleMiddleware,
+  
 } from "../../../../common/middlewares/auth.middleware.js";
+import { roleMiddleware } from "../../../../common/middlewares/role.middleware.js";
 
 const router = express.Router();
 
