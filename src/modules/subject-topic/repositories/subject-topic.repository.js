@@ -1,6 +1,8 @@
 import Subject from "../../../models/subject.model.js";
 import Topic from "../../../models/topic.model.js";
 
+const escapeRegex = (value) => String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
 // ========== SUBJECT REPOSITORY ==========
 
 export const createSubjectRepo = (data) => Subject.create(data);
@@ -14,7 +16,17 @@ export const getSubjectByIdRepo = (id) => Subject.findById(id);
 
 export const getAllSubjectsRepo = () => Subject.find().populate("createdBy", "_id name email");
 
-export const getSubjectByNameRepo = (name) => Subject.findOne({ name });
+export const getSubjectByNameRepo = (name) => {
+  const normalizedName = String(name ?? "").trim();
+
+  if (!normalizedName) {
+    return null;
+  }
+
+  return Subject.findOne({
+    name: new RegExp(`^${escapeRegex(normalizedName)}$`, "i"),
+  });
+};
 
 // ========== TOPIC REPOSITORY ==========
 
@@ -37,4 +49,7 @@ export const getTopicsBySubjectIdRepo = (subjectId) =>
   Topic.find({ subjectId }).populate("createdBy", "_id name email");
 
 export const getTopicByNameAndSubjectRepo = (name, subjectId) =>
-  Topic.findOne({ name, subjectId });
+  Topic.findOne({
+    name: new RegExp(`^${escapeRegex(String(name ?? "").trim())}$`, "i"),
+    subjectId,
+  });

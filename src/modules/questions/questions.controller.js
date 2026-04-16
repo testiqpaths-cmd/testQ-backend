@@ -5,6 +5,15 @@ import XLSX from "xlsx";
 import Question from "../../models/question.model.js";
 import mongoose from "mongoose";
 import logger from "../../config/logger.js";
+import { validateQuestion } from "./questions.validator.js";
+import {
+  getSubjectByNameRepo,
+  getTopicByNameAndSubjectRepo,
+} from "../subject-topic/repositories/subject-topic.repository.js";
+import {
+  createSubjectService,
+  createTopicService,
+} from "../subject-topic/subject-topic.service.js";
 
 
 export const createQuestion = asyncHandler(async (req, res) => {
@@ -38,14 +47,188 @@ export const deleteQuestion = asyncHandler(async (req, res) => {
   res.json({ success: true, message: "Question deleted" });
 });
 
+const normalizeText = (value) => String(value ?? "").trim();
+
+const normalizeKey = (value) =>
+  normalizeText(value).toLowerCase().replace(/[\s_-]+/g, "");
+
+const createRowReader = (row) => {
+  const lookup = new Map(
+    Object.entries(row).map(([key, value]) => [normalizeKey(key), value])
+  );
+
+  return (aliases = []) => {
+    for (const alias of aliases) {
+      const value = lookup.get(normalizeKey(alias));
+      if (normalizeText(value)) {
+        return value;
+      }
+    }
+
+    return "";
+  };
+};
+
 const parseOptions = (value) => {
+  if (Array.isArray(value)) {
+    return value.map((option) => normalizeText(option)).filter(Boolean);
+  }
+
   if (!value) return [];
 
-  // supports: "A|B|C|D" and also "A, B, C, D"
-  const str = String(value).trim();
+  const str = normalizeText(value);
   const parts = str.includes("|") ? str.split("|") : str.split(",");
 
-  return parts.map((x) => x.trim()).filter(Boolean); // removes empty strings
+  return parts.map((option) => normalizeText(option)).filter(Boolean);
+};
+
+const normalizeQuestionType = (value) => {
+  const normalized = normalizeText(value)
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, "_");
+
+  const typeMap = {
+    MCQ: "MCQ",
+    MULTIPLE_CHOICE: "MCQ",
+    MULTIPLECHOICE: "MCQ",
+    TRUE_FALSE: "TRUE_FALSE",
+    TRUEFALSE: "TRUE_FALSE",
+    TRUE_OR_FALSE: "TRUE_FALSE",
+    SHORT: "SHORT",
+    SHORT_ANSWER: "SHORT",
+    SHORTANSWER: "SHORT",
+    LONG: "LONG",
+    LONG_ANSWER: "LONG",
+    LONGANSWER: "LONG",
+  };
+
+  return typeMap[normalized] || normalized;
+};
+
+const normalizeDifficulty = (value) => {
+  const normalized = normalizeText(value).toUpperCase();
+  const difficultyMap = {
+    EASY: "EASY",
+    MEDIUM: "MEDIUM",
+    HARD: "HARD",
+  };
+
+  return difficultyMap[normalized] || normalized;
+};
+
+const resolveSubjectId = async (value) => {
+  const subjectValue = normalizeText(value);
+
+  if (!subjectValue) {
+    return null;
+  }
+
+  if (mongoose.Types.ObjectId.isValid(subjectValue)) {
+    return subjectValue;
+  }
+
+  const subject = await getSubjectByNameRepo(subjectValue);
+  return subject?._id?.toString() ?? null;
+};
+
+const resolveOrCreateSubjectId = async (value, createdBy) => {
+  const subjectValue = normalizeText(value);
+
+  if (!subjectValue) {
+    return null;
+  }
+
+  const existingSubjectId = await resolveSubjectId(subjectValue);
+  if (existingSubjectId) {
+    return existingSubjectId;
+  }
+
+  const subject = await createSubjectService({
+    name: subjectValue,
+    description: "",
+    createdBy,
+  });
+
+  return subject?._id?.toString() ?? null;
+};
+
+const resolveTopicId = async (value, subjectId) => {
+  const topicValue = normalizeText(value);
+
+  if (!topicValue) {
+    return null;
+  }
+
+  if (mongoose.Types.ObjectId.isValid(topicValue)) {
+    return topicValue;
+  }
+
+  if (!subjectId) {
+    return null;
+  }
+
+  const topic = await getTopicByNameAndSubjectRepo(topicValue, subjectId);
+  return topic?._id?.toString() ?? null;
+};
+
+const resolveOrCreateTopicId = async (value, subjectId, createdBy) => {
+  const topicValue = normalizeText(value);
+
+  if (!topicValue || !subjectId) {
+    return null;
+  }
+
+  const existingTopicId = await resolveTopicId(topicValue, subjectId);
+  if (existingTopicId) {
+    return existingTopicId;
+  }
+
+  const topic = await createTopicService({
+    name: topicValue,
+    subjectId,
+    createdBy,
+  });
+
+  return topic?._id?.toString() ?? null;
+};
+
+const normalizeCorrectAnswer = ({ type, correctAnswer, options }) => {
+  const answer = normalizeText(correctAnswer);
+
+  if (!answer) {
+    return "";
+  }
+
+  if (type === "MCQ") {
+    const optionIndexMap = {
+      A: 0,
+      B: 1,
+      C: 2,
+      D: 3,
+      1: 0,
+      2: 1,
+      3: 2,
+      4: 3,
+    };
+
+    const selectedIndex = optionIndexMap[answer.toUpperCase()];
+    if (selectedIndex !== undefined && options[selectedIndex]) {
+      return options[selectedIndex];
+    }
+
+    const matchedOption = options.find(
+      (option) => normalizeText(option).toLowerCase() === answer.toLowerCase()
+    );
+
+    return matchedOption || answer;
+  }
+
+  if (type === "TRUE_FALSE") {
+    if (/^true$/i.test(answer)) return "TRUE";
+    if (/^false$/i.test(answer)) return "FALSE";
+  }
+
+  return answer;
 };
   
 export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
@@ -64,29 +247,131 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
 
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
 
-  const questions = rows.map((row, idx) => ({
-    __row: idx + 2,
-    subjectId: String(row.subjectId || "").trim(),
-    topicId: String(row.topicId || "").trim(),
-    questionText: String(row.questionText || "").trim(),
-    type: String(row.type || "").trim(),
-    options: parseOptions(row.options),
-    correctAnswer: String(row.correctAnswer || "").trim(),
-    marks: Number(row.marks),
-    difficulty: String(row.difficulty || "").trim(),
-  }));
+  const uploadedBy = req.user?._id;
+  const formSubjectValue = req.body.subjectId ?? req.body.subject;
+  const formTopicValue = req.body.topicId ?? req.body.topic;
+
+  const questions = [];
+  const rowErrors = [];
+
+  for (const [index, row] of rows.entries()) {
+    const read = createRowReader(row);
+
+    const rowSubjectId = await resolveOrCreateSubjectId(
+      read(["subjectId", "subject", "Subject", "Subject ID"])
+      || formSubjectValue,
+      uploadedBy
+    );
+    const subjectId = rowSubjectId;
+
+    const rowTopicId = await resolveOrCreateTopicId(
+      read(["topicId", "topic", "Topic", "Topic ID"]),
+      subjectId,
+      uploadedBy
+    );
+    const topicId = rowTopicId || (formTopicValue ? await resolveOrCreateTopicId(formTopicValue, subjectId, uploadedBy) : null);
+
+    const options = parseOptions(
+      read(["options", "Options", "answerOptions", "Answer Options"])
+    );
+
+    if (!options.length) {
+      const indexedOptions = [
+        read(["option1", "Option 1", "A"]),
+        read(["option2", "Option 2", "B"]),
+        read(["option3", "Option 3", "C"]),
+        read(["option4", "Option 4", "D"]),
+      ]
+        .map((option) => normalizeText(option))
+        .filter(Boolean);
+
+      options.push(...indexedOptions);
+    }
+
+    const type = normalizeQuestionType(read(["type", "Type", "questionType", "Question Type"]));
+    const questionText = normalizeText(
+      read(["questionText", "Question Text", "question", "Question"])
+    );
+    const marks = Number(
+      read(["marks", "Marks", "points", "Points"]) || 0
+    );
+    const difficulty = normalizeDifficulty(
+      read(["difficulty", "Difficulty"])
+    ) || "EASY";
+    const correctAnswer = normalizeCorrectAnswer({
+      type,
+      correctAnswer: read([
+        "correctAnswer",
+        "Correct Answer",
+        "answer",
+        "Answer",
+      ]),
+      options,
+    });
+
+    const rowNumber = index + 2;
+    const missingFields = [];
+
+    if (!subjectId) missingFields.push("subject");
+    if (!topicId) missingFields.push("topic");
+    if (!questionText) missingFields.push("question text");
+    if (!type) missingFields.push("question type");
+    if (!Number.isFinite(marks) || marks <= 0) missingFields.push("marks");
+
+    if (missingFields.length) {
+      rowErrors.push(`Row ${rowNumber}: missing or invalid ${missingFields.join(", ")}`);
+      continue;
+    }
+
+    const validationErrors = validateQuestion({
+      subjectId,
+      topicId,
+      questionText,
+      type,
+      options,
+      correctAnswer,
+      marks,
+      difficulty,
+    });
+
+    if (validationErrors.length) {
+      rowErrors.push(`Row ${rowNumber}: ${validationErrors.join(", ")}`);
+      continue;
+    }
+
+    questions.push({
+      __row: rowNumber,
+      subjectId,
+      topicId,
+      questionText,
+      type,
+      options,
+      correctAnswer,
+      marks,
+      difficulty,
+    });
+  }
 
   // console.log("📄 Sheet:", sheetName);
   // console.log("🧾 First 3 mapped questions:", questions.slice(0, 3));
 
+  if (!questions.length) {
+    return res.status(400).json({
+      success: false,
+      message: "No valid questions were found in the Excel file",
+      errors: rowErrors,
+    });
+  }
+
   // ✅ no auth → no user passed
   // console.log("User in request:", req.user);
-  await service.bulkUploadQuestionsService(questions,req.user);
+  await service.bulkUploadQuestionsService(questions, req.user);
   // console.log("Bulk upload complete");
 
   res.json({
     success: true,
     message: `${questions.length} questions uploaded`,
+    warnings: rowErrors.length ? rowErrors : undefined,
   });
 }catch(err){
   logger.error(`Error during bulk upload: ${err.message}`);

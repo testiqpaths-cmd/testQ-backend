@@ -1,5 +1,6 @@
 ﻿import { register as registerService } from "./auth.service.js";
 import { login as loginService } from "./auth.service.js";
+import  logger  from "../../config/logger.js";
 import {
   accessCookieOptions,
   refreshCookieOptions,
