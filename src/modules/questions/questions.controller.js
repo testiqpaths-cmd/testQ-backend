@@ -8,12 +8,18 @@ import logger from "../../config/logger.js";
 
 
 export const createQuestion = asyncHandler(async (req, res) => {
-  
   const payload = {
-    ...req.body,
+    subjectId: req.body.subjectId || req.body.topic,
+    topicId: req.body.topicId || req.body.subTopic,
+    questionText: req.body.questionText,
+    type: req.body.type,
+    options: Array.isArray(req.body.options) ? req.body.options : [],
+    correctAnswer: req.body.correctAnswer,
+    marks: req.body.marks,
+    difficulty: req.body.difficulty,
     createdBy: req.user._id,
-   
   };
+
   const question = await service.createQuestionService(payload);
 
   res.status(201).json({ success: true, data: question });

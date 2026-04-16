@@ -7,3 +7,5 @@
 2026-03-14 13:17:54:1754 error: createTest error: Test validation failed: totalQuestions: Path `totalQuestions` is required.
 2026-03-15 15:28:51:2851 error: createTest error: Test validation failed: totalQuestions: Path `totalQuestions` is required.
 2026-03-15 16:14:51:1451 error: createTest error: Test validation failed: scheduleType: Path `scheduleType` is required., totalMarks: Path `totalMarks` is required., duration: Path `duration` is required., totalQuestions: Path `totalQuestions` is required., visibility: Path `visibility` is required., title: Path `title` is required.
+2026-04-16 14:28:33:2833 error: Error during bulk upload: Question validation failed: subjectId: Cast to ObjectId failed for value "" (type string) at path "subjectId" because of "BSONError", topicId: Cast to ObjectId failed for value "" (type string) at path "topicId" because of "BSONError"
+2026-04-16 18:15:00:150 error: Error during bulk upload: Question validation failed: subjectId: Cast to ObjectId failed for value "" (type string) at path "subjectId" because of "BSONError", topicId: Cast to ObjectId failed for value "" (type string) at path "topicId" because of "BSONError"
