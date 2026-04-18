@@ -18,6 +18,13 @@ export async function createTest(data, user) {
 
 export async function updateTest(test, payload) {
   Object.assign(test, payload);
+
+  const hasFixedSchedule = Boolean(test.startTime && test.endTime);
+  if (hasFixedSchedule) {
+    test.scheduleType = "FIXED";
+    test.isPublished = true;
+  }
+
   await test.save();
   return test;
 }
@@ -28,4 +35,21 @@ export async function deleteTest(test) {
 
 export const getAllTests = async () => {
   return await Test.find().sort({ createdAt: -1 });
+};
+
+export const getMyTests = async ({ userId, search = "" }) => {
+  const filters = {
+    "createdBy.userId": userId,
+  };
+
+  if (String(search || "").trim()) {
+    filters.$or = [
+      { title: { $regex: search, $options: "i" } },
+      { description: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  return Test.find(filters)
+    .populate("subjectId", "name")
+    .sort({ createdAt: -1 });
 };

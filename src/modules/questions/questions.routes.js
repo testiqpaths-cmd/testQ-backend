@@ -15,6 +15,8 @@ import {
   updateQuestion,
   deleteQuestion,
   uploadQuestionsExcel,
+  getMyExcelBatchesController,
+  getQuestionsByExcelBatchController,
 } from "./questions.controller.js";
 
 import { createQuestionSchema } from "./schemas/create-question.schema.js";
@@ -31,6 +33,8 @@ router.post(
   upload.single("file"),
   uploadQuestionsExcel
 );
+router.get("/excel-batches/my", authMiddleware, getMyExcelBatchesController);
+router.get("/excel-batches/:batchId/questions", authMiddleware, getQuestionsByExcelBatchController);
 
 router.get("/getAllQuestion", getAllQuestionsController);
 router.get("/getQuestionsByUser/:userId", getQuestionsByUserIdController);

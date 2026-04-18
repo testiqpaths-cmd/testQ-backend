@@ -43,6 +43,12 @@ const questionSchema = new mongoose.Schema({
     ref: "User",
     required: true,
   },
+
+  excelBatchId: {
+    type: String,
+    default: null,
+    index: true,
+  },
   
   createdAt: {
     type: Date,

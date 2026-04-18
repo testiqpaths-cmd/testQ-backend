@@ -14,6 +14,7 @@ import {
   createSubjectService,
   createTopicService,
 } from "../subject-topic/subject-topic.service.js";
+import { v4 as uuidv4 } from "uuid";
 
 
 export const createQuestion = asyncHandler(async (req, res) => {
@@ -48,6 +49,17 @@ export const deleteQuestion = asyncHandler(async (req, res) => {
 });
 
 const normalizeText = (value) => String(value ?? "").trim();
+
+const normalizeQuestionTextForDuplicate = (value) =>
+  normalizeText(value).toLowerCase().replace(/\s+/g, " ");
+
+const buildQuestionDuplicateKey = ({ subjectId, topicId, type, questionText }) =>
+  [
+    String(subjectId ?? ""),
+    String(topicId ?? ""),
+    normalizeText(type).toUpperCase(),
+    normalizeQuestionTextForDuplicate(questionText),
+  ].join("|");
 
 const normalizeKey = (value) =>
   normalizeText(value).toLowerCase().replace(/[\s_-]+/g, "");
@@ -251,25 +263,46 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
   const formSubjectValue = req.body.subjectId ?? req.body.subject;
   const formTopicValue = req.body.topicId ?? req.body.topic;
 
+  const defaultSubjectId = await resolveOrCreateSubjectId(formSubjectValue, uploadedBy);
+  const defaultTopicId = defaultSubjectId
+    ? await resolveOrCreateTopicId(formTopicValue, defaultSubjectId, uploadedBy)
+    : null;
+  const hasFormDefaults = Boolean(defaultSubjectId && defaultTopicId);
+
   const questions = [];
   const rowErrors = [];
+  const excelBatchId = uuidv4();
 
   for (const [index, row] of rows.entries()) {
     const read = createRowReader(row);
 
-    const rowSubjectId = await resolveOrCreateSubjectId(
-      read(["subjectId", "subject", "Subject", "Subject ID"])
-      || formSubjectValue,
-      uploadedBy
-    );
-    const subjectId = rowSubjectId;
+    const rowSubjectRaw = read([
+      "subjectId",
+      "subject",
+      "Subject",
+      "Subject ID",
+      "subjectName",
+      "Subject Name",
+    ]);
+
+    const rowTopicRaw = read([
+      "topicId",
+      "topic",
+      "Topic",
+      "Topic ID",
+      "topicName",
+      "Topic Name",
+    ]);
+
+    const rowSubjectId = await resolveOrCreateSubjectId(rowSubjectRaw, uploadedBy);
+    const subjectId = hasFormDefaults ? defaultSubjectId : rowSubjectId || defaultSubjectId;
 
     const rowTopicId = await resolveOrCreateTopicId(
-      read(["topicId", "topic", "Topic", "Topic ID"]),
+      rowTopicRaw,
       subjectId,
       uploadedBy
     );
-    const topicId = rowTopicId || (formTopicValue ? await resolveOrCreateTopicId(formTopicValue, subjectId, uploadedBy) : null);
+    const topicId = hasFormDefaults ? defaultTopicId : rowTopicId || defaultTopicId;
 
     const options = parseOptions(
       read(["options", "Options", "answerOptions", "Answer Options"])
@@ -312,8 +345,12 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     const rowNumber = index + 2;
     const missingFields = [];
 
-    if (!subjectId) missingFields.push("subject");
-    if (!topicId) missingFields.push("topic");
+    if (!subjectId) {
+      missingFields.push("subject (provide in row or form-level subject)");
+    }
+    if (!topicId) {
+      missingFields.push("topic (provide in row or form-level topic)");
+    }
     if (!questionText) missingFields.push("question text");
     if (!type) missingFields.push("question type");
     if (!Number.isFinite(marks) || marks <= 0) missingFields.push("marks");
@@ -349,6 +386,7 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
       correctAnswer,
       marks,
       difficulty,
+      excelBatchId,
     });
   }
 
@@ -363,14 +401,82 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     });
   }
 
+  // Remove duplicates within uploaded file first.
+  const uploadSeenKeys = new Set();
+  const uniqueQuestions = [];
+
+  for (const question of questions) {
+    const duplicateKey = buildQuestionDuplicateKey(question);
+    if (uploadSeenKeys.has(duplicateKey)) {
+      rowErrors.push(
+        `Row ${question.__row}: duplicate question in uploaded file for same subject/topic/type`
+      );
+      continue;
+    }
+
+    uploadSeenKeys.add(duplicateKey);
+    uniqueQuestions.push(question);
+  }
+
+  // Skip duplicates that already exist in DB for same subject + topic + type + question text.
+  const pairKeys = [...new Set(uniqueQuestions.map((q) => `${q.subjectId}|${q.topicId}`))];
+  const pairFilters = pairKeys.map((pair) => {
+    const [subjectId, topicId] = pair.split("|");
+    return { subjectId, topicId };
+  });
+
+  const existingQuestions = pairFilters.length
+    ? await Question.find({ $or: pairFilters })
+        .select("subjectId topicId type questionText")
+        .lean()
+    : [];
+
+  const existingKeys = new Set(
+    existingQuestions.map((q) =>
+      buildQuestionDuplicateKey({
+        subjectId: q.subjectId,
+        topicId: q.topicId,
+        type: q.type,
+        questionText: q.questionText,
+      })
+    )
+  );
+
+  const questionsToInsert = [];
+
+  for (const question of uniqueQuestions) {
+    const duplicateKey = buildQuestionDuplicateKey(question);
+    if (existingKeys.has(duplicateKey)) {
+      rowErrors.push(
+        `Row ${question.__row}: question already exists for this subject/topic/type in database`
+      );
+      continue;
+    }
+
+    questionsToInsert.push(question);
+  }
+
+  if (!questionsToInsert.length) {
+    return res.status(200).json({
+      success: true,
+      message: "No new questions uploaded. All valid rows were duplicates.",
+      uploaded: 0,
+      skipped: rowErrors.length,
+      warnings: rowErrors,
+    });
+  }
+
   // ✅ no auth → no user passed
   // console.log("User in request:", req.user);
-  await service.bulkUploadQuestionsService(questions, req.user);
+  await service.bulkUploadQuestionsService(questionsToInsert, req.user);
   // console.log("Bulk upload complete");
 
   res.json({
     success: true,
-    message: `${questions.length} questions uploaded`,
+    message: `${questionsToInsert.length} questions uploaded`,
+    excelBatchId,
+    uploaded: questionsToInsert.length,
+    skipped: rowErrors.length,
     warnings: rowErrors.length ? rowErrors : undefined,
   });
 }catch(err){
@@ -381,6 +487,64 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     errors: err.message,
   });
 }
+});
+
+export const getMyExcelBatchesController = asyncHandler(async (req, res) => {
+  const userId = req.user?._id;
+
+  const batches = await Question.aggregate([
+    {
+      $match: {
+        createdBy: new mongoose.Types.ObjectId(userId),
+        excelBatchId: { $ne: null },
+      },
+    },
+    {
+      $group: {
+        _id: "$excelBatchId",
+        questionCount: { $sum: 1 },
+        uploadedAt: { $max: "$createdAt" },
+      },
+    },
+    { $sort: { uploadedAt: -1 } },
+  ]);
+
+  res.json({
+    success: true,
+    data: batches.map((item) => ({
+      batchId: item._id,
+      questionCount: item.questionCount,
+      uploadedAt: item.uploadedAt,
+    })),
+  });
+});
+
+export const getQuestionsByExcelBatchController = asyncHandler(async (req, res) => {
+  const userId = req.user?._id;
+  const { batchId } = req.params;
+  const { quantity, difficulty } = req.query;
+
+  const filters = {
+    createdBy: userId,
+    excelBatchId: batchId,
+  };
+
+  if (difficulty) {
+    filters.difficulty = String(difficulty).toUpperCase();
+  }
+
+  let query = Question.find(filters)
+    .populate("subjectId", "name")
+    .populate("topicId", "name")
+    .sort({ createdAt: -1 });
+
+  const limit = Number(quantity);
+  if (Number.isFinite(limit) && limit > 0) {
+    query = query.limit(limit);
+  }
+
+  const items = await query;
+  return res.json({ success: true, data: items });
 });
 
 export const getAllQuestionsController = async (req, res) => {

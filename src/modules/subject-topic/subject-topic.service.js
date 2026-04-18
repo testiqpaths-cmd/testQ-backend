@@ -4,12 +4,14 @@ import {
   deleteSubjectRepo,
   getSubjectByIdRepo,
   getAllSubjectsRepo,
+  getSubjectsByUserRepo,
   getSubjectByNameRepo,
   createTopicRepo,
   updateTopicRepo,
   deleteTopicRepo,
   getTopicByIdRepo,
   getAllTopicsRepo,
+  getTopicsByUserRepo,
   getTopicsBySubjectIdRepo,
   getTopicByNameAndSubjectRepo,
 } from "./repositories/subject-topic.repository.js";
@@ -46,6 +48,10 @@ export const getSubjectByIdService = async (id) => {
 
 export const getAllSubjectsService = async () => {
   return getAllSubjectsRepo();
+};
+
+export const getMySubjectsService = async (userId) => {
+  return getSubjectsByUserRepo(userId);
 };
 
 // ========== TOPIC SERVICES ==========
@@ -90,6 +96,10 @@ export const getAllTopicsService = async () => {
   return getAllTopicsRepo();
 };
 
-export const getTopicsBySubjectIdService = async (subjectId) => {
-  return getTopicsBySubjectIdRepo(subjectId);
+export const getMyTopicsService = async (userId) => {
+  return getTopicsByUserRepo(userId);
+};
+
+export const getTopicsBySubjectIdService = async (subjectId, userId = null) => {
+  return getTopicsBySubjectIdRepo(subjectId, userId);
 };

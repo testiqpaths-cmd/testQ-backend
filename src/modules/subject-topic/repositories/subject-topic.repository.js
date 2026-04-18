@@ -16,6 +16,11 @@ export const getSubjectByIdRepo = (id) => Subject.findById(id);
 
 export const getAllSubjectsRepo = () => Subject.find().populate("createdBy", "_id name email");
 
+export const getSubjectsByUserRepo = (userId) =>
+  Subject.find({ createdBy: userId })
+    .populate("createdBy", "_id name email")
+    .sort({ updatedAt: -1, createdAt: -1 });
+
 export const getSubjectByNameRepo = (name) => {
   const normalizedName = String(name ?? "").trim();
 
@@ -45,8 +50,20 @@ export const getAllTopicsRepo = () =>
     .populate("subjectId", "_id name")
     .populate("createdBy", "_id name email");
 
-export const getTopicsBySubjectIdRepo = (subjectId) =>
-  Topic.find({ subjectId }).populate("createdBy", "_id name email");
+export const getTopicsByUserRepo = (userId) =>
+  Topic.find({ createdBy: userId })
+    .populate("subjectId", "_id name")
+    .populate("createdBy", "_id name email")
+    .sort({ updatedAt: -1, createdAt: -1 });
+
+export const getTopicsBySubjectIdRepo = (subjectId, userId = null) => {
+  const filters = { subjectId };
+  if (userId) {
+    filters.createdBy = userId;
+  }
+
+  return Topic.find(filters).populate("createdBy", "_id name email");
+};
 
 export const getTopicByNameAndSubjectRepo = (name, subjectId) =>
   Topic.findOne({

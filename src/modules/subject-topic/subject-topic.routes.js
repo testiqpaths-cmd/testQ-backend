@@ -7,11 +7,13 @@ import {
   deleteSubject,
   getSubjectById,
   getAllSubjects,
+  getMySubjects,
   createTopic,
   updateTopic,
   deleteTopic,
   getTopicById,
   getAllTopics,
+  getMyTopics,
   getTopicsBySubjectId,
 } from "./subject-topic.controller.js";
 import {
@@ -44,11 +46,14 @@ router.put(
 // Delete subject
 router.delete("/subjects/:id", authMiddleware, deleteSubject);
 
+// Get current user's subjects
+router.get("/subjects/me", authMiddleware, getMySubjects);
+
 // Get subject by ID
-router.get("/subjects/:id", getSubjectById);
+router.get("/subjects/:id", authMiddleware, getSubjectById);
 
 // Get all subjects
-router.get("/subjects", getAllSubjects);
+router.get("/subjects", authMiddleware, getAllSubjects);
 
 // ========== TOPIC ROUTES ==========
 
@@ -71,13 +76,16 @@ router.put(
 // Delete topic
 router.delete("/topics/:id", authMiddleware, deleteTopic);
 
+// Get current user's topics
+router.get("/topics/me", authMiddleware, getMyTopics);
+
 // Get topic by ID
-router.get("/topics/:id", getTopicById);
+router.get("/topics/:id", authMiddleware, getTopicById);
 
 // Get all topics
-router.get("/topics", getAllTopics);
+router.get("/topics", authMiddleware, getAllTopics);
 
 // Get topics by subject ID
-router.get("/subjects/:subjectId/topics", getTopicsBySubjectId);
+router.get("/subjects/:subjectId/topics", authMiddleware, getTopicsBySubjectId);
 
 export default router;

@@ -13,6 +13,12 @@ const testSchema = new Schema({
   allowedOrganizations: [{ type: Types.ObjectId }],
   testCode: { type: String },
   totalQuestions: { type: Number, required: true },
+  questionSource: {
+    type: String,
+    enum: ["SUBJECT_TOPIC", "EXCEL"],
+    default: "SUBJECT_TOPIC",
+  },
+  excelBatchId: { type: String, default: null },
   subjectIds: [{ type: Types.ObjectId, ref: "Subject", required: true }],
   topicIds: [{ type: Types.ObjectId, ref: "Topic" }],
   difficulty: [{ type: String }],
