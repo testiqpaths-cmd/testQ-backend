@@ -27,6 +27,14 @@ const userSchema = new Schema(
       trim: true,
     },
 
+    firebaseUid: {
+      type: String,
+      unique: true,
+      sparse: true,
+      trim: true,
+      default: null,
+    },
+
     phone: {
       type: String,
       unique: true,

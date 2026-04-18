@@ -1,5 +1,6 @@
 ﻿import { register as registerService } from "./auth.service.js";
 import { login as loginService } from "./auth.service.js";
+import { firebaseAuth as firebaseAuthService } from "./auth.service.js";
 import  logger  from "../../config/logger.js";
 import {
   accessCookieOptions,
@@ -85,6 +86,44 @@ export const loginController = async (req, res) => {
   });
 }catch (err) {
     logger.error(`Login error: ${err.message}`);
+    res.status(401).json({ success: false, message: err.message });
+  }
+};
+
+/** Firebase login/register */
+export const firebaseAuthController = async (req, res) => {
+  try {
+    const { firebaseUid, email, firstName, lastName, displayName, photoURL } = req.body;
+
+    const { user, accessToken, refreshToken } = await firebaseAuthService({
+      firebaseUid,
+      email,
+      firstName,
+      lastName,
+      displayName,
+      photoURL,
+    });
+
+    res
+      .cookie("accessToken", accessToken, accessCookieOptions)
+      .cookie("refreshToken", refreshToken, refreshCookieOptions)
+      .status(200)
+      .json({
+        success: true,
+        message: "Firebase authentication successful",
+        accessToken,
+        refreshToken,
+        user: {
+          id: user._id,
+          email: user.email,
+          role: user.role,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          firebaseUid: user.firebaseUid,
+        },
+      });
+  } catch (err) {
+    logger.error(`Firebase auth error: ${err.message}`);
     res.status(401).json({ success: false, message: err.message });
   }
 };
