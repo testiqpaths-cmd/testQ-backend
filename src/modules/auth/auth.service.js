@@ -10,11 +10,44 @@ import {generateAccessToken,generateRefreshToken,} from "../../modules/auth/util
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { passwordService } from "./services/password.service.js";
 
+const normalizeRequiredString = (value) => {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+};
+
+const normalizeOptionalString = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const trimmed = String(value).trim();
+  return trimmed || undefined;
+};
+
+const normalizeEmail = (value) => normalizeRequiredString(value).toLowerCase();
+
+const sanitizeUserCreatePayload = (payload) => {
+  const sanitized = {
+    ...payload,
+    firstName: normalizeRequiredString(payload.firstName),
+    lastName: normalizeOptionalString(payload.lastName),
+    email: normalizeEmail(payload.email),
+    phone: normalizeOptionalString(payload.phone),
+    firebaseUid: normalizeOptionalString(payload.firebaseUid),
+  };
+
+  if (!sanitized.lastName) delete sanitized.lastName;
+  if (!sanitized.phone) delete sanitized.phone;
+  if (!sanitized.firebaseUid) delete sanitized.firebaseUid;
+
+  return sanitized;
+};
+
 
 
 /** Register user */
 export const register = async (userData) => {
-  const { firstName, lastName, email, password } = userData;
+  const firstName = normalizeRequiredString(userData?.firstName);
+  const lastName = normalizeOptionalString(userData?.lastName);
+  const email = normalizeEmail(userData?.email);
+  const password = normalizeRequiredString(userData?.password);
 
   if (!firstName || !lastName || !email || !password) {
     throw new AuthError(
@@ -29,23 +62,37 @@ export const register = async (userData) => {
 
   const hashedPassword = await passwordService.hash(password);
 
-  const user = await createUser({
+  const user = await createUser(sanitizeUserCreatePayload({
     ...userData,
+    firstName,
+    lastName,
+    email,
     password: hashedPassword,
     isEmailVerified: true,
-  });
+  }));
 
-  return user;
+  return {
+    user,
+    accessToken: generateAccessToken({ id: user._id, role: user.role }),
+    refreshToken: generateRefreshToken({ id: user._id, role: user.role }),
+  };
 };
 
 
 
 //login
 export const login = async ({ email, password }) => {
-  const user = await findUserByEmail(email);
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedPassword = normalizeRequiredString(password);
+
+  if (!normalizedEmail || !normalizedPassword) {
+    throw new AuthError("Invalid credentials");
+  }
+
+  const user = await findUserByEmail(normalizedEmail);
   if (!user) throw new AuthError("Invalid credentials");
 
-  const isMatch = await bcrypt.compare(password, user.password);
+  const isMatch = await bcrypt.compare(normalizedPassword, user.password);
   if (!isMatch) throw new AuthError("Invalid credentials");
 
   return {
@@ -63,33 +110,47 @@ export const firebaseAuth = async ({
   displayName,
   photoURL,
 }) => {
-  if (!firebaseUid || !email) {
+  const normalizedFirebaseUid = normalizeRequiredString(firebaseUid);
+  const normalizedEmail = normalizeEmail(email);
+
+  if (!normalizedFirebaseUid || !normalizedEmail) {
     throw new AuthError("firebaseUid and email are required");
   }
 
-  let user = await findUserByFirebaseUid(firebaseUid);
+  let user = await findUserByFirebaseUid(normalizedFirebaseUid);
   if (!user) {
-    user = await findUserByEmail(email);
+    user = await findUserByEmail(normalizedEmail);
   }
 
   if (!user) {
     const [derivedFirstName = "Student", ...rest] = (displayName || "").trim().split(" ");
     const derivedLastName = rest.join(" ");
-    const randomPassword = `${firebaseUid}:${Date.now()}`;
+    const randomPassword = `${normalizedFirebaseUid}:${Date.now()}`;
     const hashedPassword = await passwordService.hash(randomPassword);
 
     user = await createUser({
+      ...sanitizeUserCreatePayload({
       firstName: firstName || derivedFirstName || "Student",
       lastName: lastName || derivedLastName || "",
-      email,
+      email: normalizedEmail,
       password: hashedPassword,
       role: "STUDENT",
-      firebaseUid,
+      firebaseUid: normalizedFirebaseUid,
       isEmailVerified: true,
       emailVerifiedAt: new Date(),
       status: "ACTIVE",
+      }),
     });
   } else {
+    if (
+      user.firebaseUid &&
+      String(user.firebaseUid).trim() !== normalizedFirebaseUid
+    ) {
+      throw new AuthError(
+        "This email is already linked to another Firebase account",
+      );
+    }
+
     const updates = {
       role: "STUDENT",
       isEmailVerified: true,
@@ -98,7 +159,7 @@ export const firebaseAuth = async ({
     };
 
     if (!user.firebaseUid) {
-      updates.firebaseUid = firebaseUid;
+      updates.firebaseUid = normalizedFirebaseUid;
     }
 
     if (!user.firstName && (firstName || displayName)) {
@@ -107,6 +168,14 @@ export const firebaseAuth = async ({
 
     if (!user.lastName && lastName) {
       updates.lastName = lastName;
+    }
+
+    updates.firebaseUid = normalizeOptionalString(updates.firebaseUid);
+    updates.firstName = normalizeOptionalString(updates.firstName) || user.firstName;
+    updates.lastName = normalizeOptionalString(updates.lastName) || user.lastName;
+
+    if (!updates.firebaseUid) {
+      delete updates.firebaseUid;
     }
 
     user = await User.findByIdAndUpdate(user._id, updates, { new: true });

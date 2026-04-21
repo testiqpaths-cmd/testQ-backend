@@ -11,6 +11,7 @@ import {
   generateAccessToken,
 } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
+import { findUserById } from "./repositories/auth.repository.js";
 
 
 /** Register */
@@ -30,7 +31,7 @@ export const registerController = async (req, res) => {
     } = req.body;
 
     // Call service with clean data
-    const user = await registerService({
+    const { user, accessToken, refreshToken } = await registerService({
       firstName,
       lastName,
       email,
@@ -41,12 +42,18 @@ export const registerController = async (req, res) => {
       organizationId,
     });
 
-    // Set cookies and respond
-    res.status(201).json({
-      success: true,
-      message: "Registration successful. You can now login.",
-      user: { id: user._id, email: user.email, role: user.role },
-    });
+    res
+      .set("Authorization", `Bearer ${accessToken}`)
+      .cookie("accessToken", accessToken, accessCookieOptions)
+      .cookie("refreshToken", refreshToken, refreshCookieOptions)
+      .status(201)
+      .json({
+        success: true,
+        message: "Registration successful",
+        accessToken,
+        refreshToken,
+        user: { id: user._id, email: user.email, role: user.role },
+      });
   } catch (err) {
     logger.error(`Register error: ${err.message}`);
     res.status(400).json({
@@ -71,12 +78,15 @@ export const loginController = async (req, res) => {
 
     // Set cookies
     res
+      .set("Authorization", `Bearer ${accessToken}`)
       .cookie("accessToken", accessToken, accessCookieOptions)
       .cookie("refreshToken", refreshToken, refreshCookieOptions)
       .status(200)
       .json({
         success: true,
         message: "Login successful",
+        accessToken,
+        refreshToken,
         user: {
           id: user._id,
           email: user.email,
@@ -105,6 +115,7 @@ export const firebaseAuthController = async (req, res) => {
     });
 
     res
+      .set("Authorization", `Bearer ${accessToken}`)
       .cookie("accessToken", accessToken, accessCookieOptions)
       .cookie("refreshToken", refreshToken, refreshCookieOptions)
       .status(200)
@@ -140,8 +151,10 @@ export const refreshTokenController = (req, res) => {
       role: decoded.role,
     });
 
-    res.cookie("accessToken", newAccessToken, accessCookieOptions);
-    res.json({ message: "Access token refreshed" });
+    res
+      .set("Authorization", `Bearer ${newAccessToken}`)
+      .cookie("accessToken", newAccessToken, accessCookieOptions)
+      .json({ message: "Access token refreshed", accessToken: newAccessToken });
   } catch (err) {
     if (err.name === "TokenExpiredError")
       return res.status(401).json({ message: "Refresh token expired" });
@@ -162,7 +175,7 @@ export const logoutController = (req, res) => {
 /** /me - get current user */
 export const meController = async (req, res) => {
   try {
-    const user = await authRepository.findById(req.user.id);
+    const user = await findUserById(req.user._id);
     if (!user) throw new AuthError("User not found");
     res.json({ id: user.id, email: user.email, role: user.role });
   } catch (err) {

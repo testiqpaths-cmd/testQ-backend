@@ -1,6 +1,5 @@
 // src/database/models/user.model.js
 import mongoose from "mongoose";
-import { optional } from "zod";
 
 const { Schema, model } = mongoose;
 
@@ -15,7 +14,7 @@ const userSchema = new Schema(
 
     lastName: {
       type: String,
-      required: optional,
+      required: false,
       trim: true,
     },
 
@@ -29,16 +28,11 @@ const userSchema = new Schema(
 
     firebaseUid: {
       type: String,
-      unique: true,
-      sparse: true,
       trim: true,
-      default: null,
     },
 
     phone: {
       type: String,
-      unique: true,
-      sparse: true, // allows null values
     },
 
     password: {
@@ -138,6 +132,27 @@ const userSchema = new Schema(
   },
   {
     timestamps: true,
+  },
+);
+
+// Only enforce uniqueness when value is present and non-empty.
+userSchema.index(
+  { firebaseUid: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      firebaseUid: { $exists: true, $type: "string", $ne: "" },
+    },
+  },
+);
+
+userSchema.index(
+  { phone: 1 },
+  {
+    unique: true,
+    partialFilterExpression: {
+      phone: { $exists: true, $type: "string", $ne: "" },
+    },
   },
 );
 
