@@ -5,7 +5,6 @@ const subjectSchema = new mongoose.Schema({
     type: String,
     required: true,
     trim: true,
-    unique: true,
   },
   description: {
     type: String,
@@ -25,5 +24,8 @@ const subjectSchema = new mongoose.Schema({
     default: Date.now,
   },
 });
+
+// Subject name should be unique per creator, not globally.
+subjectSchema.index({ name: 1, createdBy: 1 }, { unique: true });
 
 export default mongoose.model("Subject", subjectSchema);

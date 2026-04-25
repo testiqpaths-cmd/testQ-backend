@@ -4,8 +4,14 @@ import { AuthError } from "../exceptions/AuthError.js";
 /** Protect routes */
 export const authMiddleware = (req, res, next) => {
   try {
-    // cookie token (your frontend uses withCredentials)
-    const token = req.cookies?.accessToken;
+    const authHeader = req.headers?.authorization || req.headers?.Authorization;
+    const headerToken =
+      typeof authHeader === "string" && authHeader.startsWith("Bearer ")
+        ? authHeader.slice(7).trim()
+        : null;
+
+    // Header first, then cookie fallback.
+    const token = headerToken || req.cookies?.accessToken;
 
     if (!token) {
       return res.status(401).json({
@@ -16,14 +22,12 @@ export const authMiddleware = (req, res, next) => {
     }
 
     
-    // ✅ YOU MISSED THIS LINE
     const decoded = verifyAccessToken(token); // { id, role }
 
-    // ✅ normalize user object
     req.user = {
       _id: decoded.id,
       role: decoded.role,
-      Id: decoded.organizationId ?? null,
+      organizationId: decoded.organizationId ?? null,
     };
 
     next();

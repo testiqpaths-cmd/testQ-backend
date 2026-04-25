@@ -18,7 +18,7 @@ export const createSubject = asyncHandler(async (req, res) => {
     createdBy: req.user._id,
   };
   const subject = await subjectTopicService.createSubjectService(payload);
-  res.status(201).json({ success: true, data: subject });
+  res.status(201).json({ success: true, data: subject, message: "Subject created successfully" });
 });
 
 export const updateSubject = asyncHandler(async (req, res) => {

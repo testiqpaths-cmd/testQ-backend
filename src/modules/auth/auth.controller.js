@@ -9,8 +9,10 @@ import {
 import {
   verifyRefreshToken,
   generateAccessToken,
+  generateRefreshToken,
 } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
+import { findUserById } from "./repositories/auth.repository.js";
 
 
 /** Register */
@@ -30,7 +32,7 @@ export const registerController = async (req, res) => {
     } = req.body;
 
     // Call service with clean data
-    const user = await registerService({
+    const { user, accessToken, refreshToken } = await registerService({
       firstName,
       lastName,
       email,
@@ -41,12 +43,18 @@ export const registerController = async (req, res) => {
       organizationId,
     });
 
-    // Set cookies and respond
-    res.status(201).json({
-      success: true,
-      message: "Registration successful. You can now login.",
-      user: { id: user._id, email: user.email, role: user.role },
-    });
+    res
+      .set("Authorization", `Bearer ${accessToken}`)
+      .cookie("accessToken", accessToken, accessCookieOptions)
+      .cookie("refreshToken", refreshToken, refreshCookieOptions)
+      .status(201)
+      .json({
+        success: true,
+        message: "Registration successful",
+        accessToken,
+        refreshToken,
+        user: { id: user._id, email: user.email, role: user.role },
+      });
   } catch (err) {
     logger.error(`Register error: ${err.message}`);
     res.status(400).json({
@@ -71,12 +79,15 @@ export const loginController = async (req, res) => {
 
     // Set cookies
     res
+      .set("Authorization", `Bearer ${accessToken}`)
       .cookie("accessToken", accessToken, accessCookieOptions)
       .cookie("refreshToken", refreshToken, refreshCookieOptions)
       .status(200)
       .json({
         success: true,
         message: "Login successful",
+        accessToken,
+        refreshToken,
         user: {
           id: user._id,
           email: user.email,
@@ -105,6 +116,7 @@ export const firebaseAuthController = async (req, res) => {
     });
 
     res
+      .set("Authorization", `Bearer ${accessToken}`)
       .cookie("accessToken", accessToken, accessCookieOptions)
       .cookie("refreshToken", refreshToken, refreshCookieOptions)
       .status(200)
@@ -129,19 +141,35 @@ export const firebaseAuthController = async (req, res) => {
 };
 
 /** Refresh token */
-export const refreshTokenController = (req, res) => {
+export const refreshTokenController = async (req, res) => {
   try {
     const refreshToken = req.cookies.refreshToken;
     if (!refreshToken) throw new AuthError("Refresh token missing");
 
     const decoded = verifyRefreshToken(refreshToken);
+    const userId = decoded.id;
+
+    const user = await findUserById(userId);
+    if (!user) throw new AuthError("User not found");
+
     const newAccessToken = generateAccessToken({
-      id: decoded.id,
-      role: decoded.role,
+      id: user._id,
+      role: user.role,
+    });
+    const newRefreshToken = generateRefreshToken({
+      id: user._id,
+      role: user.role,
     });
 
-    res.cookie("accessToken", newAccessToken, accessCookieOptions);
-    res.json({ message: "Access token refreshed" });
+    res
+      .set("Authorization", `Bearer ${newAccessToken}`)
+      .cookie("accessToken", newAccessToken, accessCookieOptions)
+      .cookie("refreshToken", newRefreshToken, refreshCookieOptions)
+      .json({
+        message: "Access token refreshed",
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      });
   } catch (err) {
     if (err.name === "TokenExpiredError")
       return res.status(401).json({ message: "Refresh token expired" });
@@ -162,7 +190,7 @@ export const logoutController = (req, res) => {
 /** /me - get current user */
 export const meController = async (req, res) => {
   try {
-    const user = await authRepository.findById(req.user.id);
+    const user = await findUserById(req.user._id);
     if (!user) throw new AuthError("User not found");
     res.json({ id: user.id, email: user.email, role: user.role });
   } catch (err) {
