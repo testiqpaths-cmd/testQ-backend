@@ -15,27 +15,43 @@ import {
   getTopicsBySubjectIdRepo,
   getTopicByNameAndSubjectRepo,
 } from "./repositories/subject-topic.repository.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
 
 // ========== SUBJECT SERVICES ==========
 
 export const createSubjectService = async (payload) => {
   // Check if subject already exists
-  const existingSubject = await getSubjectByNameRepo(payload.name);
+  const existingSubject = await getSubjectByNameRepo(payload.name, payload.createdBy);
   if (existingSubject) {
-    throw new Error("Subject already exists with this name");
+    throw new ApiError(409, "Subject already exists with this name");
   }
-  return createSubjectRepo(payload);
+  try {
+    return await createSubjectRepo(payload);
+  } catch (error) {
+    if (error?.code === 11000) {
+      throw new ApiError(409, "Subject already exists with this name");
+    }
+    throw error;
+  }
 };
 
 export const updateSubjectService = async (id, payload) => {
   // If name is being updated, check if it already exists
   if (payload.name) {
-    const existingSubject = await getSubjectByNameRepo(payload.name);
+    const subject = await getSubjectByIdRepo(id);
+    const existingSubject = await getSubjectByNameRepo(payload.name, subject?.createdBy);
     if (existingSubject && existingSubject._id.toString() !== id) {
-      throw new Error("Subject already exists with this name");
+      throw new ApiError(409, "Subject already exists with this name");
     }
   }
-  return updateSubjectRepo(id, payload);
+  try {
+    return await updateSubjectRepo(id, payload);
+  } catch (error) {
+    if (error?.code === 11000) {
+      throw new ApiError(409, "Subject already exists with this name");
+    }
+    throw error;
+  }
 };
 
 export const deleteSubjectService = async (id) => {
@@ -63,9 +79,16 @@ export const createTopicService = async (payload) => {
     payload.subjectId
   );
   if (existingTopic) {
-    throw new Error("Topic already exists with this name in the subject");
+    throw new ApiError(409, "Topic already exists with this name in the subject");
   }
-  return createTopicRepo(payload);
+  try {
+    return await createTopicRepo(payload);
+  } catch (error) {
+    if (error?.code === 11000) {
+      throw new ApiError(409, "Topic already exists with this name in the subject");
+    }
+    throw error;
+  }
 };
 
 export const updateTopicService = async (id, payload) => {
@@ -78,10 +101,17 @@ export const updateTopicService = async (id, payload) => {
       subjectId
     );
     if (existingTopic && existingTopic._id.toString() !== id) {
-      throw new Error("Topic already exists with this name in the subject");
+      throw new ApiError(409, "Topic already exists with this name in the subject");
     }
   }
-  return updateTopicRepo(id, payload);
+  try {
+    return await updateTopicRepo(id, payload);
+  } catch (error) {
+    if (error?.code === 11000) {
+      throw new ApiError(409, "Topic already exists with this name in the subject");
+    }
+    throw error;
+  }
 };
 
 export const deleteTopicService = async (id) => {

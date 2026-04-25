@@ -21,16 +21,22 @@ export const getSubjectsByUserRepo = (userId) =>
     .populate("createdBy", "_id name email")
     .sort({ updatedAt: -1, createdAt: -1 });
 
-export const getSubjectByNameRepo = (name) => {
+export const getSubjectByNameRepo = (name, userId = null) => {
   const normalizedName = String(name ?? "").trim();
 
   if (!normalizedName) {
     return null;
   }
 
-  return Subject.findOne({
+  const filters = {
     name: new RegExp(`^${escapeRegex(normalizedName)}$`, "i"),
-  });
+  };
+
+  if (userId) {
+    filters.createdBy = userId;
+  }
+
+  return Subject.findOne(filters);
 };
 
 // ========== TOPIC REPOSITORY ==========

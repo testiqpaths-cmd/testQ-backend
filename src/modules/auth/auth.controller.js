@@ -9,6 +9,7 @@ import {
 import {
   verifyRefreshToken,
   generateAccessToken,
+  generateRefreshToken,
 } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { findUserById } from "./repositories/auth.repository.js";
@@ -140,21 +141,35 @@ export const firebaseAuthController = async (req, res) => {
 };
 
 /** Refresh token */
-export const refreshTokenController = (req, res) => {
+export const refreshTokenController = async (req, res) => {
   try {
     const refreshToken = req.cookies.refreshToken;
     if (!refreshToken) throw new AuthError("Refresh token missing");
 
     const decoded = verifyRefreshToken(refreshToken);
+    const userId = decoded.id;
+
+    const user = await findUserById(userId);
+    if (!user) throw new AuthError("User not found");
+
     const newAccessToken = generateAccessToken({
-      id: decoded.id,
-      role: decoded.role,
+      id: user._id,
+      role: user.role,
+    });
+    const newRefreshToken = generateRefreshToken({
+      id: user._id,
+      role: user.role,
     });
 
     res
       .set("Authorization", `Bearer ${newAccessToken}`)
       .cookie("accessToken", newAccessToken, accessCookieOptions)
-      .json({ message: "Access token refreshed", accessToken: newAccessToken });
+      .cookie("refreshToken", newRefreshToken, refreshCookieOptions)
+      .json({
+        message: "Access token refreshed",
+        accessToken: newAccessToken,
+        refreshToken: newRefreshToken,
+      });
   } catch (err) {
     if (err.name === "TokenExpiredError")
       return res.status(401).json({ message: "Refresh token expired" });
