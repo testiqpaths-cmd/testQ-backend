@@ -3,6 +3,27 @@ import Question from "../../../models/question.model.js";
 
 const PASS_PERCENTAGE = 40;
 
+const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
+
+const resolveStudentAnswer = (answer, snapshot) => {
+  if (answer?.selectedOption !== undefined && answer?.selectedOption !== null) {
+    const selectedOption = answer.selectedOption;
+
+    if (Number.isInteger(selectedOption) && Array.isArray(snapshot?.options)) {
+      return snapshot.options[selectedOption] ?? null;
+    }
+
+    const numericIndex = Number(selectedOption);
+    if (Number.isInteger(numericIndex) && Array.isArray(snapshot?.options)) {
+      return snapshot.options[numericIndex] ?? null;
+    }
+
+    return selectedOption;
+  }
+
+  return answer?.textAnswer ?? null;
+};
+
 export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
@@ -28,17 +49,24 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   );
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
+  const snapshotMap = new Map(
+    (attempt.questionSnapshots || []).map((snapshot) => [
+      snapshot.questionId.toString(),
+      snapshot,
+    ]),
+  );
 
   let totalScore = 0;
   let hasSubjective = false;
 
   attempt.answers = attempt.answers.map((ans) => {
-    const q = qMap.get(ans.questionId.toString());
+    const snapshot = snapshotMap.get(ans.questionId.toString());
+    const q = snapshot || qMap.get(ans.questionId.toString());
     if (!q) return ans;
 
     if (q.type === "MCQ" || q.type === "TRUE_FALSE") {
-      const studentAnswer = ans.selectedOption ?? ans.textAnswer;
-      const isCorrect = studentAnswer === q.correctAnswer;
+      const studentAnswer = resolveStudentAnswer(ans, snapshot || q);
+      const isCorrect = normalizeValue(studentAnswer) === normalizeValue(q.correctAnswer);
 
       ans.isCorrect = isCorrect;
       ans.marksObtained = isCorrect ? (q.marks || 0) : 0;

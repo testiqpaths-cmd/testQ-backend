@@ -1,5 +1,6 @@
-import TestSeries from "../../models/testSeries.model.js";
+import mongoose from "mongoose";
 import crypto from "crypto";
+import TestSeries from "../../models/testSeries.model.js";
 import logger from "../../config/logger.js";
 
 
@@ -14,7 +15,7 @@ export const createSeries = async (data, user) => {
     ...data,
     seriesCode,
     createdBy: {
-      userId: new mongoose.Types.ObjectId(req.user._id),   // ✅ FIXED
+      userId: new mongoose.Types.ObjectId(user._id || user.id),
       role: user.role,
     },
   });
@@ -28,3 +29,18 @@ export const deleteSeries = (id) =>
 
 export const getSeriesById = (id) =>
   TestSeries.findById(id).populate("tests");
+
+export const getSeriesList = async ({ userId, search = "" } = {}) => {
+  const filters = userId ? { "createdBy.userId": userId } : {};
+
+  if (String(search || "").trim()) {
+    filters.$or = [
+      { title: { $regex: search, $options: "i" } },
+      { description: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  return TestSeries.find(filters)
+    .populate({ path: "tests", select: "title totalQuestions duration visibility createdAt" })
+    .sort({ createdAt: -1 });
+};

@@ -8,6 +8,30 @@ import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempt
 import { manualEvaluateAttempt } from "./services/manualEvaluateAttempt.service.js";
 import { evaluateAttemptSchema } from "./schemas/evaluateAttempt.schema.js";
 import { getAttemptResult } from "./services/getAttemptResult.service.js";
+import {
+  normalizeAttemptQuestion,
+  selectAttemptQuestions,
+} from "./services/questionSelection.service.js";
+
+const canStartTest = (test, user) => {
+  if (!test || !user) return false;
+
+  if (test.visibility === "PUBLIC") return true;
+  if (test.visibility === "LINK_ONLY") return true;
+
+  if (test.visibility === "ORG_ONLY") {
+    const userOrganizationId = String(user.organizationId || "");
+    if (!userOrganizationId) return false;
+
+    const allowedOrganizations = Array.isArray(test.allowedOrganizations)
+      ? test.allowedOrganizations.map((id) => String(id))
+      : [];
+
+    return allowedOrganizations.length === 0 || allowedOrganizations.includes(userOrganizationId);
+  }
+
+  return false;
+};
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -28,9 +52,8 @@ export const startTestAttemptController = async (req, res, next) => {
         .json({ success: false, message: "Test not found" });
     }
 
-    // 2) Validate visibility (adapt to your rules)
-    // Example: only PUBLIC can be started directly
-    if (test.visibility !== "PUBLIC") {
+    // 2) Validate visibility and organization access
+    if (!canStartTest(test, req.user)) {
       return res.status(403).json({
         success: false,
         message: "You are not allowed to start this test",
@@ -73,6 +96,15 @@ export const startTestAttemptController = async (req, res, next) => {
       });
     }
 
+    const { questionSnapshots, questions } = await selectAttemptQuestions(test);
+
+    if (!questionSnapshots.length) {
+      return res.status(400).json({
+        success: false,
+        message: "No eligible questions were found for this test",
+      });
+    }
+
     // 5) Copy duration & marks server-side
     const duration = Number(test.duration); // minutes (recommended)
     const maxScore = Number(test.totalMarks);
@@ -104,6 +136,7 @@ export const startTestAttemptController = async (req, res, next) => {
       endsAt,
       duration,
       maxScore,
+      questionSnapshots,
       status: "IN_PROGRESS",
       answers: [],
     });
@@ -121,6 +154,7 @@ export const startTestAttemptController = async (req, res, next) => {
         endsAt: attempt.endsAt,
         duration: attempt.duration,
         maxScore: attempt.maxScore,
+        questions,
         timing, // ✅ backend remaining time
       },
     });
@@ -141,12 +175,24 @@ export const getAttemptController = async (req, res, next) => {
   try {
     const attempt = req.attempt;
     const timing = req.timing;
+    const test = await Test.findById(attempt.testId).select("title duration").lean();
+
+    const questions = Array.isArray(attempt.questionSnapshots)
+      ? attempt.questionSnapshots.map((snapshot) => normalizeAttemptQuestion(snapshot))
+      : [];
 
     // Return timing and attempt status to frontend
     return res.json({
       success: true,
       message: "Attempt retrieved",
       data: {
+        test: test
+          ? {
+              _id: attempt.testId,
+              title: test.title,
+              duration: test.duration,
+            }
+          : null,
         attempt: {
           _id: attempt._id,
           testId: attempt.testId,
@@ -163,6 +209,7 @@ export const getAttemptController = async (req, res, next) => {
           percentage: attempt.percentage,
           resultStatus: attempt.resultStatus,
         },
+        questions,
         timing: {
           remainingSeconds: timing.remainingSeconds,
           remainingMs: timing.remainingMs,
@@ -203,6 +250,30 @@ export const saveAnswerController = async (req, res, next) => {
     // ✅ Validate request body
     const parsed = saveAnswerSchema.parse(req.body);
     const questionId = new mongoose.Types.ObjectId(parsed.questionId);
+    const timeSpentMs = Number(parsed.timeSpentMs || 0);
+
+    const snapshotIndex = Array.isArray(attempt.questionSnapshots)
+      ? attempt.questionSnapshots.findIndex(
+          (item) => item.questionId.toString() === questionId.toString(),
+        )
+      : -1;
+
+    if (snapshotIndex === -1) {
+      return res.status(404).json({
+        success: false,
+        message: "Question is not part of this attempt",
+        errors: null,
+      });
+    }
+
+    const snapshot = attempt.questionSnapshots[snapshotIndex];
+    if (Number.isFinite(timeSpentMs) && timeSpentMs > 0) {
+      snapshot.timeSpentMs = (snapshot.timeSpentMs || 0) + timeSpentMs;
+      snapshot.lastViewedAt = new Date();
+      if (!snapshot.startedAt) {
+        snapshot.startedAt = snapshot.lastViewedAt;
+      }
+    }
 
     // ✅ Upsert by questionId (no duplicates)
     const idx = attempt.answers.findIndex(
@@ -214,16 +285,24 @@ export const saveAnswerController = async (req, res, next) => {
       selectedOption: parsed.selectedOption ?? null,
       textAnswer: parsed.textAnswer ?? null,
       answeredAt: new Date(),
+      timeSpentMs: Number.isFinite(timeSpentMs) ? timeSpentMs : 0,
     };
 
-    if (idx >= 0) {
-      // update existing entry
-      attempt.answers[idx].selectedOption = updatedAnswer.selectedOption;
-      attempt.answers[idx].textAnswer = updatedAnswer.textAnswer;
-      attempt.answers[idx].answeredAt = updatedAnswer.answeredAt;
-    } else {
-      // add new entry
-      attempt.answers.push(updatedAnswer);
+    if (parsed.selectedOption !== undefined || parsed.textAnswer !== undefined) {
+      updatedAnswer.timeSpentMs = snapshot.timeSpentMs || updatedAnswer.timeSpentMs;
+
+      if (idx >= 0) {
+        // update existing entry
+        attempt.answers[idx].selectedOption = updatedAnswer.selectedOption;
+        attempt.answers[idx].textAnswer = updatedAnswer.textAnswer;
+        attempt.answers[idx].answeredAt = updatedAnswer.answeredAt;
+        attempt.answers[idx].timeSpentMs = updatedAnswer.timeSpentMs;
+      } else {
+        // add new entry
+        attempt.answers.push(updatedAnswer);
+      }
+    } else if (idx >= 0) {
+      attempt.answers[idx].timeSpentMs = snapshot.timeSpentMs || attempt.answers[idx].timeSpentMs || 0;
     }
 
     await attempt.save();
@@ -234,6 +313,7 @@ export const saveAnswerController = async (req, res, next) => {
       data: {
         attemptId: attempt._id,
         questionId: parsed.questionId,
+        timeSpentMs: snapshot.timeSpentMs || 0,
         timing: req.timing,
       },
     });
@@ -305,6 +385,9 @@ export const submitAttemptController = async (req, res, next) => {
       success: true,
       message: "Test submitted successfully",
       data: {
+        attemptId: attempt._id.toString(),
+        testId: attempt.testId,
+        resultId: attempt._id.toString(), // ✅ attemptId IS the result
         status: evaluatedAttempt?.status || "SUBMITTED",
         submittedAt: evaluatedAttempt?.submittedAt || attempt.submittedAt,
         totalScore: evaluatedAttempt?.totalScore ?? 0,
@@ -359,6 +442,75 @@ export const evaluateAttemptController = async (req, res, next) => {
   }
 };
 
+/**
+ * Get evaluation status by attemptId
+ * Returns evaluation type and status for determining redirect/display
+ */
+export const getEvaluationStatusController = async (req, res, next) => {
+  try {
+    const { attemptId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(attemptId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid attemptId",
+      });
+    }
+
+    const attempt = await TestAttempt.findById(attemptId)
+      .select("testId status submittedAt totalScore percentage maxScore answers questionSnapshots")
+      .lean();
+
+    if (!attempt) {
+      return res.status(404).json({
+        success: false,
+        message: "Attempt not found",
+      });
+    }
+
+    const test = await Test.findById(attempt.testId)
+      .select("title evaluationType")
+      .lean();
+
+    // Determine evaluation type: auto (all MCQ), manual (has subjective), hybrid (mixed)
+    const hasSubjective = Array.isArray(attempt.questionSnapshots) &&
+      attempt.questionSnapshots.some(q => q.type === "SUBJECTIVE" || q.type === "SHORT_ANSWER");
+
+    const evaluationType = hasSubjective ? "hybrid" : "auto";
+    const evaluationStatus = attempt.status === "SUBMITTED" || attempt.status === "EVALUATED" ? "completed" : "pending";
+
+    // Calculate analytics
+    const totalQuestions = attempt.questionSnapshots?.length || 0;
+    const attemptedQuestions = attempt.answers?.length || 0;
+    const correctAnswers = attempt.answers?.filter(a => a.isCorrect === true)?.length || 0;
+
+    return res.json({
+      success: true,
+      message: "Evaluation status retrieved",
+      data: {
+        testId: attempt.testId,
+        attemptId: attemptId,
+        testName: test?.title || "Test",
+        evaluationType,
+        evaluationStatus,
+        submittedAt: attempt.submittedAt,
+        totalScore: attempt.totalScore || 0,
+        maxScore: attempt.maxScore || 0,
+        percentage: attempt.percentage || 0,
+        analytics: {
+          total: totalQuestions,
+          attempted: attemptedQuestions,
+          unattempted: totalQuestions - attemptedQuestions,
+          correct: correctAnswers,
+          incorrect: attemptedQuestions - correctAnswers,
+        },
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
 export const getAttemptResultController = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
@@ -384,44 +536,32 @@ export const getAttemptResultController = async (req, res, next) => {
       });
     }
 
-    // ✅ Results visible after evaluation only
-    if (attempt.status !== "EVALUATED") {
+    // ✅ Results visible after submission (whether fully evaluated or pending)
+    if (attempt.status !== "EVALUATED" && attempt.status !== "SUBMITTED") {
       return res.status(409).json({
         success: false,
-        message: "Result is not available yet. Attempt not evaluated.",
+        message: "Result is not available yet. Attempt not submitted.",
         errors: null,
       });
     }
 
-    // ✅ Build response without exposing correct answers
-    const answers = (attempt.answers || []).map((a) => ({
-      questionId: a.questionId?._id,
-      questionText: a.questionId?.questionText,
-      type: a.questionId?.type,
-      marks: a.questionId?.marks,
-
-      // student's response
-      selectedOption: a.selectedOption ?? null,
-      textAnswer: a.textAnswer ?? null,
-
-      // evaluation output
-      marksObtained: a.marksObtained ?? 0,
-      isCorrect: a.isCorrect, // ok to show (doesn't reveal correctAnswer itself)
-    }));
-
+    // ✅ Return complete attempt data with all necessary fields for frontend transformation
     return res.status(200).json({
       success: true,
       message: "Result fetched successfully",
       data: {
-        attemptId: attempt._id,
+        _id: attempt._id,
         testId: attempt.testId,
+        studentId: attempt.studentId,
         status: attempt.status,
         totalScore: attempt.totalScore,
         maxScore: attempt.maxScore,
         percentage: attempt.percentage,
         resultStatus: attempt.resultStatus,
         submittedAt: attempt.submittedAt,
-        answers,
+        startedAt: attempt.startedAt,
+        answers: attempt.answers, // ✅ Includes correctAnswer from enrichment
+        questionSnapshots: attempt.questionSnapshots, // ✅ Original snapshots
       },
     });
   } catch (err) {
