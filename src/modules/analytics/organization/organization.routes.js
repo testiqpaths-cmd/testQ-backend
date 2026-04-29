@@ -1,11 +1,21 @@
 import express from "express";
-import { getOrganizationAnalytics } from "./organization.controller.js";
+import {
+  getOrganizations,
+  getOrganizationAnalytics,
+} from "./organization.controller.js";
 import {
   authMiddleware,
 } from "../../../common/middlewares/auth.middleware.js";
 import { roleMiddleware } from "../../../common/middlewares/role.middleware.js";
 
 const router = express.Router();
+
+router.get(
+  "/",
+  authMiddleware,
+  roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"),
+  getOrganizations
+);
 
 router.get(
   "/organization/:orgId",

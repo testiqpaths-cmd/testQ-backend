@@ -21,14 +21,18 @@ const shuffle = (items = []) => {
 const buildFilters = (test) => {
   const filters = {};
 
-  if (Array.isArray(test.subjectIds) && test.subjectIds.length) {
-    filters.subjectId = { $in: test.subjectIds };
+  // Only apply subject/topic filters for SUBJECT_TOPIC source
+  if (test.questionSource === "SUBJECT_TOPIC") {
+    if (Array.isArray(test.subjectIds) && test.subjectIds.length) {
+      filters.subjectId = { $in: test.subjectIds };
+    }
+
+    if (Array.isArray(test.topicIds) && test.topicIds.length) {
+      filters.topicId = { $in: test.topicIds };
+    }
   }
 
-  if (Array.isArray(test.topicIds) && test.topicIds.length) {
-    filters.topicId = { $in: test.topicIds };
-  }
-
+  // Apply type/difficulty filters for both sources
   if (Array.isArray(test.type) && test.type.length) {
     filters.type = { $in: test.type };
   }
@@ -37,6 +41,7 @@ const buildFilters = (test) => {
     filters.difficulty = { $in: test.difficulty };
   }
 
+  // For EXCEL source, use excelBatchId
   if (test.questionSource === "EXCEL" && test.excelBatchId) {
     filters.excelBatchId = test.excelBatchId;
   }

@@ -5,12 +5,12 @@ const questionSchema = new mongoose.Schema({
   subjectId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject",
-    required: true,
+    required: false,
   },
   topicId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Topic",
-    required: true,
+    required: false,
   },
   questionText: {
     type: String,

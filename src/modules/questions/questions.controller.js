@@ -345,12 +345,7 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     const rowNumber = index + 2;
     const missingFields = [];
 
-    if (!subjectId) {
-      missingFields.push("subject (provide in row or form-level subject)");
-    }
-    if (!topicId) {
-      missingFields.push("topic (provide in row or form-level topic)");
-    }
+
     if (!questionText) missingFields.push("question text");
     if (!type) missingFields.push("question type");
     if (!Number.isFinite(marks) || marks <= 0) missingFields.push("marks");
