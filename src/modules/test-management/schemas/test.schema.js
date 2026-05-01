@@ -20,6 +20,7 @@ export const createTestSchema = z
 
     duration: z.number().positive("Duration must be > 0"),
     totalMarks: z.number().positive("Total marks must be > 0"),
+    maxAttempts: z.number().int().positive().optional(),
 
     scheduleType: z.enum(["IMMEDIATE", "DELAYED", "FIXED"]),
     delayDays: z.number().positive().optional(),

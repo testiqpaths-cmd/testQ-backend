@@ -3,11 +3,14 @@ import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
 
 export async function createTest(data, user) {
-  const test = await Test.create({
+  const payload = {
     ...data,
+    maxAttempts: Number(data.maxAttempts) || 1,
     testCode: data.visibility === "LINK_ONLY" ? crypto.randomBytes(4).toString("hex") : null,
     createdBy: { userId: user._id || user.id, role: user.role },
-  });
+  };
+
+  const test = await Test.create(payload);
 
   if (data.testSeriesId) {
     await TestSeries.findByIdAndUpdate(data.testSeriesId, { $addToSet: { tests: test._id } });

@@ -24,6 +24,7 @@ const testSchema = new Schema({
   difficulty: [{ type: String }],
   type: [{ type: String }],
   duration: { type: Number, required: true },
+  maxAttempts: { type: Number, default: 1 },
   totalMarks: { type: Number, required: true },
   scheduleType: { type: String, enum: ["IMMEDIATE", "DELAYED", "FIXED"], required: true },
   delayDays: { type: Number }, // ✅ must be Number

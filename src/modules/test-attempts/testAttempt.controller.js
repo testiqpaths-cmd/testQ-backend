@@ -515,14 +515,16 @@ export const getAttemptResultController = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
 
-    const attempt = await getAttemptResult(attemptId);
-    if (!attempt) {
+    const result = await getAttemptResult(attemptId);
+    if (!result) {
       return res.status(404).json({
         success: false,
         message: "Attempt not found",
         errors: null,
       });
     }
+    const attempt = result.attempt || result;
+    const analysis = result.analysis || null;
 
     // ✅ Student can view own results only
     const requesterId = String(req.user?._id);
@@ -554,14 +556,15 @@ export const getAttemptResultController = async (req, res, next) => {
         testId: attempt.testId,
         studentId: attempt.studentId,
         status: attempt.status,
-        totalScore: attempt.totalScore,
-        maxScore: attempt.maxScore,
-        percentage: attempt.percentage,
+        totalScore: analysis?.totalScore ?? attempt.totalScore,
+        maxScore: analysis?.maxScore ?? attempt.maxScore,
+        percentage: analysis?.percentage ?? attempt.percentage,
         resultStatus: attempt.resultStatus,
         submittedAt: attempt.submittedAt,
         startedAt: attempt.startedAt,
         answers: attempt.answers, // ✅ Includes correctAnswer from enrichment
         questionSnapshots: attempt.questionSnapshots, // ✅ Original snapshots
+        analysis,
       },
     });
   } catch (err) {
