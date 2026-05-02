@@ -31,6 +31,7 @@ const testSchema = new Schema({
   startTime: { type: Date },
   endTime: { type: Date },
   isPublished: { type: Boolean, default: false },
+  status: { type: String, enum: ["DRAFT", "UPCOMING", "ACTIVE", "COMPLETED"], default: "DRAFT" },
   testSeriesId: { type: Types.ObjectId, ref: "TestSeries" },
   createdAt: { type: Date, default: Date.now },
 });

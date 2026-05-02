@@ -14,7 +14,7 @@ import {
   createSubjectService,
   createTopicService,
 } from "../subject-topic/subject-topic.service.js";
-import { v4 as uuidv4 } from "uuid";
+import path from "path";
 
 
 export const createQuestion = asyncHandler(async (req, res) => {
@@ -101,20 +101,12 @@ const normalizeQuestionType = (value) => {
 
   const typeMap = {
     MCQ: "MCQ",
-    MULTIPLE_CHOICE: "MCQ",
-    MULTIPLECHOICE: "MCQ",
     TRUE_FALSE: "TRUE_FALSE",
     TRUEFALSE: "TRUE_FALSE",
     TRUE_OR_FALSE: "TRUE_FALSE",
-    SHORT: "SHORT",
-    SHORT_ANSWER: "SHORT",
-    SHORTANSWER: "SHORT",
-    LONG: "LONG",
-    LONG_ANSWER: "LONG",
-    LONGANSWER: "LONG",
   };
 
-  return typeMap[normalized] || normalized;
+  return typeMap[normalized] || "";
 };
 
 const normalizeDifficulty = (value) => {
@@ -128,7 +120,30 @@ const normalizeDifficulty = (value) => {
   return difficultyMap[normalized] || normalized;
 };
 
-const resolveSubjectId = async (value) => {
+const toTimestampString = (date = new Date()) =>
+  date.toISOString().replace(/T/, "_").replace(/:/g, "-").replace(/\..+$/, "");
+
+const sanitizeFileStem = (value) =>
+  normalizeText(value)
+    .replace(path.extname(String(value ?? "")), "")
+    .replace(/[^\w\s-]+/g, "")
+    .replace(/\s+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_+|_+$/g, "") || "questions";
+
+const buildExcelBatchMetadata = (originalName) => {
+  const fileName = normalizeText(originalName) || "questions.xlsx";
+  const fileStem = sanitizeFileStem(fileName);
+  const timestamp = toTimestampString();
+
+  return {
+    excelBatchId: `${fileStem}_${timestamp}`,
+    excelBatchName: `${fileName} - ${timestamp.replace("_", " ")}`,
+    originalFileName: fileName,
+  };
+};
+
+const resolveSubjectId = async (value, createdBy = null) => {
   const subjectValue = normalizeText(value);
 
   if (!subjectValue) {
@@ -139,7 +154,7 @@ const resolveSubjectId = async (value) => {
     return subjectValue;
   }
 
-  const subject = await getSubjectByNameRepo(subjectValue);
+  const subject = await getSubjectByNameRepo(subjectValue, createdBy);
   return subject?._id?.toString() ?? null;
 };
 
@@ -262,6 +277,7 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
   const uploadedBy = req.user?._id;
   const formSubjectValue = req.body.subjectId ?? req.body.subject;
   const formTopicValue = req.body.topicId ?? req.body.topic;
+  const batchMeta = buildExcelBatchMetadata(req.file?.originalname);
 
   const defaultSubjectId = await resolveOrCreateSubjectId(formSubjectValue, uploadedBy);
   const defaultTopicId = defaultSubjectId
@@ -271,7 +287,8 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
 
   const questions = [];
   const rowErrors = [];
-  const excelBatchId = uuidv4();
+  const excelBatchId = batchMeta.excelBatchId;
+  const excelBatchName = batchMeta.excelBatchName;
 
   for (const [index, row] of rows.entries()) {
     const read = createRowReader(row);
@@ -347,7 +364,7 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
 
 
     if (!questionText) missingFields.push("question text");
-    if (!type) missingFields.push("question type");
+    if (!type) missingFields.push("question type (MCQ or TRUE_FALSE)");
     if (!Number.isFinite(marks) || marks <= 0) missingFields.push("marks");
 
     if (missingFields.length) {
@@ -382,6 +399,7 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
       marks,
       difficulty,
       excelBatchId,
+      excelBatchName,
     });
   }
 
@@ -470,6 +488,7 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     success: true,
     message: `${questionsToInsert.length} questions uploaded`,
     excelBatchId,
+    excelBatchName,
     uploaded: questionsToInsert.length,
     skipped: rowErrors.length,
     warnings: rowErrors.length ? rowErrors : undefined,
@@ -499,6 +518,7 @@ export const getMyExcelBatchesController = asyncHandler(async (req, res) => {
         _id: "$excelBatchId",
         questionCount: { $sum: 1 },
         uploadedAt: { $max: "$createdAt" },
+        batchName: { $first: "$excelBatchName" },
       },
     },
     { $sort: { uploadedAt: -1 } },
@@ -508,6 +528,7 @@ export const getMyExcelBatchesController = asyncHandler(async (req, res) => {
     success: true,
     data: batches.map((item) => ({
       batchId: item._id,
+      batchName: item.batchName || item._id,
       questionCount: item.questionCount,
       uploadedAt: item.uploadedAt,
     })),

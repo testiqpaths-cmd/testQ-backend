@@ -37,6 +37,7 @@ export const findAttemptsByStudent = async (studentId) => {
 
       return {
         id: String(a._id),
+        testId: String(a.testId),
         testName,
         testType,
         seriesName,

@@ -76,23 +76,38 @@ export const startTestAttemptController = async (req, res, next) => {
       });
     }
 
-    // 4) Prevent multiple attempts (fast check)
-    const existing = await TestAttempt.findOne({ testId, studentId }).lean();
-    if (existing) {
-      // Calculate timing for existing attempt
-      const existingTiming = computeAttemptTiming(existing);
+    // 4) Prevent multiple in-progress attempts and enforce maxAttempts
+    // Check if there is an in-progress attempt
+    const existingInProgress = await TestAttempt.findOne({ testId, studentId, status: 'IN_PROGRESS' }).lean();
+    if (existingInProgress) {
+      const existingTiming = computeAttemptTiming(existingInProgress);
       return res.status(409).json({
         success: false,
-        message: "Attempt already exists for this test",
+        message: 'Attempt already exists for this test',
         data: {
-          attemptId: existing._id,
-          status: existing.status,
-          startedAt: existing.startedAt,
-          endsAt: existing.endsAt,
-          duration: existing.duration,
-          maxScore: existing.maxScore,
-          timing: existingTiming, // ✅ backend remaining time
+          attemptId: existingInProgress._id,
+          status: existingInProgress.status,
+          startedAt: existingInProgress.startedAt,
+          endsAt: existingInProgress.endsAt,
+          duration: existingInProgress.duration,
+          maxScore: existingInProgress.maxScore,
+          timing: existingTiming,
         },
+      });
+    }
+
+    // Count completed/submitted attempts to enforce maxAttempts
+    const completedAttemptsCount = await TestAttempt.countDocuments({
+      testId,
+      studentId,
+      status: { $in: ['SUBMITTED', 'EVALUATED'] },
+    });
+
+    const allowedAttempts = Number(test.maxAttempts) || 1;
+    if (completedAttemptsCount >= allowedAttempts) {
+      return res.status(403).json({
+        success: false,
+        message: 'Maximum attempts reached for this test',
       });
     }
 
