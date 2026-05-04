@@ -1,5 +1,96 @@
 import PDFDocument from "pdfkit";
 
+const formatDateTime = (value) => {
+  if (!value) return "N/A";
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return "N/A";
+  return `${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+};
+
+const formatMinutes = (minutes) => {
+  if (minutes == null) return "N/A";
+  const total = Number(minutes);
+  if (!Number.isFinite(total)) return "N/A";
+  const hrs = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hrs <= 0) return `${mins} min`;
+  return `${hrs} hr ${mins} min`;
+};
+
+export const generateStudentPDF = (results, options = {}) => {
+  const { includeSingleTestHeader = false } = options;
+
+  return new Promise((resolve, reject) => {
+    try {
+      const doc = new PDFDocument({ margin: 40, size: "A4" });
+      const buffers = [];
+
+      doc.on("data", (chunk) => buffers.push(chunk));
+      doc.on("end", () => resolve(Buffer.concat(buffers)));
+      doc.on("error", (err) => reject(err));
+
+      const rows = Array.isArray(results) ? results : [results];
+
+      doc
+        .fontSize(20)
+        .fillColor("#0B3B78")
+        .text(includeSingleTestHeader ? "Test Result Report" : "Student Results Report", {
+          align: "center",
+        });
+      doc.moveDown(0.2);
+      doc
+        .fontSize(10)
+        .fillColor("#6B7280")
+        .text(`Generated on: ${formatDateTime(new Date())}`, { align: "center" });
+      doc.moveDown(1.2);
+
+      if (!rows.length) {
+        doc.fontSize(12).fillColor("#111827").text("No result data available.");
+        doc.end();
+        return;
+      }
+
+      rows.forEach((r, index) => {
+        const score = `${r.totalScore ?? 0} / ${r.maxScore ?? 0}`;
+        const percentage = Number.isFinite(r.percentage)
+          ? `${Number(r.percentage).toFixed(2)}%`
+          : "0.00%";
+        const status = r.resultStatus || "N/A";
+        const testName = r.testId?.name || r.testId?.title || "N/A";
+
+        doc
+          .fontSize(13)
+          .fillColor("#111827")
+          .text(`Test ${index + 1}: ${testName}`, { underline: true });
+        doc.moveDown(0.5);
+
+        doc.fontSize(11).fillColor("#111827");
+        doc.text(`Score: ${score}`);
+        doc.text(`Percentage: ${percentage}`);
+        doc.text(`Result: ${status}`);
+        doc.text(`Duration: ${formatMinutes(r.duration)}`);
+        doc.text(`Submitted At: ${formatDateTime(r.submittedAt || r.createdAt)}`);
+
+        if (index !== rows.length - 1) {
+          doc.moveDown(0.8);
+          const y = doc.y;
+          doc
+            .moveTo(40, y)
+            .lineTo(555, y)
+            .strokeColor("#E5E7EB")
+            .lineWidth(1)
+            .stroke();
+          doc.moveDown(0.8);
+        }
+      });
+
+      doc.end();
+    } catch (error) {
+      reject(error);
+    }
+  });
+};
+
 export const generatePDF = (results) => {
   return new Promise((resolve, reject) => {
     try {
