@@ -61,14 +61,11 @@ export const generateQuestionTemplate = async () => {
     const sampleQuestions = [
       ['Mathematics', 'Algebra', 'What is 2 + 2?', 'MCQ', '1|2|3|4', '4', '1', 'EASY'],
       ['Science', 'Physics', 'The earth revolves around the sun', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', '1', 'MEDIUM'],
-      ['Mathematics', 'Algebra', 'Solve for x: 2x + 5 = 15', 'SHORT', '', '5', '2', 'MEDIUM'],
-      ['English', 'Grammar', 'Write a short essay on your favorite book', 'LONG', '', 'Varied responses', '5', 'HARD'],
       ['Mathematics', 'Arithmetic', 'What is the sum of 5 + 6 + 7 + 8?', 'MCQ', '25|26|27|28', '26', '1', 'EASY'],
       ['Science', 'Chemistry', 'Water boils at 100 degrees Celsius', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', '1', 'EASY'],
       ['English', 'Vocabulary', 'Synonym of Happy', 'MCQ', 'Sad|Joyful|Angry|Depressed', 'Joyful', '1', 'EASY'],
       ['Mathematics', 'Geometry', 'Number of sides in a square', 'MCQ', '2|3|4|5', '4', '1', 'EASY'],
-      ['Science', 'Biology', 'Humans breathe oxygen', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', '1', 'EASY'],
-      ['English', 'Grammar', 'Identify noun in the sentence: Ram plays cricket', 'SHORT', '', 'Ram', '2', 'MEDIUM']
+      ['Science', 'Biology', 'Humans breathe oxygen', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', '1', 'EASY']
     ];
 
     sampleQuestions.forEach(question => {
@@ -86,9 +83,9 @@ export const generateQuestionTemplate = async () => {
       ['subject', 'The subject name (e.g., Mathematics, Science, English)'],
       ['topic', 'The topic name (e.g., Algebra, Physics, Grammar)'],
       ['questionText', 'The actual question content'],
-      ['type', 'MCQ, TRUE_FALSE, SHORT, or LONG'],
-      ['options', 'Pipe-separated options (e.g., "1|2|3|4" or "TRUE|FALSE"). Leave empty for SHORT/LONG types'],
-      ['correctAnswer', 'The correct answer value (e.g., "4" for MCQ, "TRUE" for TRUE_FALSE, or text for SHORT/LONG)'],
+      ['type', 'MCQ, TRUE_FALSE'],
+      ['options', 'Pipe-separated options (e.g., "1|2|3|4" or "TRUE|FALSE").'],
+      ['correctAnswer', 'The correct answer value (e.g., "4" for MCQ, "TRUE" for TRUE_FALSE)'],
       ['marks', 'Positive number'],
       ['difficulty', 'EASY, MEDIUM, or HARD'],
       [],

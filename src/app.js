@@ -7,20 +7,14 @@ import routes from "./routes/index.js";
 import { errorMiddleware } from "./common/middlewares/error.middleware.js";
 import { requestLogger } from "./common/middlewares/logger.middleware.js";
 import logger from "./config/logger.js";
+import { corsOptions } from "./config/cors.js";
 
 
 const app = express();
 
-const corsOptions = {
-  origin: "http://localhost:5173",
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  exposedHeaders: ["Authorization"],
-};
+
 
 app.use(cors(corsOptions));
-app.options(/.*/, cors(corsOptions));
 
 // Morgan HTTP request logger
 app.use(morgan(":remote-addr - :remote-user [:date[clf]] \":method :url HTTP/:http-version\" :status :res[content-length] \":referrer\" \":user-agent\" :response-time ms", 
