@@ -1,10 +1,10 @@
 import { getStudentResults } from "../../repository/studentReport.repository.js";
-import { generatePDF } from "../generators/pdf.generator.js";
+import { generateStudentPDF } from "../generators/pdf.generator.js";
 import { generateExcel } from "../generators/excel.generator.js";
 
-export const generateStudentReportService = async ({ studentId, format }) => {
+export const generateStudentReportService = async ({ studentId, format, resultId }) => {
   // Fetch results
-  const results = await getStudentResults(studentId);
+  const results = await getStudentResults(studentId, { resultId });
 
   // If no results found, return null (NOT throw error)
   if (!results || results.length === 0) {
@@ -14,7 +14,7 @@ export const generateStudentReportService = async ({ studentId, format }) => {
   // Generate report
   switch (format) {
     case "pdf":
-      return await generatePDF(results);
+      return await generateStudentPDF(results, { includeSingleTestHeader: Boolean(resultId) });
 
     case "excel":
       return await generateExcel(results);
