@@ -81,8 +81,11 @@ export const getMyTests = async (req, res) => {
     const enriched = await Promise.all(
       tests.map(async (t) => {
         const attemptsMade = await TestAttempt.countDocuments({ testId: t._id, studentId: userId });
+        // count evaluated attempts (results) for this test across all students
+        const evaluatedCount = await TestAttempt.countDocuments({ testId: t._id, status: 'EVALUATED' });
         const obj = t.toObject ? t.toObject() : { ...t };
         obj.attemptsMade = attemptsMade;
+        obj.hasResults = evaluatedCount > 0;
         if (Number(obj.maxAttempts || 1) <= attemptsMade) {
           // For UI purposes mark as completed so no Start button shows
           obj.status = 'COMPLETED';
