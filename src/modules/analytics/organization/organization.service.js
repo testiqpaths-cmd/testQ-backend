@@ -20,3 +20,6 @@ export const getOrganizationAnalyticsService = async ({ orgId, startDate, endDat
     throw new Error("Failed to fetch organization analytics");
   }
 };
+export const createOrganizationService = async (payload) => {
+  return payload;
+};
