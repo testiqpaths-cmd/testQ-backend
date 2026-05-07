@@ -14,7 +14,7 @@ export const getStudentResults = async (studentId, { resultId } = {}) => {
   }
 
   return TestAttempt.find(query)
-   .populate("testId", "name")
+   .populate("testId", "title")
    .select("totalScore maxScore percentage resultStatus createdAt duration submittedAt")
     .sort({ createdAt: -1 })
     .lean();

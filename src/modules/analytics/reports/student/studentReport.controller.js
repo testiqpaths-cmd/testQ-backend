@@ -3,7 +3,7 @@ import mongoose from "mongoose";
 
 export const generateStudentReport = async (req, res, next) => {
   try {
-    const format = req.query.format?.toLowerCase().trim();
+    const format = req.query.format?.toLowerCase().trim() || "pdf";
     const resultId = req.query.resultId?.toString().trim() || null;
     const studentId = req.user?._id;
 
