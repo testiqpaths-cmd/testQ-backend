@@ -150,6 +150,13 @@ const testAttemptSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-testAttemptSchema.index({ testId: 1, studentId: 1 }, { unique: true });
+// Allow multiple attempts over time, but only one active attempt at a time.
+testAttemptSchema.index(
+  { testId: 1, studentId: 1, status: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { status: "IN_PROGRESS" },
+  }
+);
 
 export default mongoose.model("TestAttempt", testAttemptSchema);

@@ -2,10 +2,7 @@ import express from "express";
 import {
   getOrganizations,
   getOrganizationAnalytics,
-} from "./organization.controller.js";
-import {
-  getOrganizationAnalytics,
-  createOrganization,
+  createOrganization
 } from "./organization.controller.js";
 
 import {

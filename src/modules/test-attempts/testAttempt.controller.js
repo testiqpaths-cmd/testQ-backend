@@ -176,9 +176,26 @@ export const startTestAttemptController = async (req, res, next) => {
   } catch (err) {
     // Handle unique index error (one attempt per student per test)
     if (err?.code === 11000) {
+      const { testId, studentId } = req.params ? { testId: req.params.testId, studentId: req.user?._id } : {};
+      const existingAttempt = await TestAttempt.findOne({
+        testId,
+        studentId,
+        status: 'IN_PROGRESS',
+      }).lean();
+
       return res.status(409).json({
         success: false,
         message: "Attempt already exists for this test",
+        data: existingAttempt
+          ? {
+              attemptId: existingAttempt._id,
+              status: existingAttempt.status,
+              startedAt: existingAttempt.startedAt,
+              endsAt: existingAttempt.endsAt,
+              duration: existingAttempt.duration,
+              maxScore: existingAttempt.maxScore,
+            }
+          : undefined,
       });
     }
     return next(err);

@@ -1,5 +1,4 @@
 import Organization from "../../../models/organization.model.js";
-import { getOrganizationAnalyticsService } from "./organization.service.js";
 import {
   getOrganizationAnalyticsService,
   createOrganizationService,
