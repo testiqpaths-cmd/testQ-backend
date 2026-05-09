@@ -7,6 +7,7 @@ import {
 } from "./repositories/questions.repository.js";
 //import {  } from "./questions.validator";
 import { validateQuestion } from "./questions.validator.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
 
 export const createQuestionService = async (payload) => {
   const errors = validateQuestion(payload);
@@ -18,7 +19,12 @@ export const createQuestionService = async (payload) => {
   return createQuestionRepo(payload);
 };
 export const updateQuestionService = async (id, payload) => {
-  validateQuestionByType(payload);
+  const errors = validateQuestion(payload);
+
+  if (errors.length) {
+    throw new ApiError(400, errors.join(", "));
+  }
+
   return updateQuestionRepo(id, payload);
 };
 

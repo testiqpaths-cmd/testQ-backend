@@ -5,12 +5,12 @@ const questionSchema = new mongoose.Schema({
   subjectId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Subject",
-    required: true,
+    required: false,
   },
   topicId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: "Topic",
-    required: true,
+    required: false,
   },
   questionText: {
     type: String,
@@ -18,7 +18,7 @@ const questionSchema = new mongoose.Schema({
   },
   type: {
     type: String,
-    enum: ["MCQ", "TRUE_FALSE", "SHORT", "LONG"],
+    enum: ["MCQ", "TRUE_FALSE"],
     required: true,
   },
   options: {
@@ -48,6 +48,11 @@ const questionSchema = new mongoose.Schema({
     type: String,
     default: null,
     index: true,
+  },
+
+  excelBatchName: {
+    type: String,
+    default: null,
   },
   
   createdAt: {

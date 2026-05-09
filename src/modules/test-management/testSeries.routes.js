@@ -6,6 +6,7 @@ import mongoose from "mongoose";
 import {
   createSeries,
   getSeries,
+  getSeriesList,
   updateSeries,
   deleteSeries,
 } from "./testSeries.controller.js";
@@ -18,6 +19,14 @@ router.post(
   authMiddleware,                 // enable later if needed
   roleMiddleware("IQPATH_ADMIN","ORGANIZATION","STUDENT"),  // enable later if needed
   createSeries
+);
+
+// ✅ LIST: GET /api/test-series
+router.get(
+  "/",
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
+  getSeriesList
 );
 
 // ✅ GET ONE: GET /api/test-series/:id

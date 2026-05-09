@@ -64,3 +64,23 @@ export const getSeries = async (req, res) => {
   const series = await service.getSeriesById(req.params.id);
   res.json({ success: true, data: series });
 };
+
+export const getSeriesList = async (req, res, next) => {
+  try {
+    const series = await service.getSeriesList({
+      userId: req.user?._id || req.user?.id,
+      search: req.query.search || "",
+    });
+
+    return res.json({
+      success: true,
+      data: series,
+    });
+  } catch (err) {
+    logger.error(`getSeriesList error: ${err.message}`);
+    return res.status(500).json({
+      success: false,
+      message: err.message || "Internal Server Error",
+    });
+  }
+};

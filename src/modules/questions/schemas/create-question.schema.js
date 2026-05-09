@@ -10,7 +10,7 @@ export const createQuestionSchema = z.object({
     subjectId: z.string().regex(objectIdRegex, "Invalid subject ID"),
     topicId: z.string().regex(objectIdRegex, "Invalid topic ID"),
     questionText: z.string().min(1),
-    type: z.enum(Object.values(QUESTION_TYPES)),
+    type: z.enum([QUESTION_TYPES.MCQ, QUESTION_TYPES.TRUE_FALSE]),
     options: z.array(z.string()).optional(),
     correctAnswer: z.string().optional(),
     marks: z.number().positive(),

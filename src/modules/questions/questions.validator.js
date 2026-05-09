@@ -4,7 +4,7 @@ export const validateQuestion = (question = {}) => {
   const errors = [];
 
   const topic = (question.topicId ?? "").trim();
-const subject = (question.subjectId ?? "").trim();
+  const subject = (question.subjectId ?? "").trim();
   const questionText = (question.questionText ?? "").trim();
   const type = (question.type ?? "").trim();
   const marks = Number(question.marks);
@@ -65,20 +65,8 @@ const subject = (question.subjectId ?? "").trim();
       break;
     }
 
-    case "SHORT": {
-      if (!correctAnswer) {
-        errors.push("SHORT answer must have a correctAnswer");
-      }
-      break;
-    }
-
-    case "LONG": {
-      // optional
-      break;
-    }
-
     default:
-      errors.push("Invalid question type");
+      errors.push("Only MCQ and TRUE_FALSE question types are supported");
   }
 
   return errors;

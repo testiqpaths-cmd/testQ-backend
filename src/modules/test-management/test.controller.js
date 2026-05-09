@@ -72,15 +72,29 @@ export async function deleteTest(req, res, next) {
 
 export const getMyTests = async (req, res) => {
   try {
-    const tests = await service.getMyTests({
-      userId: req.user._id || req.user.id,
-      search: req.query.search || "",
-    });
+    const userId = req.user._id || req.user.id;
+    const tests = await service.getMyTests({ userId, search: req.query.search || "" });
 
-    return res.json({
-      success: true,
-      data: tests,
-    });
+    // Attach attemptsMade and override status for UI when maxAttempts reached
+    const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+
+    const enriched = await Promise.all(
+      tests.map(async (t) => {
+        const attemptsMade = await TestAttempt.countDocuments({ testId: t._id, studentId: userId });
+        // count evaluated attempts (results) for this test across all students
+        const evaluatedCount = await TestAttempt.countDocuments({ testId: t._id, status: 'EVALUATED' });
+        const obj = t.toObject ? t.toObject() : { ...t };
+        obj.attemptsMade = attemptsMade;
+        obj.hasResults = evaluatedCount > 0;
+        if (Number(obj.maxAttempts || 1) <= attemptsMade) {
+          // For UI purposes mark as completed so no Start button shows
+          obj.status = 'COMPLETED';
+        }
+        return obj;
+      })
+    );
+
+    return res.json({ success: true, data: enriched });
   } catch (err) {
     logger.error(`getMyTests error: ${err.message}`);
     return res.status(500).json({
@@ -92,7 +106,29 @@ export const getMyTests = async (req, res) => {
 
 export const getAllTests = async (req, res) => {
   try {
+    const userId = req.user?._id || req.user?.id;
     const tests = await service.getAllTests();
+
+    // Attach attemptsMade for each test (current student's perspective)
+    if (userId) {
+      const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+      const enriched = await Promise.all(
+        tests.map(async (t) => {
+          const attemptsMade = await TestAttempt.countDocuments({ 
+            testId: t._id, 
+            studentId: userId,
+            status: { $in: ['SUBMITTED', 'EVALUATED'] }
+          });
+          const obj = t.toObject ? t.toObject() : { ...t };
+          obj.attemptsMade = attemptsMade;
+          return obj;
+        })
+      );
+      return res.json({
+        success: true,
+        data: enriched
+      });
+    }
 
     return res.json({
       success: true,

@@ -34,6 +34,52 @@ const testAttemptSchema = new mongoose.Schema(
       required: true,
     },
 
+    questionSnapshots: [
+      {
+        questionId: {
+          type: mongoose.Schema.Types.ObjectId,
+          ref: "Question",
+          required: true,
+        },
+        questionText: {
+          type: String,
+          required: true,
+        },
+        type: {
+          type: String,
+          required: true,
+        },
+        options: {
+          type: [String],
+          default: [],
+        },
+        correctAnswer: {
+          type: String,
+          default: null,
+        },
+        marks: {
+          type: Number,
+          default: 0,
+        },
+        order: {
+          type: Number,
+          required: true,
+        },
+        startedAt: {
+          type: Date,
+          default: null,
+        },
+        lastViewedAt: {
+          type: Date,
+          default: null,
+        },
+        timeSpentMs: {
+          type: Number,
+          default: 0,
+        },
+      },
+    ],
+
     status: {
       type: String,
       enum: ["IN_PROGRESS", "SUBMITTED", "EVALUATED", "EXPIRED"],
@@ -59,6 +105,10 @@ const testAttemptSchema = new mongoose.Schema(
           type: Date,
           default: Date.now,
         },
+      timeSpentMs: {
+        type: Number,
+        default: 0,
+      },
         marksObtained: {
           type: Number,
           default: 0,
