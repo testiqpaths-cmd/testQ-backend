@@ -1,4 +1,4 @@
-import User from "../../../models/user.model.js";
+import { User } from "../index.js";
 import { sendVerifyEmail } from "./email.service.js";
 import {
   generateAccessToken,

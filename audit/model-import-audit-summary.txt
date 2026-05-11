@@ -1,0 +1,53 @@
+Model Import Audit Summary
+Generated: 2026-05-10
+
+Totals
+- Total import matches: 47
+- Unique files importing top-level models: 23
+- Unique model targets: 8
+
+Counts by model target (descending)
+- testAttempt.model.js: 19
+- testSeries.model.js: 6
+- user.model.js: 5
+- test.model.js: 4
+- question.model.js: 4
+- subject.model.js: 2
+- topic.model.js: 2
+- organization.model.js: 2
+
+Counts by area
+- src/modules/analytics: 14
+- src/modules/test-attempts: 12
+- src/modules/test-management: 10
+- src/modules/auth: 3
+- src/config: 3
+- src/modules/questions: 2
+- src/modules/subject-topic: 2
+
+Top 20 largest files by line count (audit sample)
+- src/modules/questions/questions.controller.js: 544
+- src/modules/test-attempts/testAttempt.controller.js: 457
+- src/modules/auth/auth.service.js: 236
+- src/modules/auth/auth.controller.js: 217
+- src/modules/test-management/test.controller.js: 177
+- src/modules/analytics/test-attempt/testAttempt.controller.js: 156
+- src/modules/test-attempts/services/evaluateObjectiveAttempts.service.js: 109
+- src/modules/test-management/testSeries.controller.js: 84
+- src/modules/subject-topic/subject-topic.service.js: 78
+- src/modules/analytics/repository/admin.repository.js: 75
+- src/routes/index.js: 73
+- src/modules/test-management/testSeries.routes.js: 57
+- src/modules/test-management/test.service.js: 55
+- src/modules/test-management/test.routes.js: 53
+- src/modules/analytics/repository/orgReport.repository.js: 49
+- src/modules/analytics/repository/platformReports.repository.js: 47
+- src/modules/test-management/testSeries.service.js: 46
+- src/app.js: 45
+- src/modules/test-attempts/testAttempt.routes.js: 32
+- src/config/db.js: 30
+
+Notes
+- Audit includes static imports and dynamic imports that reference ../../models/* paths.
+- This report is intended for migration planning to module-local models + compatibility shims.
+- For strict accuracy on line-count ranking, a follow-up script can compute all files directly.

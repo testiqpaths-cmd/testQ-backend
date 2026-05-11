@@ -1,11 +1,11 @@
 import bcrypt from "bcryptjs";
-import User from "../../models/user.model.js"; // import your User model
 import {
   createUser,
   findUserByEmail,
   findUserById,
   findUserByFirebaseUid,
 } from "./repositories/auth.repository.js";
+import { User } from "./index.js";
 import {generateAccessToken,generateRefreshToken,} from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { passwordService } from "./services/password.service.js";
