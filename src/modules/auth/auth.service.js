@@ -138,6 +138,7 @@ export const firebaseAuth = async ({
       firebaseUid: normalizedFirebaseUid,
       isEmailVerified: true,
       emailVerifiedAt: new Date(),
+      lastLogin: new Date(),
       status: "ACTIVE",
       }),
     });
@@ -180,6 +181,16 @@ export const firebaseAuth = async ({
 
     user = await User.findByIdAndUpdate(user._id, updates, { new: true });
   }
+
+  // eslint-disable-next-line no-console
+  console.info("Firebase auth persisted to backend", {
+    userId: user?._id,
+    email: user?.email,
+    firebaseUid: user?.firebaseUid,
+    role: user?.role,
+    status: user?.status,
+    lastLogin: user?.lastLogin,
+  });
 
   const accessToken = generateAccessToken({ id: user._id, role: user.role });
   const refreshToken = generateRefreshToken({ id: user._id, role: user.role });

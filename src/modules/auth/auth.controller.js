@@ -14,6 +14,19 @@ import {
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { findUserById } from "./repositories/auth.repository.js";
 
+const buildAuthUserResponse = (user) => ({
+  id: user._id,
+  email: user.email,
+  role: user.role,
+  firstName: user.firstName,
+  lastName: user.lastName,
+  firebaseUid: user.firebaseUid,
+  status: user.status,
+  plan: user.plan,
+  isEmailVerified: user.isEmailVerified,
+  lastLogin: user.lastLogin,
+});
+
 
 /** Register */
 export const registerController = async (req, res) => {
@@ -53,7 +66,7 @@ export const registerController = async (req, res) => {
         message: "Registration successful",
         accessToken,
         refreshToken,
-        user: { id: user._id, email: user.email, role: user.role },
+        user: buildAuthUserResponse(user),
       });
   } catch (err) {
     logger.error(`Register error: ${err.message}`);
@@ -88,11 +101,7 @@ export const loginController = async (req, res) => {
         message: "Login successful",
         accessToken,
         refreshToken,
-        user: {
-          id: user._id,
-          email: user.email,
-          role: user.role,
-        },
+        user: buildAuthUserResponse(user),
     
   });
 }catch (err) {
@@ -125,14 +134,7 @@ export const firebaseAuthController = async (req, res) => {
         message: "Firebase authentication successful",
         accessToken,
         refreshToken,
-        user: {
-          id: user._id,
-          email: user.email,
-          role: user.role,
-          firstName: user.firstName,
-          lastName: user.lastName,
-          firebaseUid: user.firebaseUid,
-        },
+        user: buildAuthUserResponse(user),
       });
   } catch (err) {
     logger.error(`Firebase auth error: ${err.message}`);
