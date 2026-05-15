@@ -29,7 +29,7 @@ router.use("/questions", questionsRoutes);
 router.use("/subject-topic", subjectTopicRoutes);
 
 // Other future routes
-router.use("/user", userRoutes);
+router.use("/users", userRoutes);
 
 
  // Test management routes
