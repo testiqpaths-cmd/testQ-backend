@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import UserModel from "../../models/user.model.js";
 import Organization from "../../models/organization.model.js";
 
@@ -6,6 +7,16 @@ const hashPassword = async (password) => {
 	if (!password) return undefined;
 	const salt = await bcrypt.genSalt(10);
 	return bcrypt.hash(password, salt);
+};
+
+const generateOrganizationCode = (name = "ORG") => {
+	const codeBase = name
+		.toString()
+		.trim()
+		.replace(/[^a-zA-Z0-9]+/g, "_")
+		.replace(/^_+|_+$/g, "")
+		.toUpperCase() || "ORG";
+	return `${codeBase}_${crypto.randomBytes(3).toString("hex")}`;
 };
 
 export const createUser = async (payload) => {
@@ -17,6 +28,21 @@ export const createUser = async (payload) => {
 
 export const getUserById = async (id) => {
 	return UserModel.findById(id).where({ isDeleted: false }).lean();
+};
+
+export const listUsers = async (query = {}) => {
+	const q = { isDeleted: false };
+	if (query.role && query.role !== "all") q.role = query.role;
+	if (query.status && query.status !== "all") q.status = query.status;
+	if (query.search) {
+		const search = new RegExp(query.search, "i");
+		q.$or = [
+			{ firstName: search },
+			{ lastName: search },
+			{ email: search },
+		];
+	}
+	return UserModel.find(q).lean();
 };
 
 export const updateUser = async (id, updates) => {
@@ -36,7 +62,13 @@ export const listStudents = async (query = {}) => {
 };
 
 export const createStudent = async (payload) => {
-	return createUser({ ...payload, role: "STUDENT" });
+	const data = { 
+		...payload, 
+		role: "STUDENT", 
+		password: payload.password || "change_me",
+		status: payload.status || "ACTIVE"
+	};
+	return createUser(data);
 };
 
 // Organizations
@@ -47,7 +79,14 @@ export const listOrganizations = async (query = {}) => {
 };
 
 export const createOrganization = async (payload) => {
-	const org = await Organization.create(payload);
+	const data = { ...payload };
+	if (!data.name && data.organizationName) {
+		data.name = data.organizationName;
+	}
+	if (!data.code) {
+		data.code = generateOrganizationCode(data.name || "ORG");
+	}
+	const org = await Organization.create(data);
 	return org;
 };
 
@@ -64,7 +103,8 @@ export const deleteOrganization = async (id) => {
 };
 
 // Bulk create users from parsed rows
-export const createUsersFromArray = async (rows = []) => {
+export const createUsersFromArray = async (rows = [], options = {}) => {
+	const { organizationId: overrideOrganizationId = null, organizationCode: overrideOrganizationCode = null } = options;
 	const results = [];
 	for (const row of rows) {
 		try {
@@ -74,10 +114,34 @@ export const createUsersFromArray = async (rows = []) => {
 			const password = row.password || "change_me";
 			const phone = row.phone || row.mobile || "";
 			const role = (row.role || "STUDENT").toString().trim().toUpperCase() || "STUDENT";
-			const organizationCode = row.organizationCode || row.organization_code || row.orgCode || null;
+			const organizationCode = overrideOrganizationCode || row.organizationCode || row.organization_code || row.orgCode || null;
+			let organizationId = overrideOrganizationId;
 
-			let organizationId = null;
-			if (organizationCode) {
+			// Additional fields from template
+			const plan = (row.plan || "FREE").toString().trim().toUpperCase();
+			const isEmailVerified = (row.isEmailVerified || row.isEmailVerified === "TRUE" || row.isEmailVerified === true) ? true : false;
+
+			// Address fields
+			const address = {};
+			if (row.address_line1) address.line1 = row.address_line1.toString().trim();
+			if (row.address_city) address.city = row.address_city.toString().trim();
+			if (row.address_state) address.state = row.address_state.toString().trim();
+			if (row.address_country) address.country = row.address_country.toString().trim();
+			if (row.address_zipCode) address.zipCode = row.address_zipCode.toString().trim();
+
+			// Education fields
+			const education = {};
+			if (row.education_qualification) education.qualification = row.education_qualification.toString().trim();
+			if (row.education_stream) education.stream = row.education_stream.toString().trim();
+			if (row.education_passingYear) {
+				const year = parseInt(row.education_passingYear);
+				if (!isNaN(year) && year >= 1950 && year <= new Date().getFullYear() + 5) {
+					education.passingYear = year;
+				}
+			}
+			if (row.education_college) education.college = row.education_college.toString().trim();
+
+			if (!organizationId && organizationCode) {
 				let org = await Organization.findOne({ code: organizationCode });
 				if (!org) {
 					org = await Organization.create({ name: organizationCode, code: organizationCode });
@@ -85,7 +149,30 @@ export const createUsersFromArray = async (rows = []) => {
 				organizationId = org._id;
 			}
 
-			const user = await createUser({ firstName, lastName, email, password, phone, role, organizationId, status: "ACTIVE", isEmailVerified: true });
+			const userPayload = {
+				firstName,
+				lastName,
+				email,
+				password,
+				phone,
+				role,
+				organizationId,
+				status: "ACTIVE",
+				isEmailVerified,
+				plan
+			};
+
+			// Only add address if it has values
+			if (Object.keys(address).length > 0) {
+				userPayload.address = address;
+			}
+
+			// Only add education if it has values
+			if (Object.keys(education).length > 0) {
+				userPayload.education = education;
+			}
+
+			const user = await createUser(userPayload);
 			results.push({ email, status: "created", id: user._id });
 		} catch (err) {
 			results.push({ row, status: "error", message: err.message });

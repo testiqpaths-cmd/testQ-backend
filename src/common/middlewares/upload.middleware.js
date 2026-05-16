@@ -6,15 +6,17 @@ export const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
   fileFilter: (req, file, cb) => {
-    // Accept only Excel files
+    // Accept Excel and CSV files
     if (
       file.mimetype ===
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
-      file.mimetype === "application/vnd.ms-excel"
+      file.mimetype === "application/vnd.ms-excel" ||
+      file.mimetype === "text/csv" ||
+      file.mimetype === "application/csv"
     ) {
       cb(null, true);
     } else {
-      cb(new Error("Only Excel files are allowed"), false);
+      cb(new Error("Only Excel and CSV files are allowed"), false);
     }
   },
 });

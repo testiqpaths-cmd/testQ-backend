@@ -6,6 +6,7 @@ import {
 	getUserById,
 	updateUser,
 	softDeleteUser,
+	listUsers,
 	listStudents,
 	createStudent,
 	createUsersFromArray,
@@ -16,12 +17,18 @@ import {
 	deleteOrganization,
 } from "./user.service.js";
 import xlsx from "xlsx";
+import { generateUserTemplate } from "./template/generate-userTemplate.js";
 
 // Generic user CRUD
 export const createUserController = async (req, res) => {
 	const payload = req.body;
 	const user = await createUser(payload);
 	res.status(201).json({ success: true, user });
+};
+
+export const listUsersController = async (req, res) => {
+	const users = await listUsers(req.query || {});
+	res.json({ success: true, users });
 };
 
 export const getUserController = async (req, res) => {
@@ -51,7 +58,10 @@ export const listStudentsController = async (req, res) => {
 };
 
 export const createStudentController = async (req, res) => {
-	const payload = { ...req.body, role: "STUDENT" };
+	const payload = { ...req.body, role: "STUDENT", status: req.body.status || "ACTIVE" };
+	if (!payload.email) {
+		return res.status(400).json({ success: false, message: "Student email is required" });
+	}
 	const user = await createStudent(payload);
 	res.status(201).json({ success: true, user });
 };
@@ -83,7 +93,7 @@ export const listOrganizationsController = async (req, res) => {
 
 export const createOrganizationController = async (req, res) => {
 	const org = await createOrganization(req.body);
-	res.status(201).json({ success: true, organization: org });
+	res.status(201).json({ success: true, data: org, organization: org });
 };
 
 export const getOrganizationController = async (req, res) => {
@@ -107,14 +117,46 @@ export const deleteOrganizationController = async (req, res) => {
 
 // Bulk upload users via Excel
 export const bulkUploadUsersController = async (req, res) => {
-	if (!req.file || !req.file.buffer) return res.status(400).json({ success: false, message: "Excel file is required" });
+	const file = req.file || (req.files && req.files.file && req.files.file[0]);
+	if (!file || !file.buffer) return res.status(400).json({ success: false, message: "Excel file is required" });
 
-	const workbook = xlsx.read(req.file.buffer, { type: "buffer" });
-	const sheet = workbook.Sheets[workbook.SheetNames[0]];
-	const rows = xlsx.utils.sheet_to_json(sheet, { defval: "" });
+	let organizationId = req.body.organizationId || null;
+	const organizationCode = req.body.organizationCode || null;
+	
+	// Handle FormData organizationId (string from form field)
+	if (organizationId && typeof organizationId === "string" && organizationId.trim()) {
+		organizationId = organizationId.trim();
+	}
+
+	let rows = [];
+	try {
+		if (file.mimetype === "text/csv" || file.mimetype === "application/csv" || file.originalname.endsWith('.csv')) {
+			// Handle CSV
+			const csvText = file.buffer.toString('utf-8');
+			const workbook = xlsx.read(csvText, { type: "string" });
+			const sheet = workbook.Sheets[workbook.SheetNames[0]];
+			rows = xlsx.utils.sheet_to_json(sheet, { defval: "" });
+		} else {
+			// Handle Excel
+			const workbook = xlsx.read(file.buffer, { type: "buffer" });
+			const sheet = workbook.Sheets[workbook.SheetNames[0]];
+			rows = xlsx.utils.sheet_to_json(sheet, { defval: "" });
+		}
+	} catch (error) {
+		return res.status(400).json({ success: false, message: "Invalid file format" });
+	}
 
 	// rows expected to be array of objects with headers: firstName,lastName,email,password,phone,role,organizationCode
-	const results = await createUsersFromArray(rows);
+	const results = await createUsersFromArray(rows, { organizationId, organizationCode });
 
-	res.json({ success: true, results });
+	res.status(200).json({ success: true, message: "Bulk upload completed", data: results, results });
+};
+
+// Generate and download user template Excel file
+export const generateUserTemplateController = async (req, res) => {
+	const buffer = generateUserTemplate();
+
+	res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+	res.setHeader("Content-Disposition", "attachment; filename=users_template.xlsx");
+	res.send(buffer);
 };
