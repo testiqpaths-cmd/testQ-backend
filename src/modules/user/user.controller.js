@@ -58,9 +58,31 @@ export const listStudentsController = async (req, res) => {
 };
 
 export const createStudentController = async (req, res) => {
+	const requesterRole = req.user?.role;
+	const requesterOrganizationId = req.user?.organizationId || null;
+
+	if (requesterRole !== "ORGANIZATION" && requesterRole !== "IQPATH_ADMIN") {
+		return res.status(403).json({ success: false, message: "Forbidden" });
+	}
+
 	const payload = { ...req.body, role: "STUDENT", status: req.body.status || "ACTIVE" };
+
+	if (requesterRole === "ORGANIZATION") {
+		if (!requesterOrganizationId) {
+			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
+		}
+		payload.organizationId = requesterOrganizationId;
+	}
+
+	if (requesterRole === "IQPATH_ADMIN") {
+		payload.organizationId = req.body.organizationId || null;
+	}
+
 	if (!payload.email) {
 		return res.status(400).json({ success: false, message: "Student email is required" });
+	}
+	if (!payload.organizationId) {
+		return res.status(400).json({ success: false, message: "organizationId is required" });
 	}
 	const user = await createStudent(payload);
 	res.status(201).json({ success: true, user });
@@ -92,7 +114,8 @@ export const listOrganizationsController = async (req, res) => {
 };
 
 export const createOrganizationController = async (req, res) => {
-	const org = await createOrganization(req.body);
+	const adminId = req.user?._id || req.user?.id;
+	const org = await createOrganization({ ...req.body, createdBy: adminId });
 	res.status(201).json({ success: true, data: org, organization: org });
 };
 
@@ -120,12 +143,26 @@ export const bulkUploadUsersController = async (req, res) => {
 	const file = req.file || (req.files && req.files.file && req.files.file[0]);
 	if (!file || !file.buffer) return res.status(400).json({ success: false, message: "Excel file is required" });
 
+	const requesterRole = req.user?.role;
+	const requesterOrganizationId = req.user?.organizationId || null;
+
 	let organizationId = req.body.organizationId || null;
 	const organizationCode = req.body.organizationCode || null;
+
+	if (requesterRole === "ORGANIZATION") {
+		if (!requesterOrganizationId) {
+			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
+		}
+		organizationId = requesterOrganizationId;
+	}
 	
 	// Handle FormData organizationId (string from form field)
 	if (organizationId && typeof organizationId === "string" && organizationId.trim()) {
 		organizationId = organizationId.trim();
+	}
+
+	if (requesterRole === "IQPATH_ADMIN" && !organizationId && !organizationCode) {
+		return res.status(400).json({ success: false, message: "organizationId or organizationCode is required" });
 	}
 
 	let rows = [];

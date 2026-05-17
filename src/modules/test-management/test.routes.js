@@ -15,6 +15,7 @@ import {
   deleteTest,
   getAllTests,
   getMyTests,
+  getAssignedTests,
 } from "./test.controller.js";
 
 
@@ -31,6 +32,12 @@ router.get(
   authMiddleware,
   roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
   getMyTests
+);
+// Assigned tests (published tests visible to students/orgs)
+router.get(
+  "/assigned",
+  authMiddleware,
+  getAssignedTests
 );
 
 //get one

@@ -51,8 +51,47 @@ export const createSeries = async (req, res, next) => {
 };
 
 export const updateSeries = async (req, res) => {
-  const series = await service.updateSeries(req.params.id, req.body);
-  res.json({ success: true, data: series });
+  try {
+    const id = req.params.id;
+    const payload = req.body || {};
+
+    const series = await service.updateSeries(id, payload);
+
+    // If client requested schedule update, compute start/end for tests
+    if (Array.isArray(payload.tests) && payload.scheduleStart) {
+      const Test = (await import('../../models/test.model.js')).default;
+
+      // parse scheduleStart
+      let cursor = new Date(payload.scheduleStart);
+      if (Number.isNaN(cursor.getTime())) cursor = new Date();
+
+      for (const testId of payload.tests) {
+        try {
+          const test = await Test.findById(testId);
+          if (!test) continue;
+
+          const durationMinutes = Number(test.duration) || 0;
+          const startTime = new Date(cursor);
+          const endTime = new Date(cursor.getTime() + durationMinutes * 60 * 1000);
+
+          test.startTime = startTime;
+          test.endTime = endTime;
+          await test.save();
+
+          // advance cursor
+          cursor = endTime;
+        } catch (e) {
+          // continue on per-test error
+          logger.error(`updateSeries: failed to update schedule for test ${testId}: ${e.message}`);
+        }
+      }
+    }
+
+    res.json({ success: true, data: series });
+  } catch (err) {
+    logger.error(`updateSeries error: ${err.message}`);
+    res.status(500).json({ success: false, message: err.message || 'Internal Server Error' });
+  }
 };
 
 export const deleteSeries = async (req, res) => {
@@ -82,5 +121,25 @@ export const getSeriesList = async (req, res, next) => {
       success: false,
       message: err.message || "Internal Server Error",
     });
+  }
+};
+
+export const createSeriesTest = async (req, res, next) => {
+  try {
+    const seriesId = req.params.id;
+    const data = req.body;
+
+    // basic validation
+    if (!seriesId) {
+      return res.status(400).json({ success: false, message: 'Series id is required' });
+    }
+
+    const TestSeriesService = await import('./testSeries.service.js');
+    const test = await TestSeriesService.createSeriesTest(seriesId, data, req.user);
+
+    return res.status(201).json({ success: true, data: test });
+  } catch (err) {
+    logger.error(`createSeriesTest error: ${err.message}`);
+    return res.status(500).json({ success: false, message: err.message || 'Internal Server Error' });
   }
 };

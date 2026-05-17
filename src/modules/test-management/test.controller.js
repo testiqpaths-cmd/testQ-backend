@@ -142,3 +142,14 @@ export const getAllTests = async (req, res) => {
     });
   }
 };
+
+export const getAssignedTests = async (req, res) => {
+  try {
+    const search = req.query.search || "";
+    const tests = await service.getAssignedTests({ search });
+    return res.json({ success: true, data: tests });
+  } catch (err) {
+    logger.error(`getAssignedTests error: ${err.message}`);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};

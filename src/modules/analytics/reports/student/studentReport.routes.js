@@ -11,7 +11,7 @@ const router = express.Router();
 router.get(
   "/student/results",
   authMiddleware,
- roleMiddleware("STUDENT"),
+ roleMiddleware("STUDENT", "ORGANIZATION", "IQPATH_ADMIN"),
   generateStudentReport
 );
 

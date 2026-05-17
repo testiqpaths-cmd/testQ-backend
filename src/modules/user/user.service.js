@@ -86,6 +86,9 @@ export const createOrganization = async (payload) => {
 	if (!data.code) {
 		data.code = generateOrganizationCode(data.name || "ORG");
 	}
+	if (!data.createdBy) {
+		delete data.createdBy;
+	}
 	const org = await Organization.create(data);
 	return org;
 };

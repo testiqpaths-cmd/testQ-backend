@@ -5,7 +5,7 @@ export const generateStudentReport = async (req, res, next) => {
   try {
     const format = req.query.format?.toLowerCase().trim();
     const resultId = req.query.resultId?.toString().trim() || null;
-    const studentId = req.user?._id;
+    const user = req.user;
 
     if (resultId && !mongoose.Types.ObjectId.isValid(resultId)) {
       return res.status(400).json({
@@ -23,11 +23,7 @@ export const generateStudentReport = async (req, res, next) => {
     }
 
     // Call service
-    const fileBuffer = await generateStudentReportService({
-      studentId,
-      format,
-      resultId,
-    });
+    const fileBuffer = await generateStudentReportService({ user, format, resultId });
 
     // If no data found
     if (!fileBuffer) {

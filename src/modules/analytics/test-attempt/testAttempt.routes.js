@@ -10,7 +10,7 @@ const router = express.Router();
 router.get(
   "/students/me/results",
   authMiddleware,
-  roleMiddleware("STUDENT"),
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
   getMyResultsController
 );
 

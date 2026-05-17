@@ -25,6 +25,7 @@ export const createOrganizationService = async (payload) => {
     contactEmail,
     businessPhone,
     plan,
+    createdBy,
   } = payload;
 
   const codeBase = (organizationName || "org").trim().replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase() || "ORG";
@@ -34,6 +35,7 @@ export const createOrganizationService = async (payload) => {
     name: organizationName,
     contactEmail,
     code,
+    createdBy: createdBy || undefined,
   });
 
   const [firstName, ...rest] = (contactPerson || "").trim().split(" ");

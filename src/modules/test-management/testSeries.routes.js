@@ -10,6 +10,7 @@ import {
   updateSeries,
   deleteSeries,
 } from "./testSeries.controller.js";
+import { createSeriesTest } from "./testSeries.controller.js";
 
 const router = Router();
 
@@ -53,6 +54,15 @@ router.delete(
   roleMiddleware("IQPATH_ADMIN"),
   loadSeries,
   deleteSeries
+);
+
+// ✅ CREATE TEST INSIDE SERIES: POST /api/test-series/:id/tests
+router.post(
+  "/:id/tests",
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN","ORGANIZATION"),
+  loadSeries,
+  createSeriesTest
 );
 
 export default router;

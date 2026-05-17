@@ -7,6 +7,7 @@ const organizationSchema = new mongoose.Schema(
     code: { type: String, unique: true }, // short identifier
     address: { type: String },
     contactEmail: { type: String },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     createdAt: { type: Date, default: Date.now },
     // relationships
     admins: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
