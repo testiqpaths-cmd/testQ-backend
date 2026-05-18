@@ -118,6 +118,8 @@ export const firebaseAuth = async ({
   }
 
   let user = await findUserByFirebaseUid(normalizedFirebaseUid);
+  const userFoundByFirebaseUid = !!user; // Track if user was found by firebaseUid
+  
   if (!user) {
     user = await findUserByEmail(normalizedEmail);
   }
@@ -142,7 +144,16 @@ export const firebaseAuth = async ({
       status: "ACTIVE",
       }),
     });
+  } else if (userFoundByFirebaseUid) {
+    // User already exists with this Firebase UID - don't update the record
+    // Just return the existing user for security and consistency
+    console.info("Firebase user already signed in, skipping record update", {
+      userId: user?._id,
+      email: user?.email,
+      firebaseUid: user?.firebaseUid,
+    });
   } else {
+    // User found by email but doesn't have firebaseUid yet - link Firebase account
     if (
       user.firebaseUid &&
       String(user.firebaseUid).trim() !== normalizedFirebaseUid

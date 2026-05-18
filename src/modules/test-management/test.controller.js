@@ -145,9 +145,31 @@ export const getAllTests = async (req, res) => {
 
 export const getAssignedTests = async (req, res) => {
   try {
+    const userId = req.user?._id || req.user?.id;
     const search = req.query.search || "";
     const tests = await service.getAssignedTests({ search });
-    return res.json({ success: true, data: tests });
+
+    // Attach current user's attempt count so the UI can hide Start when attempts are exhausted.
+    const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+
+    const enriched = await Promise.all(
+      tests.map(async (test) => {
+        const attemptsMade = userId
+          ? await TestAttempt.countDocuments({ testId: test._id, studentId: userId })
+          : 0;
+
+        const obj = test.toObject ? test.toObject() : { ...test };
+        obj.attemptsMade = attemptsMade;
+
+        if (Number(obj.maxAttempts || 1) <= attemptsMade) {
+          obj.status = "COMPLETED";
+        }
+
+        return obj;
+      })
+    );
+
+    return res.json({ success: true, data: enriched });
   } catch (err) {
     logger.error(`getAssignedTests error: ${err.message}`);
     return res.status(500).json({ success: false, message: err.message });
