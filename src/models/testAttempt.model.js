@@ -105,10 +105,10 @@ const testAttemptSchema = new mongoose.Schema(
           type: Date,
           default: Date.now,
         },
-      timeSpentMs: {
-        type: Number,
-        default: 0,
-      },
+        timeSpentMs: {
+          type: Number,
+          default: 0,
+        },
         marksObtained: {
           type: Number,
           default: 0,
@@ -134,6 +134,40 @@ const testAttemptSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    rank: {
+      type: Number,
+      default: null,
+    },
+
+    percentile: {
+      type: Number,
+      default: 0,
+    },
+
+    correctAnswersCount: {
+      type: Number,
+      default: 0,
+    },
+
+    incorrectAnswersCount: {
+      type: Number,
+      default: 0,
+    },
+
+    unattemptedCount: {
+      type: Number,
+      default: 0,
+    },
+
+    accuracy: {
+      type: Number,
+      default: 0,
+    },
+
+    timeTakenSeconds: {
+      type: Number,
+      default: 0,
+    },
 
     resultStatus: {
       type: String,
@@ -147,16 +181,17 @@ const testAttemptSchema = new mongoose.Schema(
       default: null,
     },
   },
-  { timestamps: true }
+  { timestamps: true },
 );
 
 // Allow multiple attempts over time, but only one active attempt at a time.
 testAttemptSchema.index(
-  { testId: 1, studentId: 1, status: 1 },
+  { testId: 1, studentId: 1, status: 1,totalScore: -1,
+  timeTakenSeconds: 1, },
   {
     unique: true,
     partialFilterExpression: { status: "IN_PROGRESS" },
-  }
+  },
 );
 
 export default mongoose.model("TestAttempt", testAttemptSchema);
