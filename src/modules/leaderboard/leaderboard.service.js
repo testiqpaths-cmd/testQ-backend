@@ -62,8 +62,20 @@ export const getTestLeaderboard = async (testId, query) => {
 
   // ✅ manual rank generation
   const leaderboard = results.map((item, index) => ({
-    ...item,
     rank: skip + index + 1,
+
+    username: item.studentName,
+   institute: item.institute || "Medicaps University",
+
+    correctQuestions: item.correctAnswersCount,
+    incorrectQuestions: item.incorrectAnswersCount,
+    totalQuestions:
+      (item.correctAnswersCount || 0) +
+      (item.incorrectAnswersCount || 0) +
+      (item.unattemptedCount || 0),
+
+    score: item.totalScore,
+    timeTaken: item.timeTakenSeconds,
   }));
 
   return leaderboard;
@@ -92,16 +104,19 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
 
     // 🧠 IMPORTANT: group per student
     {
-      $group: {
-        _id: "$studentId",
+  $group: {
+    _id: "$studentId",
 
-        totalScore: { $sum: "$totalScore" },
-        totalTime: { $sum: "$timeTakenSeconds" },
-        avgAccuracy: { $avg: "$accuracy" },
-        attempts: { $sum: 1 },
-      },
-    },
+    totalScore: { $sum: "$totalScore" },
+    totalTime: { $sum: "$timeTakenSeconds" },
 
+    correctQuestions: { $sum: "$correctAnswersCount" },
+    incorrectQuestions: { $sum: "$incorrectAnswersCount" },
+    unattemptedQuestions: { $sum: "$unattemptedCount" },
+
+    attempts: { $sum: 1 }
+  }
+},
     {
       $lookup: {
         from: "users",
@@ -131,19 +146,29 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
       },
     },
 
-    {
-      $project: {
-        rank: 1,
-        totalScore: 1,
-        totalTime: 1,
-        avgAccuracy: 1,
-        attempts: 1,
+   {
+  $project: {
+    rank: 1,
 
-        studentName: "$student.fullName",
-        email: "$student.email",
-      },
+    username: "$student.fullName",
+    institute: "$student.institute",
+
+    correctQuestions: 1,
+    incorrectQuestions: 1,
+    unattemptedQuestions: 1,
+
+    totalQuestions: {
+      $add: [
+        "$correctQuestions",
+        "$incorrectQuestions",
+        "$unattemptedQuestions"
+      ]
     },
 
+    score: "$totalScore",
+    timeTaken: "$totalTime"
+  }
+},
     { $skip: skip },
     { $limit: limit },
   ]);
