@@ -1,22 +1,44 @@
 import mongoose from "mongoose";
 import TestAttempt from "../../models/testAttempt.model.js";
 import TestSeries from "../../models/testSeries.model.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
+
+const buildStudentName = {
+  $trim: {
+    input: {
+      $concat: [
+        { $ifNull: ["$student.firstName", ""] },
+        " ",
+        { $ifNull: ["$student.lastName", ""] },
+      ],
+    },
+  },
+};
+
+const normalizePageAndLimit = (query) => {
+  const page = Math.max(1, Number(query.page || 1));
+  const limit = Math.max(1, Number(query.limit || 10));
+
+  return { page, limit, skip: (page - 1) * limit };
+};
 
 // 🧪 TEST leaderboard
 export const getTestLeaderboard = async (testId, query) => {
-  const page = Number(query.page || 1);
-  const limit = Number(query.limit || 10);
+  if (!mongoose.Types.ObjectId.isValid(testId)) {
+    throw new ApiError(400, "Invalid testId");
+  }
 
-  const skip = (page - 1) * limit;
+  const { page, limit, skip } = normalizePageAndLimit(query);
+  const matchStage = {
+    testId: new mongoose.Types.ObjectId(testId),
+    status: { $in: ["SUBMITTED", "EVALUATED"] },
+  };
+
+  const totalPromise = TestAttempt.countDocuments(matchStage);
 
   // ✅ get sorted results
-  const results = await TestAttempt.aggregate([
-    {
-      $match: {
-        testId: new mongoose.Types.ObjectId(testId),
-        status: { $in: ["SUBMITTED", "EVALUATED"] },
-      },
-    },
+  const itemsPromise = TestAttempt.aggregate([
+    { $match: matchStage },
 
     {
       $lookup: {
@@ -50,7 +72,7 @@ export const getTestLeaderboard = async (testId, query) => {
         incorrectAnswersCount: 1,
         unattemptedCount: 1,
 
-        studentName: "$student.fullName",
+        studentName: buildStudentName,
         email: "$student.email",
       },
     },
@@ -60,35 +82,62 @@ export const getTestLeaderboard = async (testId, query) => {
     { $limit: limit },
   ]);
 
+  const [results, total] = await Promise.all([itemsPromise, totalPromise]);
+
   // ✅ manual rank generation
   const leaderboard = results.map((item, index) => ({
     ...item,
     rank: skip + index + 1,
   }));
 
-  return leaderboard;
+  return {
+    items: leaderboard,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
+  };
 };
 
 // 📚 SERIES leaderboard
 export const getSeriesLeaderboard = async (seriesId, query) => {
-  const page = Number(query.page || 1);
-  const limit = Number(query.limit || 10);
-  const skip = (page - 1) * limit;
+  if (!mongoose.Types.ObjectId.isValid(seriesId)) {
+    throw new ApiError(400, "Invalid seriesId");
+  }
+
+  const { page, limit, skip } = normalizePageAndLimit(query);
 
   const series = await TestSeries.findById(seriesId).select("tests");
-  if (!series) return [];
+  if (!series) {
+    return {
+      items: [] ,
+      pagination: { page, limit, total: 0, totalPages: 1 },
+    };
+  }
 
   const testIds = series.tests;
 
-  return await TestAttempt.aggregate([
+  const matchStage = {
+    testId: {
+      $in: testIds.map((id) => new mongoose.Types.ObjectId(id)),
+    },
+    status: { $in: ["SUBMITTED", "EVALUATED"] },
+  };
+
+  const totalPromise = TestAttempt.aggregate([
+    { $match: matchStage },
     {
-      $match: {
-        testId: {
-          $in: testIds.map((id) => new mongoose.Types.ObjectId(id)),
-        },
-        status: { $in: ["SUBMITTED", "EVALUATED"] },
+      $group: {
+        _id: "$studentId",
       },
     },
+    { $count: "total" },
+  ]).then((result) => result[0]?.total || 0);
+
+  const itemsPromise = TestAttempt.aggregate([
+    { $match: matchStage },
 
     // 🧠 IMPORTANT: group per student
     {
@@ -139,7 +188,7 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
         avgAccuracy: 1,
         attempts: 1,
 
-        studentName: "$student.fullName",
+        studentName: buildStudentName,
         email: "$student.email",
       },
     },
@@ -147,4 +196,16 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
     { $skip: skip },
     { $limit: limit },
   ]);
+
+  const [items, total] = await Promise.all([itemsPromise, totalPromise]);
+
+  return {
+    items,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages: Math.max(1, Math.ceil(total / limit)),
+    },
+  };
 };

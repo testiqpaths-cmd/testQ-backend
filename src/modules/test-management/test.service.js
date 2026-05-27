@@ -3,6 +3,14 @@ import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
 import { computeTestStatus } from "./utils/status.js";
 
+const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
+
+const leaderboardCreatorFields = [
+  { $ifNull: ["$creatorUser.firstName", ""] },
+  " ",
+  { $ifNull: ["$creatorUser.lastName", ""] },
+];
+
 export async function createTest(data, user) {
   // Prevent creating series tests via the normal test creation flow.
   if (data.testSeriesId) {
@@ -47,6 +55,57 @@ export async function deleteTest(test) {
 export const getAllTests = async () => {
   // Exclude tests that belong to a series
   return await Test.find({ isSeriesTest: { $ne: true } }).sort({ createdAt: -1 });
+};
+
+export const getLeaderboardTests = async () => {
+  return Test.aggregate([
+    {
+      $match: {
+        isSeriesTest: { $ne: true },
+        "createdBy.role": { $in: creatorRoleFilter },
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "createdBy.userId",
+        foreignField: "_id",
+        as: "creatorUser",
+      },
+    },
+    {
+      $unwind: {
+        path: "$creatorUser",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $lookup: {
+        from: "organizations",
+        localField: "creatorUser.organizationId",
+        foreignField: "_id",
+        as: "creatorOrganization",
+      },
+    },
+    {
+      $unwind: {
+        path: "$creatorOrganization",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $addFields: {
+        creatorName: {
+          $trim: {
+            input: { $concat: leaderboardCreatorFields },
+          },
+        },
+        creatorEmail: "$creatorUser.email",
+        creatorOrganizationName: "$creatorOrganization.name",
+      },
+    },
+    { $sort: { createdAt: -1 } },
+  ]);
 };
 
 export const getMyTests = async ({ userId, search = "" }) => {

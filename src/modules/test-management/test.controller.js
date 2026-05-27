@@ -107,7 +107,9 @@ export const getMyTests = async (req, res) => {
 export const getAllTests = async (req, res) => {
   try {
     const userId = req.user?._id || req.user?.id;
-    const tests = await service.getAllTests();
+    const tests = req.query.leaderboard === "true"
+      ? await service.getLeaderboardTests()
+      : await service.getAllTests();
 
     // Attach attemptsMade for each test (current student's perspective)
     if (userId) {

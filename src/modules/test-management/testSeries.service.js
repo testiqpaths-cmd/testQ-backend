@@ -4,6 +4,20 @@ import TestSeries from "../../models/testSeries.model.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
 
+const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
+
+const creatorNameExpression = {
+  $trim: {
+    input: {
+      $concat: [
+        { $ifNull: ["$creatorUser.firstName", ""] },
+        " ",
+        { $ifNull: ["$creatorUser.lastName", ""] },
+      ],
+    },
+  },
+};
+
 
 export const createSeries = async (data, user) => {
   logger.debug(`Creating series for user: ${JSON.stringify(user)}`);
@@ -50,6 +64,53 @@ export const getSeriesList = async ({ userId, search = "" } = {}) => {
       select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status",
     })
     .sort({ createdAt: -1 });
+};
+
+export const getLeaderboardSeriesList = async () => {
+  return TestSeries.aggregate([
+    {
+      $match: {
+        "createdBy.role": { $in: creatorRoleFilter },
+      },
+    },
+    {
+      $lookup: {
+        from: "users",
+        localField: "createdBy.userId",
+        foreignField: "_id",
+        as: "creatorUser",
+      },
+    },
+    {
+      $unwind: {
+        path: "$creatorUser",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $lookup: {
+        from: "organizations",
+        localField: "creatorUser.organizationId",
+        foreignField: "_id",
+        as: "creatorOrganization",
+      },
+    },
+    {
+      $unwind: {
+        path: "$creatorOrganization",
+        preserveNullAndEmptyArrays: true,
+      },
+    },
+    {
+      $addFields: {
+        creatorName: creatorNameExpression,
+        creatorEmail: "$creatorUser.email",
+        creatorOrganizationName: "$creatorOrganization.name",
+        testsCount: { $size: { $ifNull: ["$tests", []] } },
+      },
+    },
+    { $sort: { createdAt: -1 } },
+  ]);
 };
 
 // Create a new test that belongs to a series. The test will be marked as a series test

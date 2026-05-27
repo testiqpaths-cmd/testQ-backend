@@ -106,10 +106,12 @@ export const getSeries = async (req, res) => {
 
 export const getSeriesList = async (req, res, next) => {
   try {
-    const series = await service.getSeriesList({
-      userId: req.user?._id || req.user?.id,
-      search: req.query.search || "",
-    });
+    const series = req.query.leaderboard === "true"
+      ? await service.getLeaderboardSeriesList()
+      : await service.getSeriesList({
+          userId: req.user?._id || req.user?.id,
+          search: req.query.search || "",
+        });
 
     return res.json({
       success: true,
