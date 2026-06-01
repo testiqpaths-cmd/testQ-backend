@@ -1,5 +1,7 @@
 import XLSX from "xlsx";
+import mongoose from "mongoose";
 import { ApiError } from "../../common/exceptions/ApiError.js";
+import Question from "../../models/question.model.js";
 import { validateQuestion } from "./questions.validator.js";
 import {
   createQuestionRepo,
