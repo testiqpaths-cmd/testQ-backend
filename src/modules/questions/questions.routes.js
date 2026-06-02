@@ -11,7 +11,8 @@ import {
   getQuestionsByUserIdController, 
   getQuestionByIdController,
   getQuestionsBySubjectController,
-  getQuestionsByTopicController 
+  getQuestionsByTopicController,
+  downloadQuestionTemplateController
 } from "./questions.controller.js";
 import {
   createQuestion,
@@ -47,26 +48,27 @@ router.get("/getQuestionById/:questionId", getQuestionByIdController);
 router.get("/getQuestionsBySubject/:subjectId", getQuestionsBySubjectController);
 router.get("/getQuestionsByTopic/:topicId", getQuestionsByTopicController);
 
-router.get("/download-template", async (req, res) => {
-  try {
-    // Generate template if it doesn't exist
-    const templatePath = await generateQuestionTemplate();
+// router.get("/download-template", async (req, res) => {
+//   try {
+//     // Generate template if it doesn't exist
+//     const templatePath = await generateQuestionTemplate();
 
-    res.download(templatePath, "question_template.xlsx", (err) => {
-      if (err) {
-        console.error("Download error:", err);
-        res.status(500).json({
-          message: "File not found or error downloading template",
-        });
-      }
-    });
-  } catch (error) {
-    console.error("Error in download-template route:", error);
-    res.status(500).json({
-      message: "Error generating or downloading template",
-      error: error.message,
-    });
-  }
-});
+//     res.download(templatePath, "question_template.xlsx", (err) => {
+//       if (err) {
+//         console.error("Download error:", err);
+//         res.status(500).json({
+//           message: "File not found or error downloading template",
+//         });
+//       }
+//     });
+//   } catch (error) {
+//     console.error("Error in download-template route:", error);
+//     res.status(500).json({
+//       message: "Error generating or downloading template",
+//       error: error.message,
+//     });
+//   }
+// });
+router.get("/download-template", downloadQuestionTemplateController);
 
 export default router;

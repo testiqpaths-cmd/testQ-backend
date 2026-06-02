@@ -256,111 +256,111 @@ export const getAttemptController = async (req, res, next) => {
   }
 };
 
-export const saveAnswerController = async (req, res, next) => {
-  try {
-    const attempt = req.attempt; // from loadAttempt
-    const timing = req.timing; // from enforceAttemptTimer
+  export const saveAnswerController = async (req, res, next) => {
+    try {
+      const attempt = req.attempt; // from loadAttempt
+      const timing = req.timing; // from enforceAttemptTimer
 
-    // ✅ Block if not in progress (Acceptance Criteria)
-    if (attempt.status !== "IN_PROGRESS") {
-      return res.status(409).json({
-        success: false,
-        message: "Attempt is not in progress",
-        errors: null,
-      });
-    }
-
-    // ✅ If timer says expired, block (your middleware may auto-expire already)
-    if (timing?.expired) {
-      return res.status(409).json({
-        success: false,
-        message: "Time expired. Attempt ended.",
-        errors: null,
-      });
-    }
-
-    // ✅ Validate request body
-    const parsed = saveAnswerSchema.parse(req.body);
-    const questionId = new mongoose.Types.ObjectId(parsed.questionId);
-    const timeSpentMs = Number(parsed.timeSpentMs || 0);
-
-    const snapshotIndex = Array.isArray(attempt.questionSnapshots)
-      ? attempt.questionSnapshots.findIndex(
-          (item) => item.questionId.toString() === questionId.toString(),
-        )
-      : -1;
-
-    if (snapshotIndex === -1) {
-      return res.status(404).json({
-        success: false,
-        message: "Question is not part of this attempt",
-        errors: null,
-      });
-    }
-
-    const snapshot = attempt.questionSnapshots[snapshotIndex];
-    if (Number.isFinite(timeSpentMs) && timeSpentMs > 0) {
-      snapshot.timeSpentMs = (snapshot.timeSpentMs || 0) + timeSpentMs;
-      snapshot.lastViewedAt = new Date();
-      if (!snapshot.startedAt) {
-        snapshot.startedAt = snapshot.lastViewedAt;
+      // ✅ Block if not in progress (Acceptance Criteria)
+      if (attempt.status !== "IN_PROGRESS") {
+        return res.status(409).json({
+          success: false,
+          message: "Attempt is not in progress",
+          errors: null,
+        });
       }
-    }
 
-    // ✅ Upsert by questionId (no duplicates)
-    const idx = attempt.answers.findIndex(
-      (a) => a.questionId.toString() === questionId.toString(),
-    );
-
-    const updatedAnswer = {
-      questionId,
-      selectedOption: parsed.selectedOption ?? null,
-      textAnswer: parsed.textAnswer ?? null,
-      answeredAt: new Date(),
-      timeSpentMs: Number.isFinite(timeSpentMs) ? timeSpentMs : 0,
-    };
-
-    if (parsed.selectedOption !== undefined || parsed.textAnswer !== undefined) {
-      updatedAnswer.timeSpentMs = snapshot.timeSpentMs || updatedAnswer.timeSpentMs;
-
-      if (idx >= 0) {
-        // update existing entry
-        attempt.answers[idx].selectedOption = updatedAnswer.selectedOption;
-        attempt.answers[idx].textAnswer = updatedAnswer.textAnswer;
-        attempt.answers[idx].answeredAt = updatedAnswer.answeredAt;
-        attempt.answers[idx].timeSpentMs = updatedAnswer.timeSpentMs;
-      } else {
-        // add new entry
-        attempt.answers.push(updatedAnswer);
+      // ✅ If timer says expired, block (your middleware may auto-expire already)
+      if (timing?.expired) {
+        return res.status(409).json({
+          success: false,
+          message: "Time expired. Attempt ended.",
+          errors: null,
+        });
       }
-    } else if (idx >= 0) {
-      attempt.answers[idx].timeSpentMs = snapshot.timeSpentMs || attempt.answers[idx].timeSpentMs || 0;
-    }
 
-    await attempt.save();
+      // ✅ Validate request body
+      const parsed = saveAnswerSchema.parse(req.body);
+      const questionId = new mongoose.Types.ObjectId(parsed.questionId);
+      const timeSpentMs = Number(parsed.timeSpentMs || 0);
 
-    return res.status(200).json({
-      success: true,
-      message: "Answer saved successfully",
-      data: {
-        attemptId: attempt._id,
-        questionId: parsed.questionId,
-        timeSpentMs: snapshot.timeSpentMs || 0,
-        timing: req.timing,
-      },
-    });
-  } catch (err) {
-    // Zod error
-    if (err?.errors) {
-      return res.status(400).json({
-        success: false,
-        message: "Validation failed",
-        errors: err.errors,
+      const snapshotIndex = Array.isArray(attempt.questionSnapshots)
+        ? attempt.questionSnapshots.findIndex(
+            (item) => item.questionId.toString() === questionId.toString(),
+          )
+        : -1;
+
+      if (snapshotIndex === -1) {
+        return res.status(404).json({
+          success: false,
+          message: "Question is not part of this attempt",
+          errors: null,
+        });
+      }
+
+      const snapshot = attempt.questionSnapshots[snapshotIndex];
+      if (Number.isFinite(timeSpentMs) && timeSpentMs > 0) {
+        snapshot.timeSpentMs = (snapshot.timeSpentMs || 0) + timeSpentMs;
+        snapshot.lastViewedAt = new Date();
+        if (!snapshot.startedAt) {
+          snapshot.startedAt = snapshot.lastViewedAt;
+        }
+      }
+
+      // ✅ Upsert by questionId (no duplicates)
+      const idx = attempt.answers.findIndex(
+        (a) => a.questionId.toString() === questionId.toString(),
+      );
+
+      const updatedAnswer = {
+        questionId,
+        selectedOption: parsed.selectedOption ?? null,
+        textAnswer: parsed.textAnswer ?? null,
+        answeredAt: new Date(),
+        timeSpentMs: Number.isFinite(timeSpentMs) ? timeSpentMs : 0,
+      };
+
+      if (parsed.selectedOption !== undefined || parsed.textAnswer !== undefined) {
+        updatedAnswer.timeSpentMs = snapshot.timeSpentMs || updatedAnswer.timeSpentMs;
+
+        if (idx >= 0) {
+          // update existing entry
+          attempt.answers[idx].selectedOption = updatedAnswer.selectedOption;
+          attempt.answers[idx].textAnswer = updatedAnswer.textAnswer;
+          attempt.answers[idx].answeredAt = updatedAnswer.answeredAt;
+          attempt.answers[idx].timeSpentMs = updatedAnswer.timeSpentMs;
+        } else {
+          // add new entry
+          attempt.answers.push(updatedAnswer);
+        }
+      } else if (idx >= 0) {
+        attempt.answers[idx].timeSpentMs = snapshot.timeSpentMs || attempt.answers[idx].timeSpentMs || 0;
+      }
+
+      await attempt.save();
+
+      return res.status(200).json({
+        success: true,
+        message: "Answer saved successfully",
+        data: {
+          attemptId: attempt._id,
+          questionId: parsed.questionId,
+          timeSpentMs: snapshot.timeSpentMs || 0,
+          timing: req.timing,
+        },
       });
+    } catch (err) {
+      // Zod error
+      if (err?.errors) {
+        return res.status(400).json({
+          success: false,
+          message: "Validation failed",
+          errors: err.errors,
+        });
+      }
+      return next(err);
     }
-    return next(err);
-  }
-};
+  };
 
 export const submitAttemptController = async (req, res, next) => {
   try {
