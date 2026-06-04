@@ -18,6 +18,31 @@ const creatorNameExpression = {
   },
 };
 
+const toIdArray = (...values) =>
+  values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      return value ? [value] : [];
+    })
+    .map((value) => String(value))
+    .filter(Boolean);
+
+const normalizeSeriesTestPayload = (data) => {
+  const subjectIds = toIdArray(data.subjectIds, data.subjectId);
+  const topicIds = toIdArray(data.topicIds, data.topicId);
+
+  if (data.questionSource !== "EXCEL" && !subjectIds.length) {
+    throw new Error("At least one subject is required");
+  }
+
+  return {
+    ...data,
+    subjectId: subjectIds[0] || data.subjectId,
+    subjectIds,
+    topicIds,
+  };
+};
+
 
 export const createSeries = async (data, user) => {
   logger.debug(`Creating series for user: ${JSON.stringify(user)}`);
@@ -120,7 +145,7 @@ export const createSeriesTest = async (seriesId, data, user) => {
   const Test = (await import('../../models/test.model.js')).default;
 
   const payload = {
-    ...data,
+    ...normalizeSeriesTestPayload(data),
     testSeriesId: seriesId,
     isSeriesTest: true,
     maxAttempts: Number(data.maxAttempts) || 1,

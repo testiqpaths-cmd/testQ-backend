@@ -61,7 +61,7 @@ export const getSubjectById = asyncHandler(async (req, res) => {
 });
 
 export const getAllSubjects = asyncHandler(async (req, res) => {
-  const subjects = await subjectTopicService.getMySubjectsService(req.user._id);
+  const subjects = await subjectTopicService.getAllSubjectsService();
   res.json({ success: true, data: subjects });
 });
 
@@ -121,7 +121,7 @@ export const getTopicById = asyncHandler(async (req, res) => {
 });
 
 export const getAllTopics = asyncHandler(async (req, res) => {
-  const topics = await subjectTopicService.getMyTopicsService(req.user._id);
+  const topics = await subjectTopicService.getAllTopicsService();
   res.json({ success: true, data: topics });
 });
 
@@ -132,8 +132,7 @@ export const getMyTopics = asyncHandler(async (req, res) => {
 
 export const getTopicsBySubjectId = asyncHandler(async (req, res) => {
   const topics = await subjectTopicService.getTopicsBySubjectIdService(
-    req.params.subjectId,
-    req.user._id
+    req.params.subjectId
   );
   res.json({ success: true, data: topics });
 });

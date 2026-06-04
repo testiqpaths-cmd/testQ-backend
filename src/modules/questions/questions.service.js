@@ -25,6 +25,16 @@ import {
 
 const normalizeText = (value) => String(value ?? "").trim();
 
+const toQueryList = (...values) =>
+  values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      return String(value ?? "")
+        .split(",")
+        .map((item) => item.trim());
+    })
+    .filter(Boolean);
+
 export const createQuestionService = async (payload) => {
   const errors = validateQuestion(payload);
 
@@ -354,8 +364,13 @@ export const getAllQuestionsService = async (query = {}) => {
   } = query;
 
   const filters = {};
-  if (subjectId) filters.subjectId = subjectId;
-  if (topicId) filters.topicId = topicId;
+  const subjectIds = toQueryList(subjectId, query.subjectIds, query["subjectId[]"], query["subjectIds[]"]);
+  const topicIds = toQueryList(topicId, query.topicIds, query["topicId[]"], query["topicIds[]"]);
+
+  if (subjectIds.length === 1) filters.subjectId = subjectIds[0];
+  if (subjectIds.length > 1) filters.subjectId = { $in: subjectIds };
+  if (topicIds.length === 1) filters.topicId = topicIds[0];
+  if (topicIds.length > 1) filters.topicId = { $in: topicIds };
   if (type) filters.type = type;
   if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
   if (organizationId) filters.organizationId = organizationId;
