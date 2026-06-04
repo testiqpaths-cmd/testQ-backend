@@ -7,13 +7,15 @@ export const createTestSchema = z
     title: z.string().min(1, "Title is required"),
     description: z.string().optional(),
 
-    subjectId: objectId,
+    subjectId: objectId.optional(),
 
     visibility: z.enum(["PUBLIC", "ORG_ONLY", "LINK_ONLY"]),
     allowedOrganizations: z.array(objectId).optional(),
 
     totalQuestions: z.number().positive("Total questions must be > 0"),
-    subjectIds: z.array(objectId).min(1, "At least one subject is required"),
+    questionSource: z.enum(["SUBJECT_TOPIC", "EXCEL"]).optional(),
+    excelBatchId: z.string().optional(),
+    subjectIds: z.array(objectId).optional(),
     topicIds: z.array(objectId).optional(),
     difficulty: z.array(z.string()).optional(),
     type: z.array(z.string()).optional(),
@@ -32,6 +34,16 @@ export const createTestSchema = z
   })
   .superRefine((data, ctx) => {
     /* Visibility rules */
+    if (
+      data.questionSource !== "EXCEL" &&
+      (!data.subjectIds || data.subjectIds.length === 0)
+    ) {
+      ctx.addIssue({
+        path: ["subjectIds"],
+        message: "At least one subject is required",
+      });
+    }
+
     if (
       data.visibility === "ORG_ONLY" &&
       (!data.allowedOrganizations || data.allowedOrganizations.length === 0)

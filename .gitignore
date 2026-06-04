@@ -3,3 +3,5 @@ node_modules
 package-lock.json
 logs/all.log
 logs/error.log
+dist
+coverage

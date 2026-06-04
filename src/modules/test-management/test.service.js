@@ -11,6 +11,31 @@ const leaderboardCreatorFields = [
   { $ifNull: ["$creatorUser.lastName", ""] },
 ];
 
+const toIdArray = (...values) =>
+  values
+    .flatMap((value) => {
+      if (Array.isArray(value)) return value;
+      return value ? [value] : [];
+    })
+    .map((value) => String(value))
+    .filter(Boolean);
+
+const normalizeTestPayload = (data) => {
+  const subjectIds = toIdArray(data.subjectIds, data.subjectId);
+  const topicIds = toIdArray(data.topicIds, data.topicId);
+
+  if (data.questionSource !== "EXCEL" && !subjectIds.length) {
+    throw new Error("At least one subject is required");
+  }
+
+  return {
+    ...data,
+    subjectId: subjectIds[0] || data.subjectId,
+    subjectIds,
+    topicIds,
+  };
+};
+
 export async function createTest(data, user) {
   // Prevent creating series tests via the normal test creation flow.
   if (data.testSeriesId) {
@@ -18,7 +43,7 @@ export async function createTest(data, user) {
   }
 
   const payload = {
-    ...data,
+    ...normalizeTestPayload(data),
     maxAttempts: Number(data.maxAttempts) || 1,
     testCode: data.visibility === "LINK_ONLY" ? crypto.randomBytes(4).toString("hex") : null,
     createdBy: { userId: user._id || user.id, role: user.role },
