@@ -208,3 +208,117 @@ export const firebaseAuth = async ({
 
   return { user, accessToken, refreshToken, photoURL };
 };
+export const githubAuth = async (code) => {
+  if (!code) {
+    throw new AuthError("GitHub authorization code is missing");
+  }
+
+  if (!process.env.GITHUB_CLIENT_ID || !process.env.GITHUB_CLIENT_SECRET) {
+    throw new AuthError("GitHub OAuth credentials are not configured");
+  }
+
+  // 1. Exchange code for GitHub access token
+  const tokenResponse = await fetch("https://github.com/login/oauth/access_token", {
+    method: "POST",
+    headers: {
+      Accept: "application/json",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      client_id: process.env.GITHUB_CLIENT_ID,
+      client_secret: process.env.GITHUB_CLIENT_SECRET,
+      code,
+      redirect_uri: process.env.GITHUB_CALLBACK_URL ||
+        "http://localhost:5000/auth/github/callback",
+    }),
+  });
+
+  const tokenData = await tokenResponse.json();
+
+  if (!tokenData.access_token) {
+    throw new AuthError(tokenData.error_description || "Failed to get GitHub access token");
+  }
+
+  // 2. Get GitHub profile
+  const profileResponse = await fetch("https://api.github.com/user", {
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+
+  const profile = await profileResponse.json();
+
+  // 3. Get GitHub email
+  const emailsResponse = await fetch("https://api.github.com/user/emails", {
+    headers: {
+      Authorization: `Bearer ${tokenData.access_token}`,
+      Accept: "application/vnd.github+json",
+    },
+  });
+
+  const emails = await emailsResponse.json();
+
+  const primaryEmail =
+    Array.isArray(emails) ?
+    emails.find((email) => email.primary && email.verified) ?.email ||
+    emails.find((email) => email.verified) ?.email :
+    null;
+
+  const email = normalizeEmail(primaryEmail || profile.email);
+
+  if (!email) {
+    throw new AuthError("Could not get verified email from GitHub");
+  }
+
+  // 4. Find or create user
+  let user = await findUserByEmail(email);
+
+  if (!user) {
+    const displayName = profile.name || profile.login || "GitHub User";
+    const [derivedFirstName = "Student", ...rest] = displayName.trim().split(" ");
+    const derivedLastName = rest.join(" ") || "User";
+
+    const randomPassword = `github:${profile.id}:${Date.now()}`;
+    const hashedPassword = await passwordService.hash(randomPassword);
+
+    user = await createUser(
+      sanitizeUserCreatePayload({
+        firstName: derivedFirstName,
+        lastName: derivedLastName,
+        email,
+        password: hashedPassword,
+        role: "STUDENT",
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        lastLogin: new Date(),
+        status: "ACTIVE",
+      })
+    );
+  } else {
+    user = await User.findByIdAndUpdate(
+      user._id, {
+        lastLogin: new Date(),
+        isEmailVerified: true,
+        emailVerifiedAt: user.emailVerifiedAt || new Date(),
+      }, {
+        new: true
+      }
+    );
+  }
+
+  const accessToken = generateAccessToken({
+    id: user._id,
+    role: user.role
+  });
+  const refreshToken = generateRefreshToken({
+    id: user._id,
+    role: user.role
+  });
+
+  return {
+    user,
+    accessToken,
+    refreshToken
+  };
+};

@@ -1,6 +1,9 @@
-﻿import { register as registerService } from "./auth.service.js";
-import { login as loginService } from "./auth.service.js";
-import { firebaseAuth as firebaseAuthService } from "./auth.service.js";
+﻿import {
+  register as registerService,
+  login as loginService,
+  firebaseAuth as firebaseAuthService,
+  githubAuth as githubAuthService,
+} from "./auth.service.js";
 import  logger  from "../../config/logger.js";
 import {
   accessCookieOptions,
@@ -199,7 +202,69 @@ export const meController = async (req, res) => {
     res.status(404).json({ message: err.message });
   }
 };
+export const githubLoginController = (req, res) => {
+  try {
+    if (!process.env.GITHUB_CLIENT_ID) {
+      return res.status(500).json({
+        success: false,
+        message: "GitHub client ID is not configured",
+      });
+    }
 
+    const callbackUrl =
+      process.env.GITHUB_CALLBACK_URL ||
+      "http://localhost:5000/auth/github/callback";
+
+    const params = new URLSearchParams({
+      client_id: process.env.GITHUB_CLIENT_ID,
+      redirect_uri: callbackUrl,
+      scope: "read:user user:email",
+    });
+
+    return res.redirect(`https://github.com/login/oauth/authorize?${params.toString()}`);
+  } catch (err) {
+    logger.error(`GitHub login error: ${err.message}`);
+    return res.status(500).json({
+      success: false,
+      message: "Failed to start GitHub authentication",
+    });
+  }
+};
+
+export const githubCallbackController = async (req, res) => {
+  try {
+    const {
+      code
+    } = req.query;
+
+    const {
+      user,
+      accessToken,
+      refreshToken
+    } = await githubAuthService(code);
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
+    res
+      .set("Authorization", `Bearer ${accessToken}`)
+      .cookie("accessToken", accessToken, accessCookieOptions)
+      .cookie("refreshToken", refreshToken, refreshCookieOptions);
+
+   const safeUser = encodeURIComponent(JSON.stringify(buildAuthUserResponse(user)));
+
+   return res.redirect(
+     `${frontendUrl}/login?accessToken=${accessToken}&refreshToken=${refreshToken}&user=${safeUser}`
+   );
+  } catch (err) {
+    logger.error(`GitHub callback error: ${err.message}`);
+
+    const frontendUrl = process.env.FRONTEND_URL || "http://localhost:5173";
+
+    return res.redirect(
+      `${frontendUrl}/login?error=${encodeURIComponent(err.message || "GitHub authentication failed")}`
+    );
+  }
+};
 
 
 
