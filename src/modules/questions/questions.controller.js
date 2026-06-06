@@ -1,6 +1,7 @@
 // modules/questions/questions.controller.js
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import * as service from "./questions.service.js";
+import { generateQuestionTemplate } from "./templates/generate-template.js";
 
 export const createQuestion = asyncHandler(async (req, res) => {
   const payload = {
@@ -131,3 +132,22 @@ export const getQuestionsByTopicController = asyncHandler(async (req, res) => {
     },
   });
 });
+
+export const downloadQuestionTemplateController = asyncHandler(
+  async (req, res) => {
+    const templatePath = await generateQuestionTemplate();
+
+    res.download(templatePath, "question_template.xlsx", (err) => {
+      if (err) {
+        console.error("Download error:", err);
+
+        if (!res.headersSent) {
+          res.status(500).json({
+            success: false,
+            message: "File not found or error downloading template",
+          });
+        }
+      }
+    });
+  }
+);
