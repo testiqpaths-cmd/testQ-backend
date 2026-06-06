@@ -6,6 +6,8 @@ import {
   logoutController,
   refreshTokenController,
   meController,
+  githubLoginController,
+  githubCallbackController,
 } from "./auth.controller.js";
 import { authMiddleware} from "../../common/middlewares/auth.middleware.js";
 import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
@@ -15,6 +17,8 @@ const router = express.Router();
 router.post("/register", registerController);
 router.post("/login", loginController);
 router.post("/firebase", firebaseAuthController);
+router.get("/github", githubLoginController);
+router.get("/github/callback", githubCallbackController);
 router.post("/logout", logoutController);
 router.post("/refresh-token", refreshTokenController);
 router.get("/me", authMiddleware, meController);
