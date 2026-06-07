@@ -22,6 +22,135 @@ const normalizePageAndLimit = (query) => {
   return { page, limit, skip: (page - 1) * limit };
 };
 
+const addResolvedAttemptStatsStage = {
+  $addFields: {
+    totalQuestions: {
+      $cond: [
+        { $isArray: "$questionSnapshots" },
+        { $size: "$questionSnapshots" },
+        0,
+      ],
+    },
+    correctAnswersCount: {
+      $size: {
+        $filter: {
+          input: { $ifNull: ["$answers", []] },
+          as: "answer",
+          cond: { $eq: ["$$answer.isCorrect", true] },
+        },
+      },
+    },
+    incorrectAnswersCount: {
+      $size: {
+        $filter: {
+          input: { $ifNull: ["$answers", []] },
+          as: "answer",
+          cond: { $eq: ["$$answer.isCorrect", false] },
+        },
+      },
+    },
+    answeredCount: {
+      $size: {
+        $filter: {
+          input: { $ifNull: ["$answers", []] },
+          as: "answer",
+          cond: {
+            $or: [
+              { $ne: ["$$answer.selectedOption", null] },
+              { $ne: ["$$answer.textAnswer", null] },
+            ],
+          },
+        },
+      },
+    },
+    resolvedTimeTakenSeconds: {
+      $round: [
+        {
+          $divide: [
+            {
+              $sum: {
+                $map: {
+                  input: { $ifNull: ["$questionSnapshots", []] },
+                  as: "question",
+                  in: { $ifNull: ["$$question.timeSpentMs", 0] },
+                },
+              },
+            },
+            1000,
+          ],
+        },
+        0,
+      ],
+    },
+  },
+};
+
+const finalizeResolvedAttemptStatsStage = {
+  $addFields: {
+    attemptedCount: {
+      $max: [
+        "$answeredCount",
+        { $add: ["$correctAnswersCount", "$incorrectAnswersCount"] },
+      ],
+    },
+    unattemptedCount: {
+      $max: [
+        0,
+        {
+          $subtract: [
+            "$totalQuestions",
+            {
+              $max: [
+                "$answeredCount",
+                { $add: ["$correctAnswersCount", "$incorrectAnswersCount"] },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+    accuracy: {
+      $cond: [
+        {
+          $gt: [
+            {
+              $max: [
+                "$answeredCount",
+                { $add: ["$correctAnswersCount", "$incorrectAnswersCount"] },
+              ],
+            },
+            0,
+          ],
+        },
+        {
+          $multiply: [
+            {
+              $divide: [
+                "$correctAnswersCount",
+                {
+                  $max: [
+                    "$answeredCount",
+                    { $add: ["$correctAnswersCount", "$incorrectAnswersCount"] },
+                  ],
+                },
+              ],
+            },
+            100,
+          ],
+        },
+        0,
+      ],
+    },
+    timeTakenSeconds: {
+      $cond: [
+        { $gt: ["$resolvedTimeTakenSeconds", 0] },
+        "$resolvedTimeTakenSeconds",
+        { $ifNull: ["$timeTakenSeconds", 0] },
+      ],
+    },
+  },
+};
+
 // 🧪 TEST leaderboard
 export const getTestLeaderboard = async (testId, query) => {
   if (!mongoose.Types.ObjectId.isValid(testId)) {
@@ -39,6 +168,9 @@ export const getTestLeaderboard = async (testId, query) => {
   // ✅ get sorted results
   const itemsPromise = TestAttempt.aggregate([
     { $match: matchStage },
+
+    addResolvedAttemptStatsStage,
+    finalizeResolvedAttemptStatsStage,
 
     {
       $lookup: {
@@ -65,12 +197,15 @@ export const getTestLeaderboard = async (testId, query) => {
     {
       $project: {
         totalScore: 1,
+        maxScore: 1,
         percentage: 1,
         accuracy: 1,
         timeTakenSeconds: 1,
         correctAnswersCount: 1,
         incorrectAnswersCount: 1,
         unattemptedCount: 1,
+        attemptedCount: 1,
+        totalQuestions: 1,
 
         studentName: buildStudentName,
         email: "$student.email",
@@ -140,6 +275,9 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
     { $match: matchStage },
 
     // 🧠 IMPORTANT: group per student
+    addResolvedAttemptStatsStage,
+    finalizeResolvedAttemptStatsStage,
+
     {
       $group: {
         _id: "$studentId",
@@ -147,6 +285,11 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
         totalScore: { $sum: "$totalScore" },
         totalTime: { $sum: "$timeTakenSeconds" },
         avgAccuracy: { $avg: "$accuracy" },
+        correctAnswersCount: { $sum: "$correctAnswersCount" },
+        incorrectAnswersCount: { $sum: "$incorrectAnswersCount" },
+        unattemptedCount: { $sum: "$unattemptedCount" },
+        attemptedCount: { $sum: "$attemptedCount" },
+        totalQuestions: { $sum: "$totalQuestions" },
         attempts: { $sum: 1 },
       },
     },
@@ -185,7 +328,14 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
         rank: 1,
         totalScore: 1,
         totalTime: 1,
+        timeTakenSeconds: "$totalTime",
         avgAccuracy: 1,
+        accuracy: "$avgAccuracy",
+        correctAnswersCount: 1,
+        incorrectAnswersCount: 1,
+        unattemptedCount: 1,
+        attemptedCount: 1,
+        totalQuestions: 1,
         attempts: 1,
 
         studentName: buildStudentName,
