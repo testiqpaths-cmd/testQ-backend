@@ -5,6 +5,28 @@ const PASS_PERCENTAGE = 40;
 
 const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
 
+const answerHasValue = (answer) =>
+  (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
+  (answer?.textAnswer !== undefined && answer?.textAnswer !== null);
+
+const updateAttemptStats = (attempt) => {
+  const answers = attempt.answers || [];
+  const totalQuestions = attempt.questionSnapshots?.length || answers.length;
+  const attemptedCount = answers.filter(answerHasValue).length;
+  const correctAnswersCount = answers.filter((answer) => answer.isCorrect === true).length;
+  const incorrectAnswersCount = answers.filter((answer) => answer.isCorrect === false).length;
+  const timeSpentMs = (attempt.questionSnapshots || []).reduce(
+    (sum, question) => sum + (question.timeSpentMs || 0),
+    0,
+  );
+
+  attempt.correctAnswersCount = correctAnswersCount;
+  attempt.incorrectAnswersCount = incorrectAnswersCount;
+  attempt.unattemptedCount = Math.max(0, totalQuestions - attemptedCount);
+  attempt.accuracy = attemptedCount > 0 ? (correctAnswersCount / attemptedCount) * 100 : 0;
+  attempt.timeTakenSeconds = Math.round(timeSpentMs / 1000);
+};
+
 const resolveStudentAnswer = (answer, snapshot) => {
   if (answer?.selectedOption !== undefined && answer?.selectedOption !== null) {
     const selectedOption = answer.selectedOption;
@@ -37,6 +59,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   if (!attempt.answers || attempt.answers.length === 0) {
     attempt.totalScore = 0;
     attempt.percentage = 0;
+    updateAttemptStats(attempt);
     // keep it SUBMITTED so manual evaluation can happen if needed
     attempt.status = "SUBMITTED";
     await attempt.save();
@@ -90,6 +113,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     attempt.maxScore && attempt.maxScore > 0
       ? Math.round((totalScore / attempt.maxScore) * 100)
       : 0;
+  updateAttemptStats(attempt);
 
   if (hasSubjective) {
     attempt.status = "SUBMITTED";

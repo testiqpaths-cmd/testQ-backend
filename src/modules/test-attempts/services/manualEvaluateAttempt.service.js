@@ -1,6 +1,28 @@
 import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js"; // adjust to your actual path
 
+const answerHasValue = (answer) =>
+  (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
+  (answer?.textAnswer !== undefined && answer?.textAnswer !== null);
+
+const updateAttemptStats = (attempt) => {
+  const answers = attempt.answers || [];
+  const totalQuestions = attempt.questionSnapshots?.length || answers.length;
+  const attemptedCount = answers.filter(answerHasValue).length;
+  const correctAnswersCount = answers.filter((answer) => answer.isCorrect === true).length;
+  const incorrectAnswersCount = answers.filter((answer) => answer.isCorrect === false).length;
+  const timeSpentMs = (attempt.questionSnapshots || []).reduce(
+    (sum, question) => sum + (question.timeSpentMs || 0),
+    0,
+  );
+
+  attempt.correctAnswersCount = correctAnswersCount;
+  attempt.incorrectAnswersCount = incorrectAnswersCount;
+  attempt.unattemptedCount = Math.max(0, totalQuestions - attemptedCount);
+  attempt.accuracy = attemptedCount > 0 ? (correctAnswersCount / attemptedCount) * 100 : 0;
+  attempt.timeTakenSeconds = Math.round(timeSpentMs / 1000);
+};
+
 export const manualEvaluateAttempt = async (attemptId, evaluations) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return { error: "Attempt not found", status: 404 };
@@ -74,6 +96,7 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
     attempt.maxScore && attempt.maxScore > 0
       ? Math.round((totalScore / attempt.maxScore) * 100)
       : 0;
+  updateAttemptStats(attempt);
 
   // ✅ SCRUM-23: PASS/FAIL
   const PASS_PERCENTAGE = 40; // change if your company rule is different
