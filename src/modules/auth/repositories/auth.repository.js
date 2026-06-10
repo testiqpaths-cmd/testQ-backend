@@ -10,6 +10,11 @@ export const findUserByEmail = async (email) => {
   return await User.findOne({ email });
 };
 
+/** Find a user by phone number */
+export const findUserByPhone = async (phone) => {
+  return await User.findOne({ phone });
+};
+
 /** Find a user by Firebase UID */
 export const findUserByFirebaseUid = async (firebaseUid) => {
   return await User.findOne({ firebaseUid });
