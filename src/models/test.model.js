@@ -35,6 +35,11 @@ const testSchema = new Schema({
   testSeriesId: { type: Types.ObjectId, ref: "TestSeries" },
   isSeriesTest: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
+  isDeleted: {
+  type: Number,
+  enum: [0, 1],
+  default: 0,
+},
 });
 
 export default model("Test", testSchema);

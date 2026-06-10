@@ -45,7 +45,10 @@ export async function createTest(data, user) {
   const payload = {
     ...normalizeTestPayload(data),
     maxAttempts: Number(data.maxAttempts) || 1,
-    testCode: data.visibility === "LINK_ONLY" ? crypto.randomBytes(4).toString("hex") : null,
+    testCode:
+      data.visibility === "LINK_ONLY"
+        ? crypto.randomBytes(4).toString("hex")
+        : null,
     createdBy: { userId: user._id || user.id, role: user.role },
   };
 
@@ -74,12 +77,15 @@ export async function updateTest(test, payload) {
 }
 
 export async function deleteTest(test) {
-  await test.deleteOne();
+  test.isDeleted = 1;
+  await test.save();
 }
 
 export const getAllTests = async () => {
   // Exclude tests that belong to a series
-  return await Test.find({ isSeriesTest: { $ne: true } }).sort({ createdAt: -1 });
+  return await Test.find({ isSeriesTest: { $ne: true } }).sort({
+    createdAt: -1,
+  });
 };
 
 export const getLeaderboardTests = async () => {
@@ -136,6 +142,7 @@ export const getLeaderboardTests = async () => {
 export const getMyTests = async ({ userId, search = "" }) => {
   const filters = {
     "createdBy.userId": userId,
+    isDeleted: { $ne: 1 },
   };
 
   if (String(search || "").trim()) {
@@ -154,7 +161,10 @@ export const getMyTests = async ({ userId, search = "" }) => {
 };
 
 export const getAssignedTests = async ({ search = "" } = {}) => {
-  const filters = { isPublished: true };
+  const filters = {
+  isPublished: true,
+  isDeleted: { $ne: 1 },
+};
 
   if (String(search || "").trim()) {
     filters.$or = [
@@ -164,7 +174,10 @@ export const getAssignedTests = async ({ search = "" } = {}) => {
   }
 
   return Test.find(filters)
-    .populate('subjectId', 'name')
-    .populate({ path: 'testSeriesId', select: 'title description visibility createdAt' })
+    .populate("subjectId", "name")
+    .populate({
+      path: "testSeriesId",
+      select: "title description visibility createdAt",
+    })
     .sort({ createdAt: -1 });
 };
