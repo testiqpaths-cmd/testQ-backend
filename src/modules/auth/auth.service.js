@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import {
   createUser,
   findUserByEmail,
+  findUserByPhone,
   findUserById,
   findUserByFirebaseUid,
 } from "./repositories/auth.repository.js";
@@ -22,6 +23,13 @@ const normalizeOptionalString = (value) => {
 };
 
 const normalizeEmail = (value) => normalizeRequiredString(value).toLowerCase();
+
+const normalizePhone = (value) => {
+  if (value === undefined || value === null) return undefined;
+  const trimmed = String(value).trim();
+  if (!trimmed) return undefined;
+  return trimmed.replace(/[^0-9+]/g, "");
+};
 
 const sanitizeUserCreatePayload = (payload) => {
   const sanitized = {
@@ -60,6 +68,14 @@ export const register = async (userData) => {
     throw new AuthError("User already exists");
   }
 
+  const normalizedPhone = normalizePhone(userData.phone);
+  if (normalizedPhone) {
+    const existingPhoneUser = await findUserByPhone(normalizedPhone);
+    if (existingPhoneUser) {
+      throw new AuthError("Phone number is already in use");
+    }
+  }
+
   const hashedPassword = await passwordService.hash(password);
 
   const user = await createUser(sanitizeUserCreatePayload({
@@ -81,6 +97,34 @@ export const register = async (userData) => {
 
 
 //login
+export const checkUserExists = async ({ email, phone }) => {
+  const normalizedEmail = email ? normalizeEmail(email) : "";
+  const normalizedPhone = normalizePhone(phone);
+
+  if (!normalizedEmail && !normalizedPhone) {
+    throw new AuthError("Email or phone is required");
+  }
+
+  const [emailUser, phoneUser] = await Promise.all([
+    normalizedEmail ? findUserByEmail(normalizedEmail) : Promise.resolve(null),
+    normalizedPhone ? findUserByPhone(normalizedPhone) : Promise.resolve(null),
+  ]);
+
+  const emailExists = Boolean(emailUser);
+  const phoneExists = Boolean(phoneUser);
+
+  return {
+    exists: emailExists || phoneExists,
+    emailExists,
+    phoneExists,
+    message: emailExists
+      ? "A user already exists with this email."
+      : phoneExists
+      ? "A user already exists with this phone number."
+      : "A user already exists with this email or phone number.",
+  };
+};
+
 export const login = async ({ email, password }) => {
   const normalizedEmail = normalizeEmail(email);
   const normalizedPassword = normalizeRequiredString(password);

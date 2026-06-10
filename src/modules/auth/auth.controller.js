@@ -3,6 +3,7 @@
   login as loginService,
   firebaseAuth as firebaseAuthService,
   githubAuth as githubAuthService,
+  checkUserExists as checkUserExistsService,
 } from "./auth.service.js";
 import  logger  from "../../config/logger.js";
 import {
@@ -80,7 +81,17 @@ export const registerController = async (req, res) => {
   }
 };
 
-
+/** Check existing user by email or phone */
+export const checkUserController = async (req, res) => {
+  try {
+    const { email, phone } = req.body;
+    const result = await checkUserExistsService({ email, phone });
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error(`Check user error: ${err.message}`);
+    return res.status(400).json({ success: false, message: err.message });
+  }
+};
 
 /** Login */
 export const loginController = async (req, res) => {

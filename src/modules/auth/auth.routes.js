@@ -1,6 +1,7 @@
 import express from "express";
 import {
   registerController,
+  checkUserController,
   loginController,
   firebaseAuthController,
   logoutController,
@@ -15,6 +16,7 @@ import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
 const router = express.Router();
 
 router.post("/register", registerController);
+router.post("/check-user", checkUserController);
 router.post("/login", loginController);
 router.post("/firebase", firebaseAuthController);
 router.get("/github", githubLoginController);
