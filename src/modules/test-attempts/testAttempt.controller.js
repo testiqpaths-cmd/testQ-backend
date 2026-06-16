@@ -603,3 +603,40 @@ export const getAttemptResultController = async (req, res, next) => {
     return next(err);
   }
 };
+
+export const updateCheatingStatusController = async (req, res, next) => {
+  try {
+    const attempt = req.attempt;
+    const { cheatingScore, violations } = req.body;
+
+    if (attempt.status !== "IN_PROGRESS") {
+      return res.status(409).json({
+        success: false,
+        message: "Attempt is not in progress",
+        errors: null,
+      });
+    }
+
+    if (typeof cheatingScore === "number") {
+      attempt.cheatingScore = cheatingScore;
+    }
+
+    if (Array.isArray(violations)) {
+      attempt.violations = violations;
+    }
+
+    await attempt.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Cheating status updated successfully",
+      data: {
+        attemptId: attempt._id,
+        cheatingScore: attempt.cheatingScore,
+        violations: attempt.violations,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};
