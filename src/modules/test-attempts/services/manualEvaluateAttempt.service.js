@@ -35,6 +35,13 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
     };
   }
 
+  if (attempt.expireReason === "CHEATING") {
+    return {
+      error: "Cannot manually evaluate an attempt that was submitted due to cheating.",
+      status: 403,
+    };
+  }
+
   // Load questions for evaluation items
   const evalQIds = evaluations.map((e) => e.questionId);
   const questions = await Question.find({ _id: { $in: evalQIds } }).select(

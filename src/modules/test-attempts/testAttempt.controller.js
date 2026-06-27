@@ -8,6 +8,7 @@ import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempt
 import { manualEvaluateAttempt } from "./services/manualEvaluateAttempt.service.js";
 import { evaluateAttemptSchema } from "./schemas/evaluateAttempt.schema.js";
 import { getAttemptResult } from "./services/getAttemptResult.service.js";
+import { getDetailedAnalysis } from "./services/getDetailedAnalysis.service.js";
 import {
   normalizeAttemptQuestion,
   selectAttemptQuestions,
@@ -408,7 +409,7 @@ export const submitAttemptController = async (req, res, next) => {
     // ✅ Manually submit before time expires
     attempt.status = "SUBMITTED";
     attempt.submittedAt = new Date();
-    attempt.expireReason = "MANUAL_SUBMIT";
+    attempt.expireReason = req.body.expireReason === "CHEATING" ? "CHEATING" : "MANUAL_SUBMIT";
     await attempt.save();
 
     const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
@@ -596,8 +597,36 @@ export const getAttemptResultController = async (req, res, next) => {
         startedAt: attempt.startedAt,
         answers: attempt.answers, // ✅ Includes correctAnswer from enrichment
         questionSnapshots: attempt.questionSnapshots, // ✅ Original snapshots
+        cheatingScore: attempt.cheatingScore,
+        violations: attempt.violations,
         analysis,
       },
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const getDetailedAnalysisController = async (req, res, next) => {
+  try {
+    const { attemptId } = req.params;
+
+    const detailedAnalysis = await getDetailedAnalysis(attemptId);
+    
+    if (!detailedAnalysis) {
+      return res.status(404).json({
+        success: false,
+        message: "Attempt not found",
+        errors: null,
+      });
+    }
+
+    // You could also add owner validation here similar to getAttemptResultController if needed
+
+    return res.status(200).json({
+      success: true,
+      message: "Detailed analysis fetched successfully",
+      data: detailedAnalysis,
     });
   } catch (err) {
     return next(err);

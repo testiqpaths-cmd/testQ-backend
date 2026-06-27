@@ -66,6 +66,16 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     return attempt;
   }
 
+  if (attempt.expireReason === "CHEATING") {
+    attempt.totalScore = 0;
+    attempt.percentage = 0;
+    updateAttemptStats(attempt);
+    attempt.status = "EVALUATED";
+    attempt.resultStatus = "FAIL";
+    await attempt.save();
+    return attempt;
+  }
+
   const qIds = attempt.answers.map((a) => a.questionId);
   const questions = await Question.find({ _id: { $in: qIds } }).select(
     "_id type correctAnswer marks"
