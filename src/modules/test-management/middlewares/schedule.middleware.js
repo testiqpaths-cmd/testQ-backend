@@ -1,5 +1,15 @@
 export default function scheduleMiddleware(req, res, next) {
-  const { scheduleType, startTime, endTime, delayDays, createdAt } = req.test;
+  const { scheduleType, startTime, endTime, delayDays, createdAt, createdBy } = req.test;
+  const user = req.user;
+
+  if (user.role === "IQPATH_ADMIN") return next();
+
+  const ownerId = createdBy?.userId?.toString();
+  const requesterId = String(user._id || user.id || "");
+  if (ownerId && requesterId && ownerId === requesterId) {
+    return next();
+  }
+
   const now = new Date();
 
   if (scheduleType === "IMMEDIATE") return next();
