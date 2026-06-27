@@ -18,11 +18,8 @@ import orgReportRoutes from "../modules/analytics/reports/organization/orgReport
 import platformReportsRoutes from "../modules/analytics/reports/platform-analytics/platformReports.routes.js";
 import leaderboardRoutes from "../modules/leaderboard/leaderboard.routes.js";
 import notificationRoutes from "../modules/notification/notification.routes.js";
-<<<<<<< HEAD
 import helpSupportRoutes from "../modules/help-support/helpSupport.routes.js";
-=======
 import dashboardRoutes from "../modules/analytics/dashboard/dashboard.routes.js";
->>>>>>> 4b5eb6f15a4435bfbfcf5f49dfadc875724a7557
 const router = express.Router();
 
 // Health check
