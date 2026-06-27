@@ -1,7 +1,21 @@
 export default function visibilityMiddleware(req, res, next) {
-  const { visibility, allowedOrganizations, testCode } = req.test;
+  const { visibility, allowedOrganizations, testCode, createdBy } = req.test;
   const user = req.user;
 
+  // 1. Admins have universal access
+  if (user.role === "IQPATH_ADMIN") return next();
+
+  // 2. The creator of the test always has access
+  const ownerId = typeof createdBy?.userId === "object"
+    ? createdBy?.userId?.toString?.()
+    : String(createdBy?.userId || "");
+  const requesterId = String(user._id || user.id || "");
+  
+  if (ownerId && requesterId && ownerId === requesterId) {
+    return next();
+  }
+
+  // 3. Visibility rules for regular students/users
   if (visibility === "PUBLIC") return next();
 
   if (visibility === "ORG_ONLY" && allowedOrganizations?.includes(user.organizationId)) return next();

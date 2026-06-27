@@ -1,18 +1,20 @@
-import Notification from "./notification.model.js";
+import * as service from "./notification.service.js";
 
 /**
  * CREATE NOTIFICATION
  */
 export const createNotificationController = async (req, res) => {
   try {
-    const { title, message } = req.body;
-
+    const { title, message, type, link, metadata } = req.body;
     const userId = req.user._id;
 
-    const notification = await Notification.create({
+    const notification = await service.createNotification({
       userId,
       title,
       message,
+      type,
+      link,
+      metadata,
     });
 
     return res.status(201).json({
@@ -33,10 +35,7 @@ export const createNotificationController = async (req, res) => {
 export const getNotificationsController = async (req, res) => {
   try {
     const userId = req.user._id;
-
-    const notifications = await Notification.find({ userId }).sort({
-      createdAt: -1,
-    });
+    const notifications = await service.getNotifications(userId);
 
     return res.json({
       success: true,
@@ -56,23 +55,40 @@ export const getNotificationsController = async (req, res) => {
 export const markNotificationReadController = async (req, res) => {
   try {
     const { id } = req.params;
+    const userId = req.user._id;
 
-    const notification = await Notification.findByIdAndUpdate(
-      id,
-      { isRead: true },
-      { new: true }
-    );
+    const notification = await service.markNotificationRead(id, userId);
 
     if (!notification) {
       return res.status(404).json({
         success: false,
-        message: "Notification not found",
+        message: "Notification not found or unauthorized",
       });
     }
 
     return res.json({
       success: true,
       notification,
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * MARK ALL AS READ
+ */
+export const markAllNotificationsReadController = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    await service.markAllNotificationsRead(userId);
+
+    return res.json({
+      success: true,
+      message: "All notifications marked as read",
     });
   } catch (error) {
     return res.status(500).json({

@@ -20,6 +20,22 @@ const notificationSchema = new mongoose.Schema(
       trim: true,
     },
 
+    type: {
+      type: String,
+      enum: ["TEST_ASSIGNED", "RESULT", "NEW_TEST", "EVALUATION", "SUBSCRIPTION", "SYSTEM", "LEADERBOARD"],
+      default: "SYSTEM",
+    },
+
+    link: {
+      type: String,
+      default: null,
+    },
+
+    metadata: {
+      type: mongoose.Schema.Types.Mixed,
+      default: {},
+    },
+
     isRead: {
       type: Boolean,
       default: false,

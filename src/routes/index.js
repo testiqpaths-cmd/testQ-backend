@@ -18,6 +18,7 @@ import orgReportRoutes from "../modules/analytics/reports/organization/orgReport
 import platformReportsRoutes from "../modules/analytics/reports/platform-analytics/platformReports.routes.js";
 import leaderboardRoutes from "../modules/leaderboard/leaderboard.routes.js";
 import notificationRoutes from "../modules/notification/notification.routes.js";
+import helpSupportRoutes from "../modules/help-support/helpSupport.routes.js";
 const router = express.Router();
 
 // Health check
@@ -71,6 +72,7 @@ router.use("/reports", platformReportsRoutes);
 
 router.use("/leaderboard", leaderboardRoutes);
 router.use("/notifications", notificationRoutes);
+router.use("/help-support", helpSupportRoutes);
 
 export default router;
 

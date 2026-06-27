@@ -377,7 +377,7 @@ export const getAllQuestionsService = async (query = {}) => {
 
   const pageNum = Math.max(1, Number(page));
   const resolvedLimit = limit ?? quantity ?? 10;
-  const limitNum = Math.min(100, Math.max(1, Number(resolvedLimit)));
+  const limitNum = Math.max(1, Number(resolvedLimit));
 
   const [items, total] = await Promise.all([
     buildQuestionQuery(filters, {
