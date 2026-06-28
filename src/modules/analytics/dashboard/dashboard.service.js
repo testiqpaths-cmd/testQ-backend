@@ -6,7 +6,14 @@ export const getStudentDashboardData = async (studentId) => {
     studentId,
     status: { $in: ["SUBMITTED", "EVALUATED"] },
   })
-    .populate("testId", "title visibility type duration")
+    .populate({
+      path: "testId",
+      select: "title visibility type duration topicIds subjectIds difficulty",
+      populate: [
+        { path: "topicIds", select: "name" },
+        { path: "subjectIds", select: "name" }
+      ]
+    })
     .sort({ submittedAt: 1 }) // Sort chronological to build timelines
     .lean();
 
@@ -31,6 +38,7 @@ export const getStudentDashboardData = async (studentId) => {
   const weeklyMap = {};
   const monthlyMap = {};
   const recentTests = [];
+  const allTests = [];
 
   // Month Names for formatting
   const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -55,11 +63,11 @@ export const getStudentDashboardData = async (studentId) => {
     totalQuestionsAttempted += answers.length;
     totalCorrectAnswers += answers.filter((a) => a.isCorrect).length;
 
-    // Subject/Topic Wise tests count (using snapshots if available, or just fallback)
+    // Subject/Topic Wise tests count
     const topics = new Set();
-    if (attempt.questionSnapshots) {
-      attempt.questionSnapshots.forEach((q) => {
-        if (q.topic) topics.add(q.topic);
+    if (attempt.testId && Array.isArray(attempt.testId.topicIds)) {
+      attempt.testId.topicIds.forEach((topic) => {
+        if (topic && topic.name) topics.add(topic.name);
       });
     }
     
@@ -84,20 +92,62 @@ export const getStudentDashboardData = async (studentId) => {
     weeklyMap[weekLabel] = (weeklyMap[weekLabel] || 0) + 1;
     monthlyMap[monthLabel] = (monthlyMap[monthLabel] || 0) + 1;
 
-    // Recent Tests format
+    // Recent Tests format (Dashboard small table)
+    const totalQ = attempt.questionSnapshots?.length || answers.length || 0;
+    const correctQ = answers.filter((a) => a.isCorrect).length;
+    const wrongQ = answers.filter((a) => !a.isCorrect && a.selectedOption).length;
+    const skippedQ = answers.filter((a) => !a.isCorrect && !a.selectedOption).length;
+
     recentTests.push({
       id: attempt.testId?._id || attempt.testId,
       resultId: attempt._id,
       name: testName,
       category: attempt.testId?.type || "Standard",
-      difficulty: "N/A", // Not always strictly defined
+      difficulty: "Medium", // Not always strictly defined
       attemptedAt: submittedAt,
-      totalQuestions: attempt.questionSnapshots?.length || answers.length || 0,
-      correctQuestions: answers.filter((a) => a.isCorrect).length,
-      incorrectQuestions: answers.filter((a) => !a.isCorrect).length,
+      totalQuestions: totalQ,
+      correctQuestions: correctQ,
+      incorrectQuestions: wrongQ,
       percentage: percentage,
       timeTaken: `${attempt.duration || 0} minutes`,
       status: percentage >= 40 ? "pass" : "fail",
+    });
+
+    // Detailed allTests array for advanced frontend filtering
+    const primaryTopic = topics.size > 0 ? Array.from(topics)[0] : "General";
+    
+    // We map test type to subject, or fallback to 'General'
+    let subject = "General";
+    if (attempt.testId && Array.isArray(attempt.testId.subjectIds) && attempt.testId.subjectIds.length > 0) {
+      const firstSubject = attempt.testId.subjectIds[0];
+      if (firstSubject && firstSubject.name) {
+        subject = firstSubject.name;
+      }
+    } else if (attempt.testId?.type) {
+      subject = attempt.testId.type;
+    }
+
+    let difficultyRaw = "Medium";
+    if (attempt.testId && Array.isArray(attempt.testId.difficulty) && attempt.testId.difficulty.length > 0) {
+      difficultyRaw = attempt.testId.difficulty[0];
+    }
+    const difficultyStr = difficultyRaw ? (difficultyRaw.charAt(0).toUpperCase() + difficultyRaw.slice(1).toLowerCase()) : "Medium";
+    
+    allTests.push({
+      id: attempt.testId?._id || attempt.testId,
+      resultId: attempt._id,
+      name: testName,
+      subject: subject,
+      topic: primaryTopic,
+      difficulty: difficultyStr,
+      totalQuestions: totalQ,
+      correct: correctQ,
+      wrong: wrongQ,
+      skipped: skippedQ,
+      score: attempt.totalScore || 0,
+      accuracy: percentage,
+      timeTaken: attempt.duration || 0,
+      date: submittedAt
     });
   });
 
@@ -129,5 +179,6 @@ export const getStudentDashboardData = async (studentId) => {
       monthly,
     },
     tests: recentTests.slice(0, 10), // Limit to 10 recent tests for dashboard view
+    allTests, // Contains ALL raw attempts for complex frontend filtering
   };
 };
