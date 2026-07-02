@@ -1,5 +1,8 @@
 import TestAttempt from "../../../models/testAttempt.model.js";
-
+import User from "../../auth/models/User.model.js";
+import Organization from "../../../models/organization.model.js";
+import Test from "../../../models/test.model.js";
+import HelpSupport from "../../help-support/helpSupport.model.js";
 export const getStudentDashboardData = async (studentId) => {
   // Fetch all completed/submitted attempts for the student
   const attempts = await TestAttempt.find({
