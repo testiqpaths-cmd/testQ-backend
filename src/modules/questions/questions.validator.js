@@ -7,13 +7,10 @@ export const validateQuestion = (question = {}) => {
   const subject = (question.subjectId ?? "").trim();
   const questionText = (question.questionText ?? "").trim();
   const type = (question.type ?? "").trim();
-  const marks = Number(question.marks);
 
   if (!topic) errors.push("Topic is required");
   if (!questionText) errors.push("Question text is required");
   if (!type) errors.push("Question type is required");
-  if (!Number.isFinite(marks) || marks <= 0)
-    errors.push("Marks must be greater than 0");
 
   // ✅ SAFE OPTIONS (NO CRASH EVER)
   const options = (question.options ?? []).map((o) =>

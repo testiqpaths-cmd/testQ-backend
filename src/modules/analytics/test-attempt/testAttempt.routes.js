@@ -1,5 +1,6 @@
 import express from "express";
 import { getMyResultsController } from "./testAttempt.controller.js";
+import { getDetailedAnalysisController } from "../../test-attempts/testAttempt.controller.js";
 import {
   authMiddleware,
   
@@ -12,6 +13,12 @@ router.get(
   authMiddleware,
   roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
   getMyResultsController
+);
+
+router.get(
+  "/:attemptId/detailed-analysis",
+  authMiddleware,
+  getDetailedAnalysisController
 );
 
 export default router;

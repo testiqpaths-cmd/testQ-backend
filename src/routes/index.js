@@ -17,6 +17,9 @@ import studentReportRoutes from "../modules/analytics/reports/student/studentRep
 import orgReportRoutes from "../modules/analytics/reports/organization/orgReport.routes.js";
 import platformReportsRoutes from "../modules/analytics/reports/platform-analytics/platformReports.routes.js";
 import leaderboardRoutes from "../modules/leaderboard/leaderboard.routes.js";
+import notificationRoutes from "../modules/notification/notification.routes.js";
+import helpSupportRoutes from "../modules/help-support/helpSupport.routes.js";
+import dashboardRoutes from "../modules/analytics/dashboard/dashboard.routes.js";
 const router = express.Router();
 
 // Health check
@@ -52,6 +55,9 @@ router.use("/results",testAttemptRoutes);
 //testStats
 router.use("/analytics",testStatsRoutes);
 
+// Dashboard Analytics
+router.use("/dashboard", dashboardRoutes);
+
 //Organization Analystics
 router.use("/organizations", organizationRoutes);
 
@@ -69,6 +75,9 @@ router.use("/reports", orgReportRoutes);
 router.use("/reports", platformReportsRoutes);
 
 router.use("/leaderboard", leaderboardRoutes);
+router.use("/notifications", notificationRoutes);
+router.use("/help-support", helpSupportRoutes);
+
 export default router;
 
 
