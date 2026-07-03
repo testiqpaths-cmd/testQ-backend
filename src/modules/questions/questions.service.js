@@ -152,7 +152,6 @@ export const uploadQuestionsExcelService = async ({
     const questionText = normalizeText(
       read(["questionText", "Question Text", "question", "Question"])
     );
-    const marks = Number(read(["marks", "Marks", "points", "Points"]) || 0);
     const difficulty = normalizeDifficulty(read(["difficulty", "Difficulty"])) || "EASY";
     const correctAnswer = normalizeCorrectAnswer({
       type,
@@ -170,7 +169,6 @@ export const uploadQuestionsExcelService = async ({
 
     if (!questionText) missingFields.push("question text");
     if (!type) missingFields.push("question type (MCQ or TRUE_FALSE)");
-    if (!Number.isFinite(marks) || marks <= 0) missingFields.push("marks");
 
     if (missingFields.length) {
       rowErrors.push(`Row ${rowNumber}: missing or invalid ${missingFields.join(", ")}`);
@@ -184,7 +182,6 @@ export const uploadQuestionsExcelService = async ({
       type,
       options,
       correctAnswer,
-      marks,
       difficulty,
     });
 
@@ -201,7 +198,6 @@ export const uploadQuestionsExcelService = async ({
       type,
       options,
       correctAnswer,
-      marks,
       difficulty,
       excelBatchId: batchMeta.excelBatchId,
       excelBatchName: batchMeta.excelBatchName,

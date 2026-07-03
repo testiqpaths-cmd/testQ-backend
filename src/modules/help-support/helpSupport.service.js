@@ -1,7 +1,19 @@
 import HelpSupport from "./helpSupport.model.js";
+import { dispatchNotificationToAdminsAndOrgs } from "../notification/notification.service.js";
+import Notification from "../notification/notification.model.js";
 
 export const createHelpSupport = async (data) => {
-  return await HelpSupport.create(data);
+  const helpSupport = await HelpSupport.create(data);
+
+  dispatchNotificationToAdminsAndOrgs(helpSupport.organizationId || null, {
+    title: "New Help & Support Query",
+    message: `A new query has been raised regarding: ${helpSupport.subject || "General Inquiry"}.`,
+    type: "SYSTEM",
+    link: `/dashboard/help-support`,
+    metadata: { helpSupportId: helpSupport._id }
+  });
+
+  return helpSupport;
 };
 
 export const getHelpSupports = async (filters) => {
@@ -16,9 +28,22 @@ export const getHelpSupportById = async (id) => {
 };
 
 export const resolveHelpSupport = async (id) => {
-  return await HelpSupport.findByIdAndUpdate(
+  const helpSupport = await HelpSupport.findByIdAndUpdate(
     id,
     { status: "resolved" },
     { new: true }
   );
+
+  if (helpSupport && helpSupport.studentId) {
+    await Notification.create({
+      userId: helpSupport.studentId,
+      title: "Query Resolved",
+      message: `Your help & support query regarding "${helpSupport.subject || "General Inquiry"}" has been resolved.`,
+      type: "SYSTEM",
+      link: null,
+      metadata: { helpSupportId: helpSupport._id }
+    });
+  }
+
+  return helpSupport;
 };

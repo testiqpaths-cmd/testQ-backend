@@ -1,5 +1,7 @@
 import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js"; // adjust to your actual path
+import Notification from "../../../modules/notification/notification.model.js";
+import Test from "../../../models/test.model.js";
 
 const answerHasValue = (answer) =>
   (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
@@ -43,12 +45,12 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
   }
 
   // Load questions for evaluation items
-  const evalQIds = evaluations.map((e) => e.questionId);
-  const questions = await Question.find({ _id: { $in: evalQIds } }).select(
-    "_id type marks",
+  const qMap = new Map(
+    (attempt.questionSnapshots || []).map((snapshot) => [
+      snapshot.questionId.toString(),
+      snapshot,
+    ])
   );
-
-  const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
 
   // Apply evaluations
   for (const ev of evaluations) {
@@ -114,5 +116,19 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
   attempt.status = "EVALUATED";
 
   await attempt.save();
+
+  // Dispatch notification to the student about the evaluation
+  if (attempt.studentId) {
+    const test = await Test.findById(attempt.testId).select("title");
+    await Notification.create({
+      userId: attempt.studentId,
+      title: "Test Evaluated",
+      message: `Your test attempt for "${test?.title || 'a test'}" has been evaluated.`,
+      type: "EVALUATION",
+      link: `/student/dashboard/tests/results/${attempt._id}`,
+      metadata: { attemptId: attempt._id, testId: attempt.testId }
+    });
+  }
+
   return { attempt };
 };

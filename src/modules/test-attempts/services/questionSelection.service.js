@@ -54,7 +54,7 @@ const toSafeQuestion = (question, order) => ({
   questionId: question._id.toString(),
   text: question.questionText,
   type: FRONTEND_TYPE_MAP[question.type] || "multiple-choice",
-  marks: question.marks ?? 0,
+  marks: question.calculatedMarks ?? 0,
   options: Array.isArray(question.options)
     ? question.options.map((option, index) => ({
         id: index,
@@ -69,10 +69,13 @@ export const selectAttemptQuestions = async (test) => {
   const desiredCount = Math.max(1, Number(test.totalQuestions) || 0);
 
   const questions = await Question.find(filters)
-    .select("_id questionText type options correctAnswer marks")
+    .select("_id questionText type options correctAnswer")
     .lean();
 
   const selectedQuestions = shuffle(questions).slice(0, Math.min(desiredCount, questions.length));
+
+  const actualCount = selectedQuestions.length;
+  const marksPerQuestion = actualCount > 0 ? (test.totalMarks / actualCount) : 0;
 
   const questionSnapshots = selectedQuestions.map((question, index) => ({
     questionId: question._id,
@@ -80,7 +83,7 @@ export const selectAttemptQuestions = async (test) => {
     type: question.type,
     options: Array.isArray(question.options) ? question.options : [],
     correctAnswer: question.correctAnswer ?? null,
-    marks: question.marks ?? 0,
+    marks: marksPerQuestion,
     order: index,
     startedAt: null,
     lastViewedAt: null,
@@ -89,8 +92,8 @@ export const selectAttemptQuestions = async (test) => {
 
   return {
     questionSnapshots,
-    questions: questionSnapshots.map((question, index) =>
-      toSafeQuestion(selectedQuestions[index], index),
+    questions: questionSnapshots.map((snapshot, index) =>
+      toSafeQuestion({ ...selectedQuestions[index], calculatedMarks: snapshot.marks }, index),
     ),
   };
 };

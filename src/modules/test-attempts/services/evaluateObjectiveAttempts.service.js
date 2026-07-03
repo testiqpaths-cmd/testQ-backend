@@ -1,5 +1,7 @@
 import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js";
+import Notification from "../../../modules/notification/notification.model.js";
+import Test from "../../../models/test.model.js";
 
 const PASS_PERCENTAGE = 40;
 
@@ -78,7 +80,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
   const qIds = attempt.answers.map((a) => a.questionId);
   const questions = await Question.find({ _id: { $in: qIds } }).select(
-    "_id type correctAnswer marks"
+    "_id type correctAnswer"
   );
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
@@ -135,5 +137,18 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   }
 
   await attempt.save();
+
+  if (attempt.status === "EVALUATED" && attempt.studentId) {
+    const test = await Test.findById(attempt.testId).select("title");
+    await Notification.create({
+      userId: attempt.studentId,
+      title: "Test Evaluated",
+      message: `Your test attempt for "${test?.title || 'a test'}" has been evaluated.`,
+      type: "EVALUATION",
+      link: `/student/dashboard/tests/results/${attempt._id}`,
+      metadata: { attemptId: attempt._id, testId: attempt.testId }
+    });
+  }
+
   return attempt;
 };

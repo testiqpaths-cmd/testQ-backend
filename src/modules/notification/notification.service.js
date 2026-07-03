@@ -1,5 +1,5 @@
 import Notification from "./notification.model.js";
-import { listStudents } from "../user/user.service.js";
+import { listStudents, listUsers } from "../user/user.service.js";
 
 export const createNotification = async (data) => {
   return await Notification.create(data);
@@ -66,5 +66,40 @@ export const dispatchNotificationToStudents = async (creator, notificationPayloa
     await Notification.insertMany(notifications, { ordered: false });
   } catch (error) {
     console.error("Failed to dispatch bulk notifications:", error);
+  }
+};
+
+/**
+ * Generic helper to dispatch notifications to admins and specific organization.
+ * 
+ * @param {String|null} organizationId - The organization ID related to the event, or null if N/A.
+ * @param {Object} notificationPayload - { title, message, type, link, metadata }
+ */
+export const dispatchNotificationToAdminsAndOrgs = async (organizationId, notificationPayload) => {
+  try {
+    // Fetch all admins
+    const admins = await listUsers({ role: "IQPATH_ADMIN" });
+    
+    // Fetch org users if an organizationId is provided
+    let orgs = [];
+    if (organizationId) {
+      orgs = await listUsers({ role: "ORGANIZATION", organizationId });
+    }
+
+    const targetUsers = [...admins, ...orgs];
+    if (targetUsers.length === 0) return;
+
+    const notifications = targetUsers.map(user => ({
+      userId: user._id,
+      title: notificationPayload.title,
+      message: notificationPayload.message,
+      type: notificationPayload.type || "SYSTEM",
+      link: notificationPayload.link || null,
+      metadata: notificationPayload.metadata || {},
+    }));
+
+    await Notification.insertMany(notifications, { ordered: false });
+  } catch (error) {
+    console.error("Failed to dispatch notifications to admins/orgs:", error);
   }
 };

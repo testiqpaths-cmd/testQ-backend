@@ -10,6 +10,7 @@ import { User } from "./index.js";
 import {generateAccessToken,generateRefreshToken,} from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { passwordService } from "./services/password.service.js";
+import { dispatchNotificationToAdminsAndOrgs } from "../notification/notification.service.js";
 
 const normalizeRequiredString = (value) => {
   if (value === undefined || value === null) return "";
@@ -86,6 +87,14 @@ export const register = async (userData) => {
     password: hashedPassword,
     isEmailVerified: true,
   }));
+
+  dispatchNotificationToAdminsAndOrgs(user.organizationId || null, {
+    title: "New Student Registered",
+    message: `A new student ${user.firstName} ${user.lastName || ""} has registered.`,
+    type: "SYSTEM",
+    link: `/dashboard/students`, // Assuming there is a student list route
+    metadata: { userId: user._id }
+  });
 
   return {
     user,
@@ -187,6 +196,14 @@ export const firebaseAuth = async ({
       lastLogin: new Date(),
       status: "ACTIVE",
       }),
+    });
+
+    dispatchNotificationToAdminsAndOrgs(user.organizationId || null, {
+      title: "New Student Registered",
+      message: `A new student ${user.firstName} ${user.lastName || ""} has registered via Firebase.`,
+      type: "SYSTEM",
+      link: `/dashboard/students`,
+      metadata: { userId: user._id }
     });
   } else if (userFoundByFirebaseUid) {
     // User already exists with this Firebase UID - don't update the record
@@ -339,6 +356,14 @@ export const githubAuth = async (code) => {
         status: "ACTIVE",
       })
     );
+
+    dispatchNotificationToAdminsAndOrgs(user.organizationId || null, {
+      title: "New Student Registered",
+      message: `A new student ${user.firstName} ${user.lastName || ""} has registered via GitHub.`,
+      type: "SYSTEM",
+      link: `/dashboard/students`,
+      metadata: { userId: user._id }
+    });
   } else {
     user = await User.findByIdAndUpdate(
       user._id, {

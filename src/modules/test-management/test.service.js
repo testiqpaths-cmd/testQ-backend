@@ -62,9 +62,9 @@ export async function createTest(data, user) {
   // Trigger bulk notification dispatch asynchronously
   dispatchNotificationToStudents(user, {
     title: "New Test Assigned",
-    message: `A new test "${test.title}" has been assigned.`,
+    message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
     type: "TEST_ASSIGNED",
-    link: `/dashboard/tests/${test._id}/instructions`,
+    link: `/student/dashboard/tests/${test._id}/instructions`,
     metadata: { testId: test._id }
   }).catch(err => console.error("Notification dispatch failed", err));
 
