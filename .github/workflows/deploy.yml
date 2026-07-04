@@ -1,10 +1,8 @@
 name: Auto Deploy testQ-backend to MilesWeb
-
 on:
   push:
     branches:
       - production   # server iski git repo isi branch ko track karti hai
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -19,17 +17,13 @@ jobs:
           script: |
             set -e
             echo "🚀 Starting deployment..."
-
             cd ${{ secrets.DEPLOY_PATH }}
-
             echo "📥 Pulling latest code from production branch..."
             git pull origin production
-
+            export PATH=$HOME/nodevenv/testqbackend.iqpaths.com/20/bin:$PATH
             echo "📦 Installing dependencies..."
             npm install --production
-
             echo "🔄 Restarting app (Passenger-style restart)..."
             mkdir -p tmp
             touch tmp/restart.txt
-
             echo "✅ Deployment finished successfully! App will restart on next request."
