@@ -1,5 +1,11 @@
+import env from "./env";
+
+
+
+const allowedOrigins = ["http://localhost:5173", 'https://test-q-frontend.vercel.app', env.CORS_ORIGIN];
+
 export const corsOptions = {
-  origin: "http://localhost:5173",
+  origin: allowedOrigins,
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
