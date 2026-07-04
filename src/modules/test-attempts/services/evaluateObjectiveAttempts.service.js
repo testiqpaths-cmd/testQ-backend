@@ -137,18 +137,5 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   }
 
   await attempt.save();
-
-  if (attempt.status === "EVALUATED" && attempt.studentId) {
-    const test = await Test.findById(attempt.testId).select("title");
-    await Notification.create({
-      userId: attempt.studentId,
-      title: "Test Evaluated",
-      message: `Your test attempt for "${test?.title || 'a test'}" has been evaluated.`,
-      type: "EVALUATION",
-      link: `/student/dashboard/tests/results/${attempt._id}`,
-      metadata: { attemptId: attempt._id, testId: attempt.testId }
-    });
-  }
-
   return attempt;
 };

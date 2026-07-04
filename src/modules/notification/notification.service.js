@@ -26,6 +26,14 @@ export const markAllNotificationsRead = async (userId) => {
   );
 };
 
+export const deleteNotification = async (id, userId) => {
+  return await Notification.findOneAndDelete({ _id: id, userId });
+};
+
+export const deleteAllNotifications = async (userId) => {
+  return await Notification.deleteMany({ userId });
+};
+
 /**
  * Generic helper to dispatch notifications to students
  * Call this when a Test, Test Series, or Result is published.

@@ -50,7 +50,7 @@ export async function updateTest(req, res, next) {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    const test = await service.updateTest(req.test, req.body);
+    const test = await service.updateTest(req.test, req.body, req.user);
     res.json({ success: true, data: test });
   } catch (e) {
     next(e);

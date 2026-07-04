@@ -125,7 +125,7 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
       title: "Test Evaluated",
       message: `Your test attempt for "${test?.title || 'a test'}" has been evaluated.`,
       type: "EVALUATION",
-      link: `/student/dashboard/tests/results/${attempt._id}`,
+      link: `/student/dashboard/result/${attempt._id}`,
       metadata: { attemptId: attempt._id, testId: attempt.testId }
     });
   }
