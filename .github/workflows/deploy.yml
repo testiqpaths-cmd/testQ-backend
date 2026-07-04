@@ -1,0 +1,35 @@
+name: Auto Deploy testQ-backend to MilesWeb
+
+on:
+  push:
+    branches:
+      - production   # server iski git repo isi branch ko track karti hai
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to MilesWeb via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          port: ${{ secrets.SSH_PORT }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            echo "🚀 Starting deployment..."
+
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            echo "📥 Pulling latest code from production branch..."
+            git pull origin production
+
+            echo "📦 Installing dependencies..."
+            npm install --production
+
+            echo "🔄 Restarting app (Passenger-style restart)..."
+            mkdir -p tmp
+            touch tmp/restart.txt
+
+            echo "✅ Deployment finished successfully! App will restart on next request."
