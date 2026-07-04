@@ -97,3 +97,52 @@ export const markAllNotificationsReadController = async (req, res) => {
     });
   }
 };
+
+/**
+ * DELETE NOTIFICATION
+ */
+export const deleteNotificationController = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const userId = req.user._id;
+
+    const notification = await service.deleteNotification(id, userId);
+
+    if (!notification) {
+      return res.status(404).json({
+        success: false,
+        message: "Notification not found or unauthorized",
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: "Notification deleted",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};
+
+/**
+ * DELETE ALL NOTIFICATIONS
+ */
+export const deleteAllNotificationsController = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    await service.deleteAllNotifications(userId);
+
+    return res.json({
+      success: true,
+      message: "All notifications deleted",
+    });
+  } catch (error) {
+    return res.status(500).json({
+      success: false,
+      message: error.message,
+    });
+  }
+};

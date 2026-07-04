@@ -61,6 +61,13 @@ export const startTestAttemptController = async (req, res, next) => {
       });
     }
 
+    if (test.scheduleType === "IMMEDIATE" && !test.isPublished) {
+      return res.status(403).json({
+        success: false,
+        message: "This test is not published yet",
+      });
+    }
+
     // 3) Validate schedule (adapt to your test fields)
     // Example fields: test.startTime, test.endTime (Date)
     const now = new Date();

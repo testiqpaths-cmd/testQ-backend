@@ -59,19 +59,23 @@ export async function createTest(data, user) {
   test.status = computeTestStatus(test);
   await test.save();
 
-  // Trigger bulk notification dispatch asynchronously
-  dispatchNotificationToStudents(user, {
-    title: "New Test Assigned",
-    message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
-    type: "TEST_ASSIGNED",
-    link: `/student/dashboard/tests/${test._id}/instructions`,
-    metadata: { testId: test._id }
-  }).catch(err => console.error("Notification dispatch failed", err));
+  // Trigger bulk notification dispatch asynchronously if not a draft
+  if (test.status !== "Draft") {
+    dispatchNotificationToStudents(user, {
+      title: "New Test Assigned",
+      message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
+      type: "TEST_ASSIGNED",
+      link: `/student/dashboard/tests/${test._id}/instructions`,
+      metadata: { testId: test._id }
+    }).catch(err => console.error("Notification dispatch failed", err));
+  }
 
   return test;
 }
 
-export async function updateTest(test, payload) {
+export async function updateTest(test, payload, user) {
+  const prevStatus = test.status || "DRAFT";
+  
   Object.assign(test, payload);
 
   const hasFixedSchedule = Boolean(test.startTime && test.endTime);
@@ -84,6 +88,18 @@ export async function updateTest(test, payload) {
   test.status = computeTestStatus(test);
 
   await test.save();
+
+  // Dispatch notification if the test was just assigned/published
+  if (prevStatus === "DRAFT" && (test.status === "UPCOMING" || test.status === "ACTIVE") && user) {
+    dispatchNotificationToStudents(user, {
+      title: "New Test Assigned",
+      message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
+      type: "TEST_ASSIGNED",
+      link: `/student/dashboard/tests/${test._id}/instructions`,
+      metadata: { testId: test._id }
+    }).catch(err => console.error("Notification dispatch failed", err));
+  }
+
   return test;
 }
 
