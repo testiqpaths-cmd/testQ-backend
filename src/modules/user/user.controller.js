@@ -81,7 +81,7 @@ export const createStudentController = async (req, res) => {
 	if (!payload.email) {
 		return res.status(400).json({ success: false, message: "Student email is required" });
 	}
-	if (!payload.organizationId) {
+	if (!payload.organizationId && requesterRole !== "IQPATH_ADMIN") {
 		return res.status(400).json({ success: false, message: "organizationId is required" });
 	}
 	const user = await createStudent(payload);
@@ -161,9 +161,7 @@ export const bulkUploadUsersController = async (req, res) => {
 		organizationId = organizationId.trim();
 	}
 
-	if (requesterRole === "IQPATH_ADMIN" && !organizationId && !organizationCode) {
-		return res.status(400).json({ success: false, message: "organizationId or organizationCode is required" });
-	}
+	// IQPATH_ADMIN is allowed to upload users without an organization Code/Id
 
 	let rows = [];
 	try {

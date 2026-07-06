@@ -8,6 +8,7 @@ import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempt
 import { manualEvaluateAttempt } from "./services/manualEvaluateAttempt.service.js";
 import { evaluateAttemptSchema } from "./schemas/evaluateAttempt.schema.js";
 import { getAttemptResult } from "./services/getAttemptResult.service.js";
+import { getDetailedAnalysis } from "./services/getDetailedAnalysis.service.js";
 import {
   normalizeAttemptQuestion,
   selectAttemptQuestions,
@@ -57,6 +58,13 @@ export const startTestAttemptController = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: "You are not allowed to start this test",
+      });
+    }
+
+    if (test.scheduleType === "IMMEDIATE" && !test.isPublished) {
+      return res.status(403).json({
+        success: false,
+        message: "This test is not published yet",
       });
     }
 
@@ -408,7 +416,7 @@ export const submitAttemptController = async (req, res, next) => {
     // ✅ Manually submit before time expires
     attempt.status = "SUBMITTED";
     attempt.submittedAt = new Date();
-    attempt.expireReason = "MANUAL_SUBMIT";
+    attempt.expireReason = req.body.expireReason === "CHEATING" ? "CHEATING" : "MANUAL_SUBMIT";
     await attempt.save();
 
     const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
@@ -596,10 +604,75 @@ export const getAttemptResultController = async (req, res, next) => {
         startedAt: attempt.startedAt,
         answers: attempt.answers, // ✅ Includes correctAnswer from enrichment
         questionSnapshots: attempt.questionSnapshots, // ✅ Original snapshots
+        cheatingScore: attempt.cheatingScore,
+        violations: attempt.violations,
         analysis,
       },
     });
   } catch (err) {
     return next(err);
+  }
+};
+
+export const getDetailedAnalysisController = async (req, res, next) => {
+  try {
+    const { attemptId } = req.params;
+
+    const detailedAnalysis = await getDetailedAnalysis(attemptId);
+    
+    if (!detailedAnalysis) {
+      return res.status(404).json({
+        success: false,
+        message: "Attempt not found",
+        errors: null,
+      });
+    }
+
+    // You could also add owner validation here similar to getAttemptResultController if needed
+
+    return res.status(200).json({
+      success: true,
+      message: "Detailed analysis fetched successfully",
+      data: detailedAnalysis,
+    });
+  } catch (err) {
+    return next(err);
+  }
+};
+
+export const updateCheatingStatusController = async (req, res, next) => {
+  try {
+    const attempt = req.attempt;
+    const { cheatingScore, violations } = req.body;
+
+    if (attempt.status !== "IN_PROGRESS") {
+      return res.status(409).json({
+        success: false,
+        message: "Attempt is not in progress",
+        errors: null,
+      });
+    }
+
+    if (typeof cheatingScore === "number") {
+      attempt.cheatingScore = cheatingScore;
+    }
+
+    if (Array.isArray(violations)) {
+      attempt.violations = violations;
+    }
+
+    await attempt.save();
+
+    return res.status(200).json({
+      success: true,
+      message: "Cheating status updated successfully",
+      data: {
+        attemptId: attempt._id,
+        cheatingScore: attempt.cheatingScore,
+        violations: attempt.violations,
+      },
+    });
+  } catch (err) {
+    next(err);
   }
 };

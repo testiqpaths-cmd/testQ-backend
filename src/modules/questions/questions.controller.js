@@ -11,7 +11,6 @@ export const createQuestion = asyncHandler(async (req, res) => {
     type: req.body.type,
     options: Array.isArray(req.body.options) ? req.body.options : [],
     correctAnswer: req.body.correctAnswer,
-    marks: req.body.marks,
     difficulty: req.body.difficulty,
     createdBy: req.user._id,
   };

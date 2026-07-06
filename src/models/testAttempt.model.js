@@ -86,6 +86,19 @@ const testAttemptSchema = new mongoose.Schema(
       default: "IN_PROGRESS",
     },
 
+    cheatingScore: {
+      type: Number,
+      default: 0,
+    },
+
+    violations: [
+      {
+        type: { type: String, required: true },
+        timestamp: { type: Number, required: true },
+        score: { type: Number, default: 0 },
+      },
+    ],
+
     answers: [
       {
         questionId: {
@@ -177,7 +190,7 @@ const testAttemptSchema = new mongoose.Schema(
 
     expireReason: {
       type: String,
-      enum: ["TIME_EXPIRED", "MANUAL_SUBMIT", "TIME_EXPIRED_AUTO_SUBMIT", null],
+      enum: ["TIME_EXPIRED", "MANUAL_SUBMIT", "TIME_EXPIRED_AUTO_SUBMIT", "CHEATING", null],
       default: null,
     },
   },

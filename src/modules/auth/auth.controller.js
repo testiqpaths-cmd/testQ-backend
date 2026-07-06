@@ -1,4 +1,4 @@
-﻿import {
+import {
   register as registerService,
   login as loginService,
   firebaseAuth as firebaseAuthService,
@@ -277,5 +277,49 @@ export const githubCallbackController = async (req, res) => {
   }
 };
 
+export const updateProfileController = async (req, res) => {
+  try {
+    const userId = req.user._id;
+    const { firstName, lastName, phone, profileImage, education, address } = req.body;
+    
+    // Import User model dynamically if not imported, or use findUserById from repository
+    // Wait, let's just import User at the top. Wait, User is not imported in auth.controller.js!
+    // Ah, there is `import { User } from "../auth/index.js";` in user.controller.js.
+    // In auth.controller.js there is `import { findUserById } from "./repositories/auth.repository.js";`
+    // And also `import UserModel from "../../models/user.model.js"` can be used.
+    const UserModel = (await import("../../models/user.model.js")).default;
+    
+    const updates = {};
+    if (firstName !== undefined) updates.firstName = firstName;
+    if (lastName !== undefined) updates.lastName = lastName;
+    if (phone !== undefined) updates.phone = phone;
+    if (profileImage !== undefined) updates.profileImage = profileImage;
+    if (education !== undefined) updates.education = education;
+    if (address !== undefined) updates.address = address;
 
+    const user = await UserModel.findByIdAndUpdate(userId, updates, { new: true }).select("-password");
 
+    if (!user) {
+      return res.status(404).json({ success: false, message: "User not found" });
+    }
+
+    return res.status(200).json({ success: true, message: "Profile updated successfully", user: {
+      id: user._id,
+      email: user.email,
+      role: user.role,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      firebaseUid: user.firebaseUid,
+      status: user.status,
+      plan: user.plan,
+      isEmailVerified: user.isEmailVerified,
+      lastLogin: user.lastLogin,
+      profileImage: user.profileImage,
+      phone: user.phone,
+      address: user.address,
+      education: user.education
+    } });
+  } catch (error) {
+    return res.status(500).json({ success: false, message: error.message || "Failed to update profile" });
+  }
+};

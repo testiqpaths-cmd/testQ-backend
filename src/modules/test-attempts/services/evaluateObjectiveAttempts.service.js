@@ -1,5 +1,7 @@
 import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js";
+import Notification from "../../../modules/notification/notification.model.js";
+import Test from "../../../models/test.model.js";
 
 const PASS_PERCENTAGE = 40;
 
@@ -50,6 +52,8 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
 
+  const test = await Test.findById(attempt.testId).lean();
+
   // only run after submission (or re-run if already evaluated)
   if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED") {
     return attempt;
@@ -66,9 +70,19 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     return attempt;
   }
 
+  if (attempt.expireReason === "CHEATING") {
+    attempt.totalScore = 0;
+    attempt.percentage = 0;
+    updateAttemptStats(attempt);
+    attempt.status = "EVALUATED";
+    attempt.resultStatus = "FAIL";
+    await attempt.save();
+    return attempt;
+  }
+
   const qIds = attempt.answers.map((a) => a.questionId);
   const questions = await Question.find({ _id: { $in: qIds } }).select(
-    "_id type correctAnswer marks"
+    "_id type correctAnswer"
   );
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
@@ -92,7 +106,19 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       const isCorrect = normalizeValue(studentAnswer) === normalizeValue(q.correctAnswer);
 
       ans.isCorrect = isCorrect;
-      ans.marksObtained = isCorrect ? (q.marks || 0) : 0;
+      
+      const marksForQ = test?.marksPerQuestion || q.marks || 1;
+      const negPercentage = test?.negativeMarkingPercentage || 0;
+
+      if (isCorrect) {
+        ans.marksObtained = marksForQ;
+      } else if (answerHasValue(ans)) {
+        // Incorrect but attempted
+        ans.marksObtained = -(marksForQ * (negPercentage / 100));
+      } else {
+        // Unattempted
+        ans.marksObtained = 0;
+      }
 
       totalScore += ans.marksObtained;
       return ans;

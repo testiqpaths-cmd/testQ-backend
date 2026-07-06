@@ -2,6 +2,7 @@ import crypto from "crypto";
 import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
 import { computeTestStatus } from "./utils/status.js";
+import { dispatchNotificationToStudents } from "../notification/notification.service.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
 
@@ -57,10 +58,24 @@ export async function createTest(data, user) {
   // Compute and set status
   test.status = computeTestStatus(test);
   await test.save();
+
+  // Trigger bulk notification dispatch asynchronously if not a draft
+  if (test.status !== "Draft") {
+    dispatchNotificationToStudents(user, {
+      title: "New Test Assigned",
+      message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
+      type: "TEST_ASSIGNED",
+      link: `/student/dashboard/tests/${test._id}/instructions`,
+      metadata: { testId: test._id }
+    }).catch(err => console.error("Notification dispatch failed", err));
+  }
+
   return test;
 }
 
-export async function updateTest(test, payload) {
+export async function updateTest(test, payload, user) {
+  const prevStatus = test.status || "DRAFT";
+  
   Object.assign(test, payload);
 
   const hasFixedSchedule = Boolean(test.startTime && test.endTime);
@@ -73,6 +88,18 @@ export async function updateTest(test, payload) {
   test.status = computeTestStatus(test);
 
   await test.save();
+
+  // Dispatch notification if the test was just assigned/published
+  if (prevStatus === "DRAFT" && (test.status === "UPCOMING" || test.status === "ACTIVE") && user) {
+    dispatchNotificationToStudents(user, {
+      title: "New Test Assigned",
+      message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
+      type: "TEST_ASSIGNED",
+      link: `/student/dashboard/tests/${test._id}/instructions`,
+      metadata: { testId: test._id }
+    }).catch(err => console.error("Notification dispatch failed", err));
+  }
+
   return test;
 }
 
@@ -162,9 +189,9 @@ export const getMyTests = async ({ userId, search = "" }) => {
 
 export const getAssignedTests = async ({ search = "" } = {}) => {
   const filters = {
-  isPublished: true,
-  isDeleted: { $ne: 1 },
-};
+    isPublished: true,
+    isDeleted: { $ne: 1 },
+  };
 
   if (String(search || "").trim()) {
     filters.$or = [
