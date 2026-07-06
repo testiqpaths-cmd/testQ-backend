@@ -52,6 +52,8 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
 
+  const test = await Test.findById(attempt.testId).lean();
+
   // only run after submission (or re-run if already evaluated)
   if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED") {
     return attempt;
@@ -104,7 +106,19 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       const isCorrect = normalizeValue(studentAnswer) === normalizeValue(q.correctAnswer);
 
       ans.isCorrect = isCorrect;
-      ans.marksObtained = isCorrect ? (q.marks || 0) : 0;
+      
+      const marksForQ = test?.marksPerQuestion || q.marks || 1;
+      const negPercentage = test?.negativeMarkingPercentage || 0;
+
+      if (isCorrect) {
+        ans.marksObtained = marksForQ;
+      } else if (answerHasValue(ans)) {
+        // Incorrect but attempted
+        ans.marksObtained = -(marksForQ * (negPercentage / 100));
+      } else {
+        // Unattempted
+        ans.marksObtained = 0;
+      }
 
       totalScore += ans.marksObtained;
       return ans;

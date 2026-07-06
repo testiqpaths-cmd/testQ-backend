@@ -26,6 +26,8 @@ const testSchema = new Schema({
   duration: { type: Number, required: true },
   maxAttempts: { type: Number, default: 1 },
   totalMarks: { type: Number, required: true },
+  marksPerQuestion: { type: Number, required: true, default: 1 },
+  negativeMarkingPercentage: { type: Number, default: 0 },
   scheduleType: { type: String, enum: ["IMMEDIATE", "DELAYED", "FIXED"], required: true },
   delayDays: { type: Number }, // ✅ must be Number
   startTime: { type: Date },
