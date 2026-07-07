@@ -14,6 +14,12 @@ const testAttemptSchema = new mongoose.Schema(
       required: true,
     },
 
+    iqRoomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "IQRoom",
+      default: null,
+    },
+
     startedAt: {
       type: Date,
       default: Date.now,

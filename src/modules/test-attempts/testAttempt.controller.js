@@ -13,6 +13,8 @@ import {
   normalizeAttemptQuestion,
   selectAttemptQuestions,
 } from "./services/questionSelection.service.js";
+import { getIO } from "../../sockets/index.js";
+import IQRoom from "../../models/iqRoom.model.js";
 
 const canStartTest = (test, user) => {
   if (!test || !user) return false;
@@ -38,6 +40,7 @@ export const startTestAttemptController = async (req, res, next) => {
   try {
     const { testId } = req.params;
     const studentId = req.user?._id;
+    const { iqRoomId } = req.body;
 
     if (!mongoose.Types.ObjectId.isValid(testId)) {
       return res
@@ -155,6 +158,7 @@ export const startTestAttemptController = async (req, res, next) => {
     const attempt = await TestAttempt.create({
       testId,
       studentId,
+      iqRoomId: iqRoomId || null,
       startedAt,
       endsAt,
       duration,
@@ -236,6 +240,7 @@ export const getAttemptController = async (req, res, next) => {
         attempt: {
           _id: attempt._id,
           testId: attempt.testId,
+          iqRoomId: attempt.iqRoomId,
           studentId: attempt.studentId,
           status: attempt.status,
           startedAt: attempt.startedAt,
@@ -420,6 +425,22 @@ export const submitAttemptController = async (req, res, next) => {
     await attempt.save();
 
     const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
+
+    // ✅ If part of an IQ Room, notify the room
+    if (attempt.iqRoomId) {
+      try {
+        const room = await IQRoom.findById(attempt.iqRoomId);
+        if (room) {
+          const io = getIO();
+          io.of("/iq-room").to(room.roomCode).emit("leaderboard-update", {
+            userId: attempt.studentId,
+            attemptId: attempt._id,
+          });
+        }
+      } catch (err) {
+        console.error("Failed to emit socket update for IQ Room:", err);
+      }
+    }
 
     return res.json({
       success: true,
