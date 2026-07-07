@@ -3,6 +3,8 @@ import env  from "./config/env.js";
 import { connectDB } from "./config/db.js";
 import logger from "./config/logger.js";
 import { startAutoSubmitJob } from "./modules/test-attempts/jobs/autoSubmitAttempts.job.js";
+import { setupSockets } from "./sockets/index.js";
+import http from "http";
 
 const PORT = env.PORT || 5000;
 
@@ -16,8 +18,11 @@ const startServer = async () => {
     // ✅ Start cron/background job AFTER DB is ready
     startAutoSubmitJob();
 
-    // Start Express server
-    app.listen(PORT, () => {
+    // Start Express server wrapped in HTTP server
+    const server = http.createServer(app);
+    setupSockets(server);
+
+    server.listen(PORT, () => {
       logger.info(`Server running on port ${PORT}`);
     });
   } catch (err) {

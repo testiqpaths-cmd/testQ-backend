@@ -32,8 +32,15 @@ export const getUserById = async (id) => {
 
 export const listUsers = async (query = {}) => {
 	const q = { isDeleted: false };
-	if (query.role && query.role !== "all") q.role = query.role;
+	if (query.role && query.role !== "all") {
+		if (Array.isArray(query.role)) {
+			q.role = { $in: query.role };
+		} else {
+			q.role = query.role;
+		}
+	}
 	if (query.status && query.status !== "all") q.status = query.status;
+	if (query.organizationId) q.organizationId = query.organizationId;
 	if (query.search) {
 		const search = new RegExp(query.search, "i");
 		q.$or = [

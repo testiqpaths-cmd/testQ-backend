@@ -12,7 +12,7 @@ export const getAttemptResult = async (attemptId) => {
     },
   }).populate({
     path: "answers.questionId",
-    select: "questionText type marks options topic subTopic", // ✅ no correctAnswer
+    select: "questionText type options topic subTopic", // ✅ no correctAnswer
   });
 
   if (!attempt) return null;

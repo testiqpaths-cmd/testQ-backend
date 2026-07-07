@@ -14,6 +14,12 @@ const testAttemptSchema = new mongoose.Schema(
       required: true,
     },
 
+    iqRoomId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "IQRoom",
+      default: null,
+    },
+
     startedAt: {
       type: Date,
       default: Date.now,
@@ -85,6 +91,19 @@ const testAttemptSchema = new mongoose.Schema(
       enum: ["IN_PROGRESS", "SUBMITTED", "EVALUATED", "EXPIRED"],
       default: "IN_PROGRESS",
     },
+
+    cheatingScore: {
+      type: Number,
+      default: 0,
+    },
+
+    violations: [
+      {
+        type: { type: String, required: true },
+        timestamp: { type: Number, required: true },
+        score: { type: Number, default: 0 },
+      },
+    ],
 
     answers: [
       {
@@ -177,7 +196,7 @@ const testAttemptSchema = new mongoose.Schema(
 
     expireReason: {
       type: String,
-      enum: ["TIME_EXPIRED", "MANUAL_SUBMIT", "TIME_EXPIRED_AUTO_SUBMIT", null],
+      enum: ["TIME_EXPIRED", "MANUAL_SUBMIT", "TIME_EXPIRED_AUTO_SUBMIT", "CHEATING", null],
       default: null,
     },
   },

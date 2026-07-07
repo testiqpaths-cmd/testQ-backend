@@ -18,7 +18,6 @@ export const updateQuestionSchema = z.object({
       type: z.enum(Object.values(QUESTION_TYPES)).optional(),
       options: z.array(z.string()).optional(),
       correctAnswer: z.string().optional(),
-      marks: z.number().positive().optional(),
       difficulty: z.string().optional(),
     })
     .refine(

@@ -30,7 +30,6 @@ export const generateQuestionTemplate = async () => {
       'type',
       'options',
       'correctAnswer',
-      'marks',
       'difficulty'
     ];
 
@@ -53,19 +52,18 @@ export const generateQuestionTemplate = async () => {
       { width: 15 },  // type (MCQ, TRUE_FALSE, SHORT, LONG)
       { width: 25 },  // options (pipe-separated)
       { width: 15 },  // correctAnswer
-      { width: 10 },  // marks
       { width: 15 }   // difficulty
     ];
 
     // Add sample rows with different question types
     const sampleQuestions = [
-      ['Mathematics', 'Algebra', 'What is 2 + 2?', 'MCQ', '1|2|3|4', '4', '1', 'EASY'],
-      ['Science', 'Physics', 'The earth revolves around the sun', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', '1', 'MEDIUM'],
-      ['Mathematics', 'Arithmetic', 'What is the sum of 5 + 6 + 7 + 8?', 'MCQ', '25|26|27|28', '26', '1', 'EASY'],
-      ['Science', 'Chemistry', 'Water boils at 100 degrees Celsius', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', '1', 'EASY'],
-      ['English', 'Vocabulary', 'Synonym of Happy', 'MCQ', 'Sad|Joyful|Angry|Depressed', 'Joyful', '1', 'EASY'],
-      ['Mathematics', 'Geometry', 'Number of sides in a square', 'MCQ', '2|3|4|5', '4', '1', 'EASY'],
-      ['Science', 'Biology', 'Humans breathe oxygen', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', '1', 'EASY']
+      ['Mathematics', 'Algebra', 'What is 2 + 2?', 'MCQ', '1|2|3|4', '4', 'EASY'],
+      ['Science', 'Physics', 'The earth revolves around the sun', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'MEDIUM'],
+      ['Mathematics', 'Arithmetic', 'What is the sum of 5 + 6 + 7 + 8?', 'MCQ', '25|26|27|28', '26', 'EASY'],
+      ['Science', 'Chemistry', 'Water boils at 100 degrees Celsius', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'EASY'],
+      ['English', 'Vocabulary', 'Synonym of Happy', 'MCQ', 'Sad|Joyful|Angry|Depressed', 'Joyful', 'EASY'],
+      ['Mathematics', 'Geometry', 'Number of sides in a square', 'MCQ', '2|3|4|5', '4', 'EASY'],
+      ['Science', 'Biology', 'Humans breathe oxygen', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'EASY']
     ];
 
     sampleQuestions.forEach(question => {
@@ -86,7 +84,6 @@ export const generateQuestionTemplate = async () => {
       ['type', 'MCQ, TRUE_FALSE'],
       ['options', 'Pipe-separated options (e.g., "1|2|3|4" or "TRUE|FALSE").'],
       ['correctAnswer', 'The correct answer value (e.g., "4" for MCQ, "TRUE" for TRUE_FALSE)'],
-      ['marks', 'Positive number'],
       ['difficulty', 'EASY, MEDIUM, or HARD'],
       [],
       ['Important Notes:'],
@@ -96,7 +93,6 @@ export const generateQuestionTemplate = async () => {
       ['- correctAnswer must match one of the provided options exactly'],
       ['- For TRUE_FALSE type, use "TRUE" or "FALSE" in options'],
       ['- For SHORT/LONG types, leave options empty and put the expected answer in correctAnswer'],
-      ['- marks must be a positive number'],
       ['- difficulty should be EASY, MEDIUM, or HARD']
     ];
 

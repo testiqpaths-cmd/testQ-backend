@@ -9,6 +9,7 @@ import {
   meController,
   githubLoginController,
   githubCallbackController,
+  updateProfileController,
 } from "./auth.controller.js";
 import { authMiddleware} from "../../common/middlewares/auth.middleware.js";
 import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
@@ -24,6 +25,7 @@ router.get("/github/callback", githubCallbackController);
 router.post("/logout", logoutController);
 router.post("/refresh-token", refreshTokenController);
 router.get("/me", authMiddleware, meController);
+router.put("/profile", authMiddleware, updateProfileController);
 
 // Example of admin-only route
 router.get("/admin", authMiddleware, roleMiddleware("admin"), (req, res) => {

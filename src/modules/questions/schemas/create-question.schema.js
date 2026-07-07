@@ -13,7 +13,6 @@ export const createQuestionSchema = z.object({
     type: z.enum([QUESTION_TYPES.MCQ, QUESTION_TYPES.TRUE_FALSE]),
     options: z.array(z.string()).optional(),
     correctAnswer: z.string().optional(),
-    marks: z.number().positive(),
     difficulty: z.string().optional(),
   }),
 });

@@ -28,11 +28,6 @@ const questionSchema = new mongoose.Schema({
   correctAnswer: {
     type: String,
   },
-  marks: {
-    type: Number,
-    required: true,
-    min: 1,
-  },
   difficulty: {
     type: String,
     enum: ["EASY", "MEDIUM", "HARD"],
