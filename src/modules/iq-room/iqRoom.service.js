@@ -1,7 +1,7 @@
 import IQRoom from "../../models/iqRoom.model.js";
 import Test from "../../models/test.model.js";
 import TestAttempt from "../../models/testAttempt.model.js";
-import { AppError } from "../../common/utils/error.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
 
 // Generate a random 6-character alphanumeric code
 const generateRoomCode = () => {
@@ -25,7 +25,7 @@ export const createIQRoomService = async ({
 }) => {
   const test = await Test.findById(testId);
   if (!test) {
-    throw new AppError("Test not found", 404);
+    throw new ApiError(404, "Test not found");
   }
 
   let roomCode;
@@ -59,15 +59,15 @@ export const joinIQRoomService = async ({ roomCode, userId }) => {
   const room = await IQRoom.findOne({ roomCode: roomCode.toUpperCase() });
 
   if (!room) {
-    throw new AppError("Invalid Room Code", 404);
+    throw new ApiError(404, "Invalid Room Code");
   }
 
   if (room.status !== "WAITING") {
-    throw new AppError("Room is no longer accepting participants", 400);
+    throw new ApiError(400, "Room is no longer accepting participants");
   }
 
   if (room.participants.length >= room.maxParticipants) {
-    throw new AppError("Room is full", 400);
+    throw new ApiError(400, "Room is full");
   }
 
   const alreadyJoined = room.participants.some(
@@ -89,7 +89,7 @@ export const getIQRoomService = async ({ roomCode }) => {
     .populate("participants.userId", "name email");
 
   if (!room) {
-    throw new AppError("Room not found", 404);
+    throw new ApiError(404, "Room not found");
   }
 
   return room;
@@ -99,15 +99,15 @@ export const startIQRoomService = async ({ roomCode, userId }) => {
   const room = await IQRoom.findOne({ roomCode: roomCode.toUpperCase() });
 
   if (!room) {
-    throw new AppError("Room not found", 404);
+    throw new ApiError(404, "Room not found");
   }
 
   if (room.creatorId.toString() !== userId.toString()) {
-    throw new AppError("Only the creator can start the room", 403);
+    throw new ApiError(403, "Only the creator can start the room");
   }
 
   if (room.status !== "WAITING") {
-    throw new AppError(`Cannot start room in ${room.status} state`, 400);
+    throw new ApiError(400, `Cannot start room in ${room.status} state`);
   }
 
   room.status = "RUNNING";
@@ -120,7 +120,7 @@ export const startIQRoomService = async ({ roomCode, userId }) => {
 export const getIQRoomLeaderboardService = async ({ roomCode }) => {
   const room = await IQRoom.findOne({ roomCode: roomCode.toUpperCase() }).lean();
   if (!room) {
-    throw new AppError("Room not found", 404);
+    throw new ApiError(404, "Room not found");
   }
 
   // Fetch all attempts tied to this room

@@ -7,12 +7,12 @@ import {
   getIQRoomLeaderboardController,
   getUserIQRoomHistoryController,
 } from "./iqRoom.controller.js";
-import { authenticate } from "../auth/auth.middleware.js";
+import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
 
 const router = express.Router();
 
 // Apply auth middleware to all routes
-router.use(authenticate);
+router.use(authMiddleware);
 
 router.post("/create", createIQRoomController);
 router.post("/join", joinIQRoomController);
