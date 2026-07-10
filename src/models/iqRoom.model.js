@@ -36,13 +36,13 @@ const iqRoomSchema = new mongoose.Schema(
       type: Number,
       required: true,
     },
-    autoStart: {
-      type: Boolean,
-      default: false,
+    startTime: {
+      type: Date,
+      default: null,
     },
-    autoEnd: {
-      type: Boolean,
-      default: false,
+    endTime: {
+      type: Date,
+      default: null,
     },
     status: {
       type: String,

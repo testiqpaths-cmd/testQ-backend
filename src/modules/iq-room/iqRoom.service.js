@@ -20,8 +20,8 @@ export const createIQRoomService = async ({
   testId,
   maxParticipants,
   durationMinutes,
-  autoStart,
-  autoEnd,
+  startTime,
+  endTime,
 }) => {
   const test = await Test.findById(testId);
   if (!test) {
@@ -47,8 +47,8 @@ export const createIQRoomService = async ({
     testId,
     maxParticipants,
     durationMinutes: durationMinutes || test.duration,
-    autoStart,
-    autoEnd,
+    startTime: startTime ? new Date(startTime) : null,
+    endTime: endTime ? new Date(endTime) : null,
     status: "WAITING",
   });
 
@@ -84,9 +84,9 @@ export const joinIQRoomService = async ({ roomCode, userId }) => {
 
 export const getIQRoomService = async ({ roomCode }) => {
   const room = await IQRoom.findOne({ roomCode: roomCode.toUpperCase() })
-    .populate("creatorId", "name email")
+    .populate("creatorId", "firstName lastName email")
     .populate("testId", "title duration marksPerQuestion negativeMarkingPercentage maxAttempts")
-    .populate("participants.userId", "name email");
+    .populate("participants.userId", "firstName lastName email");
 
   if (!room) {
     throw new ApiError(404, "Room not found");
@@ -125,14 +125,14 @@ export const getIQRoomLeaderboardService = async ({ roomCode }) => {
 
   // Fetch all attempts tied to this room
   const attempts = await TestAttempt.find({ iqRoomId: room._id })
-    .populate("studentId", "name email")
+    .populate("studentId", "firstName lastName email")
     .lean();
 
   // Map to leaderboard entries
   const leaderboard = attempts.map(attempt => {
     return {
       userId: attempt.studentId?._id,
-      name: attempt.studentId?.name || "Unknown",
+      name: attempt.studentId ? `${attempt.studentId.firstName || ''} ${attempt.studentId.lastName || ''}`.trim() || "Unknown" : "Unknown",
       score: attempt.totalScore,
       timeTaken: attempt.timeTakenSeconds,
       correct: attempt.correctAnswersCount,

@@ -16,11 +16,11 @@ export const createIQRoomController = async (req, res, next) => {
       testId,
       maxParticipants,
       durationMinutes,
-      autoStart,
-      autoEnd,
+      startTime,
+      endTime,
     } = req.body;
 
-    const creatorId = req.user.id;
+    const creatorId = req.user._id;
 
     const room = await createIQRoomService({
       name,
@@ -29,8 +29,8 @@ export const createIQRoomController = async (req, res, next) => {
       testId,
       maxParticipants,
       durationMinutes,
-      autoStart,
-      autoEnd,
+      startTime,
+      endTime,
     });
 
     res.status(201).json({
@@ -46,7 +46,7 @@ export const createIQRoomController = async (req, res, next) => {
 export const joinIQRoomController = async (req, res, next) => {
   try {
     const { roomCode } = req.body;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     const room = await joinIQRoomService({ roomCode, userId });
 
@@ -78,7 +78,7 @@ export const getIQRoomController = async (req, res, next) => {
 export const startIQRoomController = async (req, res, next) => {
   try {
     const { roomCode } = req.params;
-    const userId = req.user.id;
+    const userId = req.user._id;
 
     const room = await startIQRoomService({ roomCode, userId });
 
@@ -112,7 +112,7 @@ export const getIQRoomLeaderboardController = async (req, res, next) => {
 
 export const getUserIQRoomHistoryController = async (req, res, next) => {
   try {
-    const userId = req.user.id;
+    const userId = req.user._id;
     const history = await getUserIQRoomHistoryService(userId);
 
     res.status(200).json({
