@@ -73,23 +73,32 @@ export const startTestAttemptController = async (req, res, next) => {
 
     // 3) Validate schedule (adapt to your test fields)
     // Example fields: test.startTime, test.endTime (Date)
-    const now = new Date();
-    if (test.startTime && now < new Date(test.startTime)) {
-      return res.status(400).json({
-        success: false,
-        message: "Test has not started yet",
-      });
-    }
-    if (test.endTime && now > new Date(test.endTime)) {
-      return res.status(400).json({
-        success: false,
-        message: "Test has already ended",
-      });
+    if (!iqRoomId) {
+      const now = new Date();
+      if (test.startTime && now < new Date(test.startTime)) {
+        return res.status(400).json({
+          success: false,
+          message: "Test has not started yet",
+        });
+      }
+      if (test.endTime && now > new Date(test.endTime)) {
+        return res.status(400).json({
+          success: false,
+          message: "Test has already ended",
+        });
+      }
     }
 
     // 4) Prevent multiple in-progress attempts and enforce maxAttempts
-    // Check if there is an in-progress attempt
-    const existingInProgress = await TestAttempt.findOne({ testId, studentId, status: 'IN_PROGRESS' }).lean();
+    const baseQuery = { testId, studentId };
+    if (iqRoomId) {
+      baseQuery.iqRoomId = iqRoomId;
+    } else {
+      baseQuery.$or = [{ iqRoomId: null }, { iqRoomId: { $exists: false } }];
+    }
+
+    // Check if there is an in-progress attempt for this specific context
+    const existingInProgress = await TestAttempt.findOne({ ...baseQuery, status: 'IN_PROGRESS' }).lean();
     if (existingInProgress) {
       const existingTiming = computeAttemptTiming(existingInProgress);
       return res.status(409).json({
@@ -109,17 +118,27 @@ export const startTestAttemptController = async (req, res, next) => {
 
     // Count completed/submitted attempts to enforce maxAttempts
     const completedAttemptsCount = await TestAttempt.countDocuments({
-      testId,
-      studentId,
+      ...baseQuery,
       status: { $in: ['SUBMITTED', 'EVALUATED'] },
     });
 
-    const allowedAttempts = Number(test.maxAttempts) || 1;
-    if (completedAttemptsCount >= allowedAttempts) {
-      return res.status(403).json({
-        success: false,
-        message: 'Maximum attempts reached for this test',
-      });
+    if (iqRoomId) {
+      // IQ Room attempts are strictly 1 per user per room
+      if (completedAttemptsCount >= 1) {
+        return res.status(403).json({
+          success: false,
+          message: 'You have already completed this live contest',
+        });
+      }
+    } else {
+      // Normal test attempts follow the test.maxAttempts rule
+      const allowedAttempts = Number(test.maxAttempts) || 1;
+      if (completedAttemptsCount >= allowedAttempts) {
+        return res.status(403).json({
+          success: false,
+          message: 'Maximum attempts reached for this test',
+        });
+      }
     }
 
     const { questionSnapshots, questions } = await selectAttemptQuestions(test);
