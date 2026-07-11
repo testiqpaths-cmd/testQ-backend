@@ -1,5 +1,6 @@
 import { User } from "../auth/index.js";
 import Organization from "../../models/organization.model.js";
+import { checkFeatureAccess } from "../subscription/services/subscription.service.js";
 import { asyncHandler as _ } from "../../common/utils/asyncHandler.js";
 import {
 	createUser,
@@ -71,6 +72,10 @@ export const createStudentController = async (req, res) => {
 		if (!requesterOrganizationId) {
 			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
 		}
+		
+		// Enforce Student Limit
+		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", 1);
+		
 		payload.organizationId = requesterOrganizationId;
 	}
 
@@ -179,6 +184,11 @@ export const bulkUploadUsersController = async (req, res) => {
 		}
 	} catch (error) {
 		return res.status(400).json({ success: false, message: "Invalid file format" });
+	}
+
+	// Enforce MAX_STUDENTS for Organization bulk uploads
+	if (requesterRole === "ORGANIZATION") {
+		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", rows.length);
 	}
 
 	// rows expected to be array of objects with headers: firstName,lastName,email,password,phone,role,organizationCode

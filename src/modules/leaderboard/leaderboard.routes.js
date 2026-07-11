@@ -1,5 +1,6 @@
 import express from "express";
 import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
+import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
 
 import {
   getTestLeaderboard,
@@ -13,6 +14,7 @@ const router = express.Router();
 router.get(
   "/test/:testId",
   authMiddleware,
+  featureMiddleware("LEADERBOARD"),
   getTestLeaderboard
 );
 
@@ -21,6 +23,7 @@ router.get(
 router.get(
   "/series/:seriesId",
   authMiddleware,
+  featureMiddleware("LEADERBOARD"),
   getSeriesLeaderboard
 );
 

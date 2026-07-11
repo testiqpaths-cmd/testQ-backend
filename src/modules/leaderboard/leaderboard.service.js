@@ -283,6 +283,7 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
         _id: "$studentId",
 
         totalScore: { $sum: "$totalScore" },
+        maxScore: { $sum: "$maxScore" },
         totalTime: { $sum: "$timeTakenSeconds" },
         avgAccuracy: { $avg: "$accuracy" },
         correctAnswersCount: { $sum: "$correctAnswersCount" },
@@ -312,21 +313,9 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
     },
 
     {
-      $setWindowFields: {
-        sortBy: {
-          totalScore: -1,
-          totalTime: 1,
-        },
-        output: {
-          rank: { $rank: {} },
-        },
-      },
-    },
-
-    {
       $project: {
-        rank: 1,
         totalScore: 1,
+        maxScore: 1,
         totalTime: 1,
         timeTakenSeconds: "$totalTime",
         avgAccuracy: 1,
@@ -347,7 +336,12 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
     { $limit: limit },
   ]);
 
-  const [items, total] = await Promise.all([itemsPromise, totalPromise]);
+  const [results, total] = await Promise.all([itemsPromise, totalPromise]);
+
+  const items = results.map((item, index) => ({
+    ...item,
+    rank: skip + index + 1,
+  }));
 
   return {
     items,

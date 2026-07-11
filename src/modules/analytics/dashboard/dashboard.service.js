@@ -3,6 +3,7 @@ import User from "../../auth/models/User.model.js";
 import Organization from "../../../models/organization.model.js";
 import Test from "../../../models/test.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
+import UserSubscription from "../../subscription/models/UserSubscription.model.js";
 
 export const getStudentDashboardData = async (studentId) => {
   // Fetch all completed/submitted attempts for the student
@@ -270,8 +271,6 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
 
   const [
     totalStudents,
-    paidStudents,
-    freeStudents,
     totalOrganizations,
     activeTests,
     activeAdminTests,
@@ -284,10 +283,9 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     supportCompleted,
     scopedTests,
     scopedStudents,
+    planDistributionRaw,
   ] = await Promise.all([
     User.countDocuments(studentFilter),
-    User.countDocuments({ ...studentFilter, plan: "PAID" }),
-    User.countDocuments({ ...studentFilter, plan: "FREE" }),
     isAdmin ? Organization.countDocuments() : Promise.resolve(0),
     Test.countDocuments({ ...testFilter, status: "ACTIVE" }),
     isAdmin ? Test.countDocuments({ ...testFilter, status: "ACTIVE", "createdBy.role": "IQPATH_ADMIN" }) : Promise.resolve(0),
@@ -310,6 +308,33 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     HelpSupport.countDocuments({ ...supportFilter, status: "resolved" }),
     Test.find(testFilter).select("_id").lean(),
     User.find(studentFilter).select("_id").lean(),
+    UserSubscription.aggregate([
+      { $match: { status: "ACTIVE" } },
+      {
+        $lookup: {
+          from: "plans",
+          localField: "planId",
+          foreignField: "_id",
+          as: "plan"
+        }
+      },
+      { $unwind: "$plan" },
+      {
+        $lookup: {
+          from: "roles",
+          localField: "plan.roleId",
+          foreignField: "_id",
+          as: "role"
+        }
+      },
+      { $unwind: "$role" },
+      {
+        $group: {
+          _id: { roleName: "$role.name", planName: "$plan.name", planId: "$plan._id", price: "$plan.price" },
+          count: { $sum: 1 }
+        }
+      }
+    ])
   ]);
 
   const testIds = scopedTests.map((test) => test._id);
@@ -339,14 +364,31 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     date: attempt.submittedAt || attempt.updatedAt || attempt.createdAt,
   }));
 
+  const planDistribution = {
+    students: [],
+    organizations: []
+  };
+
+  planDistributionRaw.forEach((stat) => {
+    const { roleName, planName, planId, price } = stat._id;
+    const planInfo = { planName, planId, count: stat.count, price };
+    
+    // We only have orgs and students right now
+    if (roleName === "STUDENT") {
+      planDistribution.students.push(planInfo);
+    } else if (roleName === "ORGANIZATION") {
+      planDistribution.organizations.push(planInfo);
+    }
+  });
+
   return {
     students: {
       total: totalStudents,
-      paid: paidStudents,
-      free: freeStudents,
+      plans: planDistribution.students,
     },
     organizations: {
       total: totalOrganizations,
+      plans: planDistribution.organizations,
     },
     tests: {
       totalActive: activeTests,

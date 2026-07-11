@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import UserModel from "../../models/user.model.js";
 import Organization from "../../models/organization.model.js";
+import UserSubscription from "../subscription/models/UserSubscription.model.js";
 
 const hashPassword = async (password) => {
 	if (!password) return undefined;
@@ -49,7 +50,26 @@ export const listUsers = async (query = {}) => {
 			{ email: search },
 		];
 	}
-	return UserModel.find(q).lean();
+	if (query.planId) {
+		const subs = await UserSubscription.find({ planId: query.planId, status: "ACTIVE" }).select("userId").lean();
+		const filterUserIds = subs.map(s => s.userId);
+		q._id = { $in: filterUserIds };
+	}
+	
+	const users = await UserModel.find(q).lean();
+	
+	const userIds = users.map(u => u._id);
+	const activeSubs = await UserSubscription.find({ userId: { $in: userIds }, status: "ACTIVE" }).populate("planId", "name").lean();
+	
+	const subMap = {};
+	activeSubs.forEach(sub => {
+		subMap[sub.userId] = sub;
+	});
+
+	return users.map(u => ({
+		...u,
+		activePlanName: subMap[u._id]?.planId?.name || "Free/Default"
+	}));
 };
 
 export const updateUser = async (id, updates) => {
@@ -65,7 +85,26 @@ export const softDeleteUser = async (id, deletedBy = null) => {
 export const listStudents = async (query = {}) => {
 	const q = { role: "STUDENT", isDeleted: false };
 	if (query.organizationId) q.organizationId = query.organizationId;
-	return UserModel.find(q).lean();
+	if (query.planId) {
+		const subs = await UserSubscription.find({ planId: query.planId, status: "ACTIVE" }).select("userId").lean();
+		const filterUserIds = subs.map(s => s.userId);
+		q._id = { $in: filterUserIds };
+	}
+	
+	const users = await UserModel.find(q).lean();
+	
+	const userIds = users.map(u => u._id);
+	const activeSubs = await UserSubscription.find({ userId: { $in: userIds }, status: "ACTIVE" }).populate("planId", "name").lean();
+	
+	const subMap = {};
+	activeSubs.forEach(sub => {
+		subMap[sub.userId] = sub;
+	});
+
+	return users.map(u => ({
+		...u,
+		activePlanName: subMap[u._id]?.planId?.name || "Free/Default"
+	}));
 };
 
 export const createStudent = async (payload) => {
