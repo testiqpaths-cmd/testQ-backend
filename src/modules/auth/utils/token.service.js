@@ -4,9 +4,9 @@ import env from "../../../config/env.js";
 export const generateAccessToken = (user) =>
   jwt.sign(
     {
-      id: user._id?.toString() || user.id,     // ✅ always set id properly
+      id: user._id?.toString() || user.id,
       role: user.role,
-      
+      organizationId: user.organizationId?.toString() ?? null,
     },
     env.JWT_ACCESS_SECRET,
     { expiresIn: env.JWT_ACCESS_EXPIRES_IN }
@@ -17,6 +17,7 @@ export const generateRefreshToken = (user) =>
     {
       id: user._id?.toString() || user.id,
       role: user.role,
+      organizationId: user.organizationId?.toString() ?? null,
     },
     env.JWT_REFRESH_SECRET,
     { expiresIn: env.JWT_REFRESH_EXPIRES_IN }
