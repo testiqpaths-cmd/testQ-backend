@@ -3,6 +3,7 @@ import { Router } from "express";
 import path from "path";
 import { fileURLToPath } from "url";
 import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
+import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
 import { validate } from "../../common/middlewares/validate.middleware.js";
 import { upload } from "../../common/middlewares/upload.middleware.js";
 import { generateQuestionTemplate } from "./templates/generate-template.js";
@@ -30,23 +31,24 @@ const router = Router();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-router.post("/createManual", authMiddleware, validate(createQuestionSchema), createQuestion);
-router.put("/update/:id", authMiddleware, validate(updateQuestionSchema), updateQuestion);
-router.delete("/delete/:id",authMiddleware, deleteQuestion);
+router.post("/createManual", authMiddleware, featureMiddleware("QUESTION_BANK", true), validate(createQuestionSchema), createQuestion);
+router.put("/update/:id", authMiddleware, featureMiddleware("QUESTION_BANK"), validate(updateQuestionSchema), updateQuestion);
+router.delete("/delete/:id",authMiddleware, featureMiddleware("QUESTION_BANK"), deleteQuestion);
 router.post(
   "/upload-excel",
   authMiddleware,
+  featureMiddleware("QUESTION_BANK", true),
   upload.single("file"),
   uploadQuestionsExcel
 );
-router.get("/excel-batches/my", authMiddleware, getMyExcelBatchesController);
-router.get("/excel-batches/:batchId/questions", authMiddleware, getQuestionsByExcelBatchController);
+router.get("/excel-batches/my", authMiddleware, featureMiddleware("QUESTION_BANK"), getMyExcelBatchesController);
+router.get("/excel-batches/:batchId/questions", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsByExcelBatchController);
 
-router.get("/getAllQuestion", getAllQuestionsController);
-router.get("/getQuestionsByUser/:userId", getQuestionsByUserIdController);
-router.get("/getQuestionById/:questionId", getQuestionByIdController);
-router.get("/getQuestionsBySubject/:subjectId", getQuestionsBySubjectController);
-router.get("/getQuestionsByTopic/:topicId", getQuestionsByTopicController);
+router.get("/getAllQuestion", authMiddleware, featureMiddleware("QUESTION_BANK"), getAllQuestionsController);
+router.get("/getQuestionsByUser/:userId", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsByUserIdController);
+router.get("/getQuestionById/:questionId", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionByIdController);
+router.get("/getQuestionsBySubject/:subjectId", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsBySubjectController);
+router.get("/getQuestionsByTopic/:topicId", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsByTopicController);
 
 // router.get("/download-template", async (req, res) => {
 //   try {

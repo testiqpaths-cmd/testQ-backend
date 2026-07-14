@@ -12,6 +12,7 @@ import {
 import {
   roleMiddleware
 } from "../../../common/middlewares/role.middleware.js";
+import { featureMiddleware } from "../../../common/middlewares/feature.middleware.js";
 
 const router = express.Router();
 
@@ -35,6 +36,7 @@ router.get(
   "/organization/:orgId",
   authMiddleware,
   roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"),
+  featureMiddleware("ANALYTICS"),
   getOrganizationAnalytics
 );
 

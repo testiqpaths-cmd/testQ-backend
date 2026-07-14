@@ -4,7 +4,8 @@ import { autoSubmitExpiredAttempts } from "../services/autoSubmitExpiredAttempts
 let isRunning = false;
 
 export const startAutoSubmitJob = () => {
-  cron.schedule("*/30 * * * * *", async () => {
+  // Run every 5 minutes to reduce CPU load and prevent missed executions
+  cron.schedule("*/5 * * * *", async () => {
     if (isRunning) return; // ✅ prevent overlap
     isRunning = true;
 

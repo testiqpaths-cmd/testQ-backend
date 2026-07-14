@@ -399,28 +399,8 @@ export const submitAttemptController = async (req, res, next) => {
     const attempt = req.attempt;
     const timing = req.timing;
 
-    // ✅ If timer expired, middleware already set EXPIRED
-    // Return clear message that time is up
-    if (attempt.status === "EXPIRED") {
-      return res.json({
-        success: true,
-        message: "Attempt auto-expired due to time over",
-        data: {
-          status: "EXPIRED",
-          expireReason: attempt.expireReason,
-          submittedAt: attempt.submittedAt,
-          timing: {
-            remainingSeconds: 0,
-            remainingMs: 0,
-            expired: true,
-            serverNow: timing.serverNow,
-          },
-        },
-      });
-    }
-
     // Prevent submission if not in progress and not already expired
-    if (attempt.status !== "IN_PROGRESS") {
+    if (attempt.status !== "IN_PROGRESS" && attempt.status !== "EXPIRED") {
       return res.status(409).json({
         success: false,
         message: `Cannot submit attempt - status is ${attempt.status.toLowerCase()}`,
@@ -437,11 +417,13 @@ export const submitAttemptController = async (req, res, next) => {
       });
     }
 
-    // ✅ Manually submit before time expires
-    attempt.status = "SUBMITTED";
-    attempt.submittedAt = new Date();
-    attempt.expireReason = req.body.expireReason === "CHEATING" ? "CHEATING" : "MANUAL_SUBMIT";
-    await attempt.save();
+    // ✅ Manually submit before time expires, unless it already expired
+    if (attempt.status !== "EXPIRED") {
+      attempt.status = "SUBMITTED";
+      attempt.submittedAt = new Date();
+      attempt.expireReason = req.body.expireReason === "CHEATING" ? "CHEATING" : "MANUAL_SUBMIT";
+      await attempt.save();
+    }
 
     const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
 

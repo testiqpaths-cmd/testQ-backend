@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authMiddleware} from "../../common/middlewares/auth.middleware.js";
 import loadSeries from "./middlewares/loadSeries.middleware.js";
 import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
+import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
 import mongoose from "mongoose";
 import {
   createSeries,
@@ -27,6 +28,7 @@ router.get(
   "/",
   authMiddleware,
   roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
+  featureMiddleware("TEST_SERIES"),
   getSeriesList
 );
 

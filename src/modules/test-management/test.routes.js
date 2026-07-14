@@ -7,6 +7,7 @@ import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
 import loadTest from "./middlewares/loadTest.middleware.js";
 import schedule from "./middlewares/schedule.middleware.js";
 import visibility from "./middlewares/visibility.middleware.js";
+import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
 
 import {
   createTest,
@@ -25,6 +26,7 @@ router.post(
   "/tests",
   authMiddleware,
   roleMiddleware("IQPATH_ADMIN", "ORGANIZATION","STUDENT"),
+  featureMiddleware("CREATE_TEST", true),
   createTest
 );
 router.get(

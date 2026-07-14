@@ -2,6 +2,10 @@ import bcrypt from "bcryptjs";
 import crypto from "crypto";
 import UserModel from "../../models/user.model.js";
 import Organization from "../../models/organization.model.js";
+import UserSubscription from "../subscription/models/UserSubscription.model.js";
+import sendEmail from "../../config/email.js";
+import { loginTemplate } from "../../template/login.template.js";
+import env from "../../config/env.js";
 
 const hashPassword = async (password) => {
 	if (!password) return undefined;
@@ -22,8 +26,7 @@ const generateOrganizationCode = (name = "ORG") => {
 export const createUser = async (payload) => {
 	const data = { ...payload };
 	if (data.password) data.password = await hashPassword(data.password);
-	const user = await UserModel.create(data);
-	return user;
+	return UserModel.create(data);
 };
 
 export const getUserById = async (id) => {
@@ -33,23 +36,33 @@ export const getUserById = async (id) => {
 export const listUsers = async (query = {}) => {
 	const q = { isDeleted: false };
 	if (query.role && query.role !== "all") {
-		if (Array.isArray(query.role)) {
-			q.role = { $in: query.role };
-		} else {
-			q.role = query.role;
-		}
+		q.role = Array.isArray(query.role) ? { $in: query.role } : query.role;
 	}
 	if (query.status && query.status !== "all") q.status = query.status;
 	if (query.organizationId) q.organizationId = query.organizationId;
 	if (query.search) {
 		const search = new RegExp(query.search, "i");
-		q.$or = [
-			{ firstName: search },
-			{ lastName: search },
-			{ email: search },
-		];
+		q.$or = [{ firstName: search }, { lastName: search }, { email: search }];
 	}
-	return UserModel.find(q).lean();
+	if (query.planId) {
+		const subs = await UserSubscription.find({ planId: query.planId, status: "ACTIVE" }).select("userId").lean();
+		q._id = { $in: subs.map((sub) => sub.userId) };
+	}
+
+	const users = await UserModel.find(q).lean();
+	const activeSubs = await UserSubscription.find({ userId: { $in: users.map((u) => u._id) }, status: "ACTIVE" })
+		.populate("planId", "name")
+		.lean();
+
+	const subMap = {};
+	activeSubs.forEach((sub) => {
+		subMap[sub.userId] = sub;
+	});
+
+	return users.map((u) => ({
+		...u,
+		activePlanName: subMap[u._id]?.planId?.name || "Free/Default",
+	}));
 };
 
 export const updateUser = async (id, updates) => {
@@ -61,24 +74,39 @@ export const softDeleteUser = async (id, deletedBy = null) => {
 	return UserModel.findByIdAndUpdate(id, { isDeleted: true, deletedAt: new Date(), deletedBy }, { new: true });
 };
 
-// Students are users with role STUDENT
 export const listStudents = async (query = {}) => {
 	const q = { role: "STUDENT", isDeleted: false };
 	if (query.organizationId) q.organizationId = query.organizationId;
-	return UserModel.find(q).lean();
+	if (query.planId) {
+		const subs = await UserSubscription.find({ planId: query.planId, status: "ACTIVE" }).select("userId").lean();
+		q._id = { $in: subs.map((sub) => sub.userId) };
+	}
+
+	const users = await UserModel.find(q).lean();
+	const activeSubs = await UserSubscription.find({ userId: { $in: users.map((u) => u._id) }, status: "ACTIVE" })
+		.populate("planId", "name")
+		.lean();
+
+	const subMap = {};
+	activeSubs.forEach((sub) => {
+		subMap[sub.userId] = sub;
+	});
+
+	return users.map((u) => ({
+		...u,
+		activePlanName: subMap[u._id]?.planId?.name || "Free/Default",
+	}));
 };
 
 export const createStudent = async (payload) => {
-	const data = { 
-		...payload, 
-		role: "STUDENT", 
+	return createUser({
+		...payload,
+		role: "STUDENT",
 		password: payload.password || "change_me",
-		status: payload.status || "ACTIVE"
-	};
-	return createUser(data);
+		status: payload.status || "ACTIVE",
+	});
 };
 
-// Organizations
 export const listOrganizations = async (query = {}) => {
 	const q = {};
 	if (query.name) q.name = { $regex: query.name, $options: "i" };
@@ -87,16 +115,24 @@ export const listOrganizations = async (query = {}) => {
 
 export const createOrganization = async (payload) => {
 	const data = { ...payload };
-	if (!data.name && data.organizationName) {
-		data.name = data.organizationName;
-	}
-	if (!data.code) {
-		data.code = generateOrganizationCode(data.name || "ORG");
-	}
-	if (!data.createdBy) {
-		delete data.createdBy;
-	}
+	if (!data.name && data.organizationName) data.name = data.organizationName;
+	if (!data.code) data.code = generateOrganizationCode(data.name || "ORG");
+	if (!data.createdBy) delete data.createdBy;
+
 	const org = await Organization.create(data);
+
+	if (data.contactEmail && data.password) {
+		await createUser({
+			firstName: data.contactPerson || data.name,
+			email: data.contactEmail,
+			password: data.password,
+			role: "ORGANIZATION",
+			organizationId: org._id,
+			status: "ACTIVE",
+			plan: data.plan || "FREE",
+		});
+	}
+
 	return org;
 };
 
@@ -112,26 +148,29 @@ export const deleteOrganization = async (id) => {
 	return Organization.findByIdAndDelete(id);
 };
 
-// Bulk create users from parsed rows
 export const createUsersFromArray = async (rows = [], options = {}) => {
 	const { organizationId: overrideOrganizationId = null, organizationCode: overrideOrganizationCode = null } = options;
 	const results = [];
+
 	for (const row of rows) {
+		let rowEmail = "";
 		try {
 			const firstName = (row.firstName || row.first_name || row.FirstName || "").toString().trim();
 			const lastName = (row.lastName || row.last_name || row.LastName || "").toString().trim();
-			const email = (row.email || row.Email || "").toString().trim().toLowerCase();
+			rowEmail = (row.email || row.Email || "").toString().trim().toLowerCase();
+
+			if (!rowEmail && !firstName) continue;
+
 			const password = row.password || "change_me";
-			const phone = row.phone || row.mobile || "";
+			const phone = (row.phone || row.mobile || "").toString().trim();
 			const role = (row.role || "STUDENT").toString().trim().toUpperCase() || "STUDENT";
 			const organizationCode = overrideOrganizationCode || row.organizationCode || row.organization_code || row.orgCode || null;
 			let organizationId = overrideOrganizationId;
 
-			// Additional fields from template
 			const plan = (row.plan || "FREE").toString().trim().toUpperCase();
-			const isEmailVerified = (row.isEmailVerified || row.isEmailVerified === "TRUE" || row.isEmailVerified === true) ? true : false;
+			const rawVerified = row.isEmailVerified;
+			const isEmailVerified = rawVerified === true || String(rawVerified).trim().toUpperCase() === "TRUE";
 
-			// Address fields
 			const address = {};
 			if (row.address_line1) address.line1 = row.address_line1.toString().trim();
 			if (row.address_city) address.city = row.address_city.toString().trim();
@@ -139,7 +178,6 @@ export const createUsersFromArray = async (rows = [], options = {}) => {
 			if (row.address_country) address.country = row.address_country.toString().trim();
 			if (row.address_zipCode) address.zipCode = row.address_zipCode.toString().trim();
 
-			// Education fields
 			const education = {};
 			if (row.education_qualification) education.qualification = row.education_qualification.toString().trim();
 			if (row.education_stream) education.stream = row.education_stream.toString().trim();
@@ -153,41 +191,96 @@ export const createUsersFromArray = async (rows = [], options = {}) => {
 
 			if (!organizationId && organizationCode) {
 				let org = await Organization.findOne({ code: organizationCode });
-				if (!org) {
-					org = await Organization.create({ name: organizationCode, code: organizationCode });
-				}
+				if (!org) org = await Organization.create({ name: organizationCode, code: organizationCode });
 				organizationId = org._id;
 			}
 
 			const userPayload = {
 				firstName,
 				lastName,
-				email,
+				email: rowEmail,
 				password,
-				phone,
 				role,
 				organizationId,
 				status: "ACTIVE",
 				isEmailVerified,
-				plan
+				plan,
 			};
 
-			// Only add address if it has values
-			if (Object.keys(address).length > 0) {
-				userPayload.address = address;
+			if (phone) userPayload.phone = phone;
+			if (Object.keys(address).length > 0) userPayload.address = address;
+			if (Object.keys(education).length > 0) userPayload.education = education;
+
+			const existingUser = rowEmail
+				? await UserModel.findOne({ email: rowEmail }).setOptions({ includeDeleted: true })
+				: null;
+
+			let user;
+			let status = "created";
+
+			if (existingUser?.isDeleted) {
+				await UserModel.updateOne(
+					{ _id: existingUser._id },
+					{
+						$set: {
+							...userPayload,
+							isDeleted: false,
+							deletedAt: null,
+							deletedBy: null,
+						},
+					},
+				);
+				user = await UserModel.findById(existingUser._id).lean();
+				status = "restored";
+			} else if (existingUser) {
+				throw new Error(`Email "${rowEmail}" is already registered`);
+			} else {
+				user = await createUser(userPayload);
 			}
 
-			// Only add education if it has values
-			if (Object.keys(education).length > 0) {
-				userPayload.education = education;
+			try {
+				const loginUrl = (env.CORS_ORIGIN || "http://localhost:5173") + "/login";
+				const emailHtml = loginTemplate({
+					firstName: user.firstName,
+					email: user.email,
+					password,
+					loginUrl,
+				});
+				const textContent = `Welcome to TestQ!\n\nEmail: ${user.email}\nPassword: ${password}\nLogin: ${loginUrl}`;
+
+				await sendEmail({
+					to: user.email,
+					subject: "Welcome to TestQ - Your Account Credentials",
+					html: emailHtml,
+					textContent,
+				});
+			} catch (emailErr) {
+				console.error(`Failed to send email to ${user.email}:`, emailErr);
 			}
 
-			const user = await createUser(userPayload);
-			results.push({ email, status: "created", id: user._id });
+			results.push({ email: rowEmail, status, id: user._id });
 		} catch (err) {
-			results.push({ row, status: "error", message: err.message });
+			let friendlyMessage = err.message;
+
+			if (err.code === 11000) {
+				const field = Object.keys(err.keyPattern || {})[0] || "";
+				if (field === "email") {
+					friendlyMessage = `Email "${rowEmail}" is already registered`;
+				} else if (field === "phone") {
+					friendlyMessage = `Phone number is already in use by another account`;
+				} else {
+					friendlyMessage = `A user with this ${field} already exists`;
+				}
+			}
+
+			if (err.name === "ValidationError") {
+				const fields = Object.keys(err.errors).join(", ");
+				friendlyMessage = `Missing or invalid fields: ${fields}`;
+			}
+
+			results.push({ email: rowEmail, status: "error", message: friendlyMessage });
 		}
 	}
+
 	return results;
 };
-

@@ -155,4 +155,14 @@ userSchema.index(
   },
 );
 
+userSchema.pre(/^find/, function () {
+  if (this.getOptions?.().includeDeleted === true) return;
+  this.where({ isDeleted: { $ne: true } });
+});
+
+userSchema.pre(/^findOneAndUpdate/, function () {
+  if (this.getOptions?.().includeDeleted === true) return;
+  this.where({ isDeleted: { $ne: true } });
+});
+
 export default model("User", userSchema);

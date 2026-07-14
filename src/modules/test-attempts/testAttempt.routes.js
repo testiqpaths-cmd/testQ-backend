@@ -8,10 +8,12 @@ import {loadAttempt  , enforceAttemptTimer} from '../test-attempts/middlewares/e
 import { validate } from '../../common/middlewares/validate.middleware.js';
 import { evaluateAttemptSchema } from './schemas/evaluateAttempt.schema.js';
 
+import { featureMiddleware } from '../../common/middlewares/feature.middleware.js';
+
 const router = express.Router();
 
 // ✅ Start test: creates attempt with backend-enforced timing
-router.post('/starttest/:testId', authMiddleware, startTestAttemptController);
+router.post('/starttest/:testId', authMiddleware, featureMiddleware('CREATE_TEST', true), startTestAttemptController);
 
 // ✅ Save answer: checks expiry before allowing save
 router.post('/saveanswer/:attemptId', authMiddleware, loadAttempt, enforceAttemptTimer, saveAnswerController);

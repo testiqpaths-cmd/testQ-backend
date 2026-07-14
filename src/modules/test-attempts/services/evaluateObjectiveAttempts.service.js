@@ -54,8 +54,8 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
   const test = await Test.findById(attempt.testId).lean();
 
-  // only run after submission (or re-run if already evaluated)
-  if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED") {
+  // only run after submission (or re-run if already evaluated or expired)
+  if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED" && attempt.status !== "EXPIRED") {
     return attempt;
   }
 

@@ -23,25 +23,23 @@ const env = {
   JWT_ACCESS_EXPIRES_IN: process.env.JWT_ACCESS_EXPIRES_IN,
   JWT_REFRESH_EXPIRES_IN: process.env.JWT_REFRESH_EXPIRES_IN,
 
-    // Mail
-  MAIL_HOST: process.env.MAIL_HOST,
-  MAIL_PORT: Number(process.env.MAIL_PORT),
-  MAIL_USER: process.env.MAIL_USER,
-  MAIL_PASS: process.env.MAIL_PASS,
-  MAIL_FROM: process.env.MAIL_FROM,
+  // Mail
+  BREVO_API_KEY: process.env.BREVO_API_KEY,
+  BREVO_SENDER_EMAIL: process.env.BREVO_SENDER_EMAIL,
+  BREVO_SENDER_NAME: process.env.BREVO_SENDER_NAME,
 
   // Cookies
   COOKIE_SECURE: process.env.COOKIE_SECURE === "true",
   COOKIE_SAME_SITE: process.env.COOKIE_SAME_SITE || "lax",
   COOKIE_DOMAIN: process.env.COOKIE_DOMAIN || "localhost",
-    
+
   // Redis
-    REDIS_HOST: process.env.REDIS_HOST,
-    REDIS_PORT: Number(process.env.REDIS_PORT),
-    REDIS_PASSWORD: process.env.REDIS_PASSWORD,
+  REDIS_HOST: process.env.REDIS_HOST,
+  REDIS_PORT: Number(process.env.REDIS_PORT),
+  REDIS_PASSWORD: process.env.REDIS_PASSWORD,
 
   // CORS
-  CORS_ORIGIN: process.env.CORS_ORIGIN ,
+  CORS_ORIGIN: process.env.CORS_ORIGIN,
 };
 
 export default env;

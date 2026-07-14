@@ -1,5 +1,6 @@
 import { User } from "../auth/index.js";
 import Organization from "../../models/organization.model.js";
+import { checkFeatureAccess } from "../subscription/services/subscription.service.js";
 import { asyncHandler as _ } from "../../common/utils/asyncHandler.js";
 import {
 	createUser,
@@ -18,16 +19,58 @@ import {
 } from "./user.service.js";
 import xlsx from "xlsx";
 import { generateUserTemplate } from "./template/generate-userTemplate.js";
+import sendEmail from "../../config/email.js";
+import { loginTemplate } from "../../template/login.template.js";
+import env from "../../config/env.js";
+
+const sendWelcomeEmail = async (user, password) => {
+	if (!user?.email) return;
+	const loginUrl = (env.CORS_ORIGIN || "http://localhost:5173") + "/login";
+	const emailHtml = loginTemplate({
+		firstName: user.firstName,
+		email: user.email,
+		password: password || "change_me",
+		loginUrl,
+	});
+	const textContent = `Welcome to TestQ!\n\nEmail: ${user.email}\nPassword: ${password || "change_me"}\nLogin: ${loginUrl}`;
+
+	await sendEmail({
+		to: user.email,
+		subject: "Welcome to TestQ - Your Account Credentials",
+		html: emailHtml,
+		textContent,
+	});
+};
 
 // Generic user CRUD
 export const createUserController = async (req, res) => {
 	const payload = req.body;
 	const user = await createUser(payload);
+	try {
+		await sendWelcomeEmail(user, payload.password);
+	} catch (emailErr) {
+		console.error(`Failed to send welcome email to ${user.email}:`, emailErr);
+	}
 	res.status(201).json({ success: true, user });
 };
 
 export const listUsersController = async (req, res) => {
-	const users = await listUsers(req.query || {});
+	const query = req.query || {};
+	
+	// Role-based scoping
+	if (req.user && req.user.role === "ORGANIZATION") {
+		// Organizations can only list their own students
+		let orgId = req.user.organizationId || null;
+		// Fallback: if organizationId not in token, fetch from DB
+		if (!orgId) {
+			const dbUser = await getUserById(req.user._id);
+			orgId = dbUser?.organizationId ?? null;
+		}
+		query.organizationId = orgId;
+		query.role = "STUDENT";
+	}
+
+	const users = await listUsers(query);
 	res.json({ success: true, users });
 };
 
@@ -51,15 +94,26 @@ export const deleteUserController = async (req, res) => {
 	res.json({ success: true, message: "User deleted" });
 };
 
-// Student controllers
 export const listStudentsController = async (req, res) => {
-	const users = await listStudents(req.query || {});
+	const query = req.query || {};
+	
+	if (req.user && req.user.role === "ORGANIZATION") {
+		let orgId = req.user.organizationId || null;
+		// Fallback: if organizationId not in token, fetch from DB
+		if (!orgId) {
+			const dbUser = await getUserById(req.user._id);
+			orgId = dbUser?.organizationId ?? null;
+		}
+		query.organizationId = orgId;
+	}
+
+	const users = await listStudents(query);
 	res.json({ success: true, users });
 };
 
 export const createStudentController = async (req, res) => {
 	const requesterRole = req.user?.role;
-	const requesterOrganizationId = req.user?.organizationId || null;
+	let requesterOrganizationId = req.user?.organizationId || null;
 
 	if (requesterRole !== "ORGANIZATION" && requesterRole !== "IQPATH_ADMIN") {
 		return res.status(403).json({ success: false, message: "Forbidden" });
@@ -68,9 +122,18 @@ export const createStudentController = async (req, res) => {
 	const payload = { ...req.body, role: "STUDENT", status: req.body.status || "ACTIVE" };
 
 	if (requesterRole === "ORGANIZATION") {
+		// Fallback: resolve organizationId from DB if not present in token
+		if (!requesterOrganizationId) {
+			const dbUser = await getUserById(req.user._id);
+			requesterOrganizationId = dbUser?.organizationId ?? null;
+		}
 		if (!requesterOrganizationId) {
 			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
 		}
+		
+		// Enforce Student Limit
+		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", 1);
+		
 		payload.organizationId = requesterOrganizationId;
 	}
 
@@ -85,6 +148,11 @@ export const createStudentController = async (req, res) => {
 		return res.status(400).json({ success: false, message: "organizationId is required" });
 	}
 	const user = await createStudent(payload);
+	try {
+		await sendWelcomeEmail(user, payload.password);
+	} catch (emailErr) {
+		console.error(`Failed to send welcome email to ${user.email}:`, emailErr);
+	}
 	res.status(201).json({ success: true, user });
 };
 
@@ -144,12 +212,17 @@ export const bulkUploadUsersController = async (req, res) => {
 	if (!file || !file.buffer) return res.status(400).json({ success: false, message: "Excel file is required" });
 
 	const requesterRole = req.user?.role;
-	const requesterOrganizationId = req.user?.organizationId || null;
+	let requesterOrganizationId = req.user?.organizationId || null;
 
 	let organizationId = req.body.organizationId || null;
 	const organizationCode = req.body.organizationCode || null;
 
 	if (requesterRole === "ORGANIZATION") {
+		// Fallback: resolve organizationId from DB if not present in token (handles old tokens)
+		if (!requesterOrganizationId) {
+			const dbUser = await getUserById(req.user._id);
+			requesterOrganizationId = dbUser?.organizationId ?? null;
+		}
 		if (!requesterOrganizationId) {
 			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
 		}
@@ -179,6 +252,11 @@ export const bulkUploadUsersController = async (req, res) => {
 		}
 	} catch (error) {
 		return res.status(400).json({ success: false, message: "Invalid file format" });
+	}
+
+	// Enforce MAX_STUDENTS for Organization bulk uploads
+	if (requesterRole === "ORGANIZATION") {
+		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", rows.length);
 	}
 
 	// rows expected to be array of objects with headers: firstName,lastName,email,password,phone,role,organizationCode
