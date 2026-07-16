@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import { autoSubmitExpiredAttempts } from "../services/autoSubmitExpiredAttempts.service.js";
+import { syncAllMissedAttempts } from "../services/syncMissedAttempts.service.js";
 
 let isRunning = false;
 
@@ -11,6 +12,7 @@ export const startAutoSubmitJob = () => {
 
     try {
       await autoSubmitExpiredAttempts();
+      await syncAllMissedAttempts();
     } catch (err) {
       console.error("❌ Auto-submit job error:", err.message);
     } finally {

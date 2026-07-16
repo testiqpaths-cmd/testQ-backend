@@ -1,5 +1,10 @@
 import { User } from "../auth/index.js";
 import Organization from "../../models/organization.model.js";
+import Test from "../../models/test.model.js";
+import TestSeries from "../../models/testSeries.model.js";
+import TestAttempt from "../../models/testAttempt.model.js";
+import { findAttemptsByStudent } from "../analytics/test-attempt/repository/testAttempt.repository.js";
+import { syncMissedAttemptsForStudent } from "../test-attempts/services/syncMissedAttempts.service.js";
 import { checkFeatureAccess } from "../subscription/services/subscription.service.js";
 import { asyncHandler as _ } from "../../common/utils/asyncHandler.js";
 import {
@@ -78,7 +83,42 @@ export const getUserController = async (req, res) => {
 	const { id } = req.params;
 	const user = await getUserById(id);
 	if (!user) return res.status(404).json({ success: false, message: "User not found" });
-	res.json({ success: true, user });
+
+	const data = { ...user };
+
+	if (user.role === "STUDENT") {
+		// Sync missed attempts first
+		await syncMissedAttemptsForStudent(id);
+		// Get all attempts/tests given
+		const attempts = await findAttemptsByStudent(id);
+		data.attempts = attempts || [];
+		data.testsGivenCount = (attempts || []).filter(a => a.status !== "missed").length;
+	} else if (user.role === "ORGANIZATION") {
+		const orgId = user.organizationId;
+		// Count students registered in organization
+		const orgStudents = await User.find({
+			role: "STUDENT",
+			organizationId: orgId,
+			isDeleted: false
+		}).select("firstName lastName email status createdAt").lean();
+
+		// Count tests created by organization user
+		const testsCreatedCount = await Test.countDocuments({
+			"createdBy.userId": user._id,
+			isDeleted: { $ne: 1 }
+		});
+
+		// Count series created by organization user
+		const seriesCreatedCount = await TestSeries.countDocuments({
+			"createdBy.userId": user._id
+		});
+
+		data.students = orgStudents || [];
+		data.testsCreatedCount = testsCreatedCount;
+		data.seriesCreatedCount = seriesCreatedCount;
+	}
+
+	res.json({ success: true, user: data });
 };
 
 export const updateUserController = async (req, res) => {

@@ -11,9 +11,9 @@ export const findAttemptsByStudent = async (studentId) => {
       studentId: new mongoose.Types.ObjectId(studentId),
     })
       .select(
-        "testId totalScore maxScore percentage resultStatus submittedAt evaluatedAt totalQuestions duration"
+        "testId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
       )
-      .populate({ path: 'testId', select: 'title duration totalQuestions testSeriesId totalMarks createdBy' })
+      .populate({ path: 'testId', select: 'title duration totalQuestions testSeriesId totalMarks createdBy isIQRoomTest' })
       .sort({ submittedAt: -1 })
       .lean();
 
@@ -37,7 +37,7 @@ export const findAttemptsByStudent = async (studentId) => {
 
       return {
         id: String(a._id),
-        testId: String(a.testId),
+        testId: String(test._id || a.testId),
         testName,
         testType,
         seriesName,
@@ -48,9 +48,10 @@ export const findAttemptsByStudent = async (studentId) => {
         score: resolvedScore,
         totalMarks: resolvedTotalMarks,
         percentage: resolvedPercentage,
-        status: (a.resultStatus || '').toLowerCase(),
-        allowDownload: true,
+        status: a.status === "MISSED" ? "missed" : (a.resultStatus || '').toLowerCase(),
+        allowDownload: a.status === "MISSED" ? false : true,
         createdBy: (test.createdBy && test.createdBy.role) || '',
+        isIQRoomTest: Boolean(test.isIQRoomTest),
         submittedAt: a.submittedAt,
         evaluatedAt: a.evaluatedAt,
       };

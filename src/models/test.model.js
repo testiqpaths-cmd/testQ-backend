@@ -36,6 +36,7 @@ const testSchema = new Schema({
   status: { type: String, enum: ["DRAFT", "UPCOMING", "ACTIVE", "COMPLETED"], default: "DRAFT" },
   testSeriesId: { type: Types.ObjectId, ref: "TestSeries" },
   isSeriesTest: { type: Boolean, default: false },
+  isIQRoomTest: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   isDeleted: {
   type: Number,

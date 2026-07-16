@@ -88,7 +88,7 @@ const testAttemptSchema = new mongoose.Schema(
 
     status: {
       type: String,
-      enum: ["IN_PROGRESS", "SUBMITTED", "EVALUATED", "EXPIRED"],
+      enum: ["IN_PROGRESS", "SUBMITTED", "EVALUATED", "EXPIRED", "MISSED"],
       default: "IN_PROGRESS",
     },
 

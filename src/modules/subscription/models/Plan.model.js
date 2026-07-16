@@ -36,6 +36,10 @@ const planSchema = new mongoose.Schema(
       type: Boolean,
       default: false, // if true, assigned automatically upon signup for this role
     },
+    icon: {
+      type: String,
+      default: null,
+    },
   },
   { timestamps: true }
 );

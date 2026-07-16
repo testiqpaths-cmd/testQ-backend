@@ -109,8 +109,8 @@ export async function deleteTest(test) {
 }
 
 export const getAllTests = async () => {
-  // Exclude tests that belong to a series
-  return await Test.find({ isSeriesTest: { $ne: true } }).sort({
+  // Exclude tests that belong to a series or IQ Room
+  return await Test.find({ isSeriesTest: { $ne: true }, isIQRoomTest: { $ne: true } }).sort({
     createdAt: -1,
   });
 };
@@ -120,6 +120,7 @@ export const getLeaderboardTests = async () => {
     {
       $match: {
         isSeriesTest: { $ne: true },
+        isIQRoomTest: { $ne: true },
         "createdBy.role": { $in: creatorRoleFilter },
       },
     },
@@ -179,8 +180,9 @@ export const getMyTests = async ({ userId, search = "" }) => {
     ];
   }
 
-  // Exclude series tests from normal user's test listings
+  // Exclude series and IQ Room tests from normal user's test listings
   filters.isSeriesTest = { $ne: true };
+  filters.isIQRoomTest = { $ne: true };
 
   return Test.find(filters)
     .populate("subjectId", "name")
@@ -191,6 +193,7 @@ export const getAssignedTests = async ({ search = "" } = {}) => {
   const filters = {
     isPublished: true,
     isDeleted: { $ne: 1 },
+    isIQRoomTest: { $ne: true },
   };
 
   if (String(search || "").trim()) {
