@@ -33,6 +33,7 @@ export const createTestSchema = z
 
     testSeriesId: objectId.optional(),
     isPublished: z.boolean().optional(),
+    isIQRoomTest: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
     /* Visibility rules */

@@ -208,6 +208,7 @@ export const getUserUsageDetails = async (userId) => {
       name: plan.name,
       description: plan.description,
       role: plan.roleId.name,
+      icon: plan.icon,
     },
     status: sub.status,
     features: featureDetails.filter(f => f !== null),

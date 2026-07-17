@@ -238,7 +238,7 @@ export const getAttemptController = async (req, res, next) => {
   try {
     const attempt = req.attempt;
     const timing = req.timing;
-    const test = await Test.findById(attempt.testId).select("title duration").lean();
+    const test = await Test.findById(attempt.testId).select("title duration createdBy isIQRoomTest").lean();
 
     const questions = Array.isArray(attempt.questionSnapshots)
       ? attempt.questionSnapshots.map((snapshot) => normalizeAttemptQuestion(snapshot))
@@ -254,6 +254,8 @@ export const getAttemptController = async (req, res, next) => {
               _id: attempt.testId,
               title: test.title,
               duration: test.duration,
+              createdBy: test.createdBy,
+              isIQRoomTest: test.isIQRoomTest,
             }
           : null,
         attempt: {
@@ -588,11 +590,12 @@ export const getAttemptResultController = async (req, res, next) => {
     const attempt = result.attempt || result;
     const analysis = result.analysis || null;
 
-    // ✅ Student can view own results only
+    // ✅ Student can view own results. Admins and Organizations can view student results.
     const requesterId = String(req.user?._id);
+    const requesterRole = req.user?.role;
     const ownerId = String(attempt.studentId);
 
-    if (requesterId !== ownerId) {
+    if (requesterId !== ownerId && requesterRole !== "IQPATH_ADMIN" && requesterRole !== "ORGANIZATION") {
       return res.status(403).json({
         success: false,
         message: "You are not allowed to view this result",
