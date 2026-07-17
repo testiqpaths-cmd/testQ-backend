@@ -46,6 +46,21 @@ const normalizeSeriesTestPayload = (data) => {
 
 export const createSeries = async (data, user) => {
   logger.debug(`Creating series for user: ${JSON.stringify(user)}`);
+
+  console.log("Checking duplicate title:", data.title);
+
+  const existingSeries = await TestSeries.findOne({
+    title: {
+      $regex: `^${data.title.trim()}$`,
+      $options: "i",
+    },
+  });
+
+  console.log("Existing Series:", existingSeries);
+
+  if (existingSeries) {
+    throw new Error("Test series with this title already exists");
+  }
   const seriesCode =
     data.visibility === "LINK_ONLY"
       ? crypto.randomBytes(4).toString("hex")
