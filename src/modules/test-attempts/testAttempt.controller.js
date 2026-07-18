@@ -423,7 +423,14 @@ export const submitAttemptController = async (req, res, next) => {
     if (attempt.status !== "EXPIRED") {
       attempt.status = "SUBMITTED";
       attempt.submittedAt = new Date();
-      attempt.expireReason = req.body.expireReason === "CHEATING" ? "CHEATING" : "MANUAL_SUBMIT";
+      const cheatingReasons = ["CHEATING", "PROLONGED_ABSENCE", "PHONE_PERSISTENCE", "PHONE_DETECTED", "FACE_ABSENT"];
+      if (cheatingReasons.includes(req.body.expireReason)) {
+        attempt.expireReason = "CHEATING";
+      } else if (req.body.expireReason === "TIME_EXPIRED") {
+        attempt.expireReason = "TIME_EXPIRED";
+      } else {
+        attempt.expireReason = "MANUAL_SUBMIT";
+      }
       await attempt.save();
     }
 

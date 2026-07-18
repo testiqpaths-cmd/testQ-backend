@@ -24,17 +24,15 @@ export const createSeries = async (req, res, next) => {
       mongoose.Types.ObjectId.isValid(id),
     );
 
-    const allowedRoles = ["IQPATH_ADMIN", "ORGANIZATION","STUDENT"];
-    const series = await TestSeries.create({
-      title: title.trim(),
-      description: description?.trim() || "",
-      visibility,
-      tests: cleanedTests,
-      createdBy: {
-        userId: req.user?._id,
-        role: allowedRoles.includes(req.user?.role) ? req.user.role : "ORGANIZATION", // default to a valid role
+    const series = await service.createSeries(
+      {
+        title: title.trim(),
+        description: description?.trim() || "",
+        visibility,
+        tests: cleanedTests,
       },
-    });
+      req.user
+    );
 
     return res.status(201).json({
       success: true,
@@ -109,9 +107,9 @@ export const getSeriesList = async (req, res, next) => {
     const series = req.query.leaderboard === "true"
       ? await service.getLeaderboardSeriesList()
       : await service.getSeriesList({
-          userId: req.user?._id || req.user?.id,
-          search: req.query.search || "",
-        });
+        userId: req.user?._id || req.user?.id,
+        search: req.query.search || "",
+      });
 
     return res.json({
       success: true,

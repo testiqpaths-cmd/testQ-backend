@@ -70,15 +70,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     return attempt;
   }
 
-  if (attempt.expireReason === "CHEATING") {
-    attempt.totalScore = 0;
-    attempt.percentage = 0;
-    updateAttemptStats(attempt);
-    attempt.status = "EVALUATED";
-    attempt.resultStatus = "FAIL";
-    await attempt.save();
-    return attempt;
-  }
+
 
   const qIds = attempt.answers.map((a) => a.questionId);
   const questions = await Question.find({ _id: { $in: qIds } }).select(
@@ -143,11 +135,13 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
   if (hasSubjective) {
     attempt.status = "SUBMITTED";
-    attempt.resultStatus = null;
+    attempt.resultStatus = attempt.expireReason === "CHEATING" ? "FAIL" : null;
   } else {
     attempt.status = "EVALUATED";
     attempt.resultStatus =
-      attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+      attempt.expireReason === "CHEATING"
+        ? "FAIL"
+        : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
   }
 
   await attempt.save();

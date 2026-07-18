@@ -37,12 +37,7 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
     };
   }
 
-  if (attempt.expireReason === "CHEATING") {
-    return {
-      error: "Cannot manually evaluate an attempt that was submitted due to cheating.",
-      status: 403,
-    };
-  }
+
 
   // Load questions for evaluation items
   const qMap = new Map(
@@ -110,7 +105,9 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
   // ✅ SCRUM-23: PASS/FAIL
   const PASS_PERCENTAGE = 40; // change if your company rule is different
   attempt.resultStatus =
-    attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+    attempt.expireReason === "CHEATING"
+      ? "FAIL"
+      : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
 
   // ✅ final status
   attempt.status = "EVALUATED";
