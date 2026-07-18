@@ -189,12 +189,16 @@ export const getMyTests = async ({ userId, search = "" }) => {
     .sort({ createdAt: -1 });
 };
 
-export const getAssignedTests = async ({ search = "" } = {}) => {
+export const getAssignedTests = async ({ search = "", userCreatedAt = null } = {}) => {
   const filters = {
     isPublished: true,
     isDeleted: { $ne: 1 },
     isIQRoomTest: { $ne: true },
   };
+
+  if (userCreatedAt) {
+    filters.createdAt = { $gte: new Date(userCreatedAt) };
+  }
 
   if (String(search || "").trim()) {
     filters.$or = [

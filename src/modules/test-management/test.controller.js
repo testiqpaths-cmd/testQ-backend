@@ -41,7 +41,22 @@ export const createTest = async (req, res) => {
 };
 
 export async function getTest(req, res) {
-  res.json({ success: true, data: req.test });
+  try {
+    if (req.user?.role === "STUDENT") {
+      const User = (await import("../../modules/auth/models/User.model.js")).default;
+      const dbUser = await User.findById(req.user._id || req.user.id).select("createdAt");
+      if (dbUser && req.test?.createdAt && new Date(req.test.createdAt) < new Date(dbUser.createdAt)) {
+        return res.status(403).json({
+          success: false,
+          message: "You cannot access a test created before your registration date",
+        });
+      }
+    }
+    res.json({ success: true, data: req.test });
+  } catch (err) {
+    logger.error(`getTest error: ${err.message}`);
+    res.status(500).json({ success: false, message: err.message });
+  }
 }
 
 export async function updateTest(req, res, next) {
@@ -149,7 +164,17 @@ export const getAssignedTests = async (req, res) => {
   try {
     const userId = req.user?._id || req.user?.id;
     const search = req.query.search || "";
-    const tests = await service.getAssignedTests({ search });
+
+    let userCreatedAt = null;
+    if (userId && req.user?.role === "STUDENT") {
+      const User = (await import("../../modules/auth/models/User.model.js")).default;
+      const dbUser = await User.findById(userId).select("createdAt");
+      if (dbUser) {
+        userCreatedAt = dbUser.createdAt;
+      }
+    }
+
+    const tests = await service.getAssignedTests({ search, userCreatedAt });
 
     // Attach current user's attempt count so the UI can hide Start when attempts are exhausted.
     const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
