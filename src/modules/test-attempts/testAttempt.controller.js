@@ -162,7 +162,7 @@ export const startTestAttemptController = async (req, res, next) => {
     }
 
     // 5) Copy duration & marks server-side
-    const duration = Number(test.duration); // minutes (recommended)
+    let duration = Number(test.duration); // minutes (recommended)
     const maxScore = Number(test.totalMarks);
 
     if (!Number.isFinite(duration) || duration <= 0) {
@@ -179,10 +179,25 @@ export const startTestAttemptController = async (req, res, next) => {
     }
 
     const startedAt = new Date();
-    const endsAt = new Date(startedAt.getTime() + duration * 60 * 1000);
+    let endsAt = new Date(startedAt.getTime() + duration * 60 * 1000);
 
-    // Optional: also cap by test.endTime if you want hard stop
-    // if (test.endTime && endsAt > new Date(test.endTime)) endsAt = new Date(test.endTime);
+    let endTime = test.endTime;
+    if (iqRoomId) {
+      const room = await IQRoom.findById(iqRoomId).lean();
+      if (room && room.endTime) {
+        endTime = room.endTime;
+      }
+    }
+
+    if (endTime) {
+      const endTimeDate = new Date(endTime);
+      const diffMs = endTimeDate.getTime() - startedAt.getTime();
+      const diffMinutes = diffMs / (60 * 1000);
+      if (diffMinutes < duration) {
+        duration = Math.max(0, diffMinutes);
+        endsAt = endTimeDate;
+      }
+    }
 
     // 6) Create attempt
     const attempt = await TestAttempt.create({
