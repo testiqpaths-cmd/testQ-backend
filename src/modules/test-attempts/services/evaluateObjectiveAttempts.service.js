@@ -144,6 +144,25 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
         : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
   }
 
+  if (!attempt.iqRoomId) {
+    try {
+      const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
+      await TestAssignment.updateOne(
+        { testId: attempt.testId, studentId: attempt.studentId },
+        {
+          $set: {
+            status: "SUBMITTED",
+            submittedAt: attempt.submittedAt || new Date(),
+            score: attempt.totalScore ?? 0,
+          },
+        },
+        { upsert: true }
+      );
+    } catch (err) {
+      console.error("Failed to sync TestAssignment during evaluateObjectiveForAttempt:", err);
+    }
+  }
+
   await attempt.save();
   return attempt;
 };

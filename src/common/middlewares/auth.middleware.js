@@ -29,6 +29,20 @@ export const authMiddleware = async (req, res, next) => {
       const decoded = verifyAccessToken(token); // backend JWT
       logger.debug(`auth.middleware: backend JWT verified id=${decoded.id}`);
 
+      const dbUser = await User.findById(decoded.id).select("status role organizationId");
+      if (!dbUser) {
+        return res.status(401).json({
+          success: false,
+          message: "User not found",
+        });
+      }
+      if (dbUser.status === "SUSPENDED") {
+        return res.status(403).json({
+          success: false,
+          message: "Your account is blocked. Please contact admin.",
+        });
+      }
+
       req.user = {
         _id: decoded.id,
         role: decoded.role,
@@ -53,11 +67,19 @@ export const authMiddleware = async (req, res, next) => {
 
       let user = null;
       if (uid) {
-        user = await User.findOne({ firebaseUid: uid });
+        user = await User.findOne({ firebaseUid: uid }).setOptions({ includeDeleted: true });
       }
 
       if (!user && email) {
-        user = await User.findOne({ email: email.toLowerCase() });
+        user = await User.findOne({ email: email.toLowerCase() }).setOptions({ includeDeleted: true });
+      }
+
+      if (user && user.isDeleted) {
+        user.isDeleted = false;
+        user.deletedAt = null;
+        user.deletedBy = null;
+        user.status = "ACTIVE";
+        await user.save();
       }
 
       if (!user) {
@@ -83,6 +105,13 @@ export const authMiddleware = async (req, res, next) => {
       } else if (!user.firebaseUid && uid) {
         user.firebaseUid = uid;
         await user.save();
+      }
+
+      if (user && user.status === "SUSPENDED") {
+        return res.status(403).json({
+          success: false,
+          message: "Your account is blocked. Please contact admin.",
+        });
       }
 
       // Attach minimal user info expected by downstream code

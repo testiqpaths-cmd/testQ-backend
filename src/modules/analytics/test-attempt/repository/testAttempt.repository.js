@@ -9,6 +9,7 @@ export const findAttemptsByStudent = async (studentId) => {
 
     const attempts = await TestAttempt.find({
       studentId: new mongoose.Types.ObjectId(studentId),
+      status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
     })
       .select(
         "testId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"

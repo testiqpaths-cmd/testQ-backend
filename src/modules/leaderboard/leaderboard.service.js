@@ -160,7 +160,7 @@ export const getTestLeaderboard = async (testId, query) => {
   const { page, limit, skip } = normalizePageAndLimit(query);
   const matchStage = {
     testId: new mongoose.Types.ObjectId(testId),
-    status: { $in: ["SUBMITTED", "EVALUATED"] },
+    status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
   };
 
   const totalPromise = TestAttempt.countDocuments(matchStage);
@@ -258,7 +258,7 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
     testId: {
       $in: testIds.map((id) => new mongoose.Types.ObjectId(id)),
     },
-    status: { $in: ["SUBMITTED", "EVALUATED"] },
+    status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
   };
 
   const totalPromise = TestAttempt.aggregate([

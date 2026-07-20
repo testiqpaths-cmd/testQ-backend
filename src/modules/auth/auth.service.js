@@ -64,9 +64,44 @@ export const register = async (userData) => {
     );
   }
 
-  const existingUser = await findUserByEmail(email);
+  const existingUser = await User.findOne({ email }).setOptions({ includeDeleted: true });
   if (existingUser) {
-    throw new AuthError("User already exists");
+    if (existingUser.isDeleted) {
+      // Restore user
+      const hashedPassword = await passwordService.hash(password);
+      const normalizedPhone = normalizePhone(userData.phone);
+      
+      const updates = {
+        firstName,
+        lastName,
+        password: hashedPassword,
+        isEmailVerified: true,
+        emailVerifiedAt: new Date(),
+        isDeleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        status: "ACTIVE",
+      };
+      if (normalizedPhone) updates.phone = normalizedPhone;
+      
+      const user = await User.findByIdAndUpdate(existingUser._id, updates, { new: true, includeDeleted: true });
+      
+      dispatchNotificationToAdminsAndOrgs(user.organizationId || null, {
+        title: "Student Registered (Restored)",
+        message: `A previously deleted student ${user.firstName} ${user.lastName || ""} has registered again.`,
+        type: "SYSTEM",
+        link: `/dashboard/students`,
+        metadata: { userId: user._id }
+      });
+
+      return {
+        user,
+        accessToken: generateAccessToken({ id: user._id, role: user.role }),
+        refreshToken: generateRefreshToken({ id: user._id, role: user.role }),
+      };
+    } else {
+      throw new AuthError("User already exists");
+    }
   }
 
   const normalizedPhone = normalizePhone(userData.phone);
@@ -145,6 +180,10 @@ export const login = async ({ email, password }) => {
   const user = await findUserByEmail(normalizedEmail);
   if (!user) throw new AuthError("Invalid credentials");
 
+  if (user.status === "SUSPENDED") {
+    throw new AuthError("Your account is blocked. Please contact admin.");
+  }
+
   const isMatch = await bcrypt.compare(normalizedPassword, user.password);
   if (!isMatch) throw new AuthError("Invalid credentials");
 
@@ -170,11 +209,25 @@ export const firebaseAuth = async ({
     throw new AuthError("firebaseUid and email are required");
   }
 
-  let user = await findUserByFirebaseUid(normalizedFirebaseUid);
+  let user = await User.findOne({ firebaseUid: normalizedFirebaseUid }).setOptions({ includeDeleted: true });
   const userFoundByFirebaseUid = !!user; // Track if user was found by firebaseUid
   
   if (!user) {
-    user = await findUserByEmail(normalizedEmail);
+    user = await User.findOne({ email: normalizedEmail }).setOptions({ includeDeleted: true });
+  }
+
+  // Restore the user if they were soft-deleted
+  if (user && user.isDeleted) {
+    user = await User.findByIdAndUpdate(
+      user._id,
+      {
+        isDeleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        status: "ACTIVE",
+      },
+      { new: true, includeDeleted: true }
+    );
   }
 
   if (!user) {
@@ -264,6 +317,10 @@ export const firebaseAuth = async ({
     lastLogin: user?.lastLogin,
   });
 
+  if (user && user.status === "SUSPENDED") {
+    throw new AuthError("Your account is blocked. Please contact admin.");
+  }
+
   const accessToken = generateAccessToken({ id: user._id, role: user.role });
   const refreshToken = generateRefreshToken({ id: user._id, role: user.role });
 
@@ -333,7 +390,20 @@ export const githubAuth = async (code) => {
   }
 
   // 4. Find or create user
-  let user = await findUserByEmail(email);
+  let user = await User.findOne({ email }).setOptions({ includeDeleted: true });
+
+  if (user && user.isDeleted) {
+    user = await User.findByIdAndUpdate(
+      user._id,
+      {
+        isDeleted: false,
+        deletedAt: null,
+        deletedBy: null,
+        status: "ACTIVE",
+      },
+      { new: true, includeDeleted: true }
+    );
+  }
 
   if (!user) {
     const displayName = profile.name || profile.login || "GitHub User";
@@ -374,6 +444,10 @@ export const githubAuth = async (code) => {
         new: true
       }
     );
+  }
+
+  if (user && user.status === "SUSPENDED") {
+    throw new AuthError("Your account is blocked. Please contact admin.");
   }
 
   const accessToken = generateAccessToken({

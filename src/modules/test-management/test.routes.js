@@ -17,6 +17,12 @@ import {
   getAllTests,
   getMyTests,
   getAssignedTests,
+  publishTest,
+  acceptTestAssignment,
+  declineTestAssignment,
+  pendingTestAssignment,
+  hideTestAssignment,
+  startTestAssignment,
 } from "./test.controller.js";
 
 
@@ -40,6 +46,51 @@ router.get(
   "/assigned",
   authMiddleware,
   getAssignedTests
+);
+
+// Publish endpoint
+router.patch(
+  "/tests/:id/publish",
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
+  loadTest,
+  publishTest
+);
+
+// Student assignment action endpoints
+router.post(
+  "/tests/:id/accept",
+  authMiddleware,
+  roleMiddleware("STUDENT"),
+  acceptTestAssignment
+);
+
+router.post(
+  "/tests/:id/decline",
+  authMiddleware,
+  roleMiddleware("STUDENT"),
+  declineTestAssignment
+);
+
+router.post(
+  "/tests/:id/pending",
+  authMiddleware,
+  roleMiddleware("STUDENT"),
+  pendingTestAssignment
+);
+
+router.post(
+  "/tests/:id/hide",
+  authMiddleware,
+  roleMiddleware("STUDENT"),
+  hideTestAssignment
+);
+
+router.post(
+  "/tests/:id/start",
+  authMiddleware,
+  roleMiddleware("STUDENT"),
+  startTestAssignment
 );
 
 //get one

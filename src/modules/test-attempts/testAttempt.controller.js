@@ -100,6 +100,18 @@ export const startTestAttemptController = async (req, res, next) => {
       }
     }
 
+    // Verify assignment is accepted for student
+    if (req.user?.role === "STUDENT" && !iqRoomId) {
+      const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+      const assignment = await TestAssignment.findOne({ testId, studentId });
+      if (!assignment || !["ACCEPTED", "STARTED"].includes(assignment.status)) {
+        return res.status(400).json({
+          success: false,
+          message: "You must accept the test assignment before starting the test"
+        });
+      }
+    }
+
     // 4) Prevent multiple in-progress attempts and enforce maxAttempts
     const baseQuery = { testId, studentId };
     if (iqRoomId) {
@@ -212,6 +224,14 @@ export const startTestAttemptController = async (req, res, next) => {
       status: "IN_PROGRESS",
       answers: [],
     });
+
+    if (!iqRoomId && req.user?.role === "STUDENT") {
+      const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+      await TestAssignment.updateOne(
+        { testId, studentId },
+        { $set: { status: "STARTED", startedAt } }
+      );
+    }
 
     const timing = computeAttemptTiming(attempt);
     return res.status(201).json({

@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
+import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
 
@@ -55,20 +56,10 @@ export async function createTest(data, user) {
 
   const test = await Test.create(payload);
 
-  // Compute and set status
-  test.status = computeTestStatus(test);
+  // New tests are ALWAYS created as DRAFT
+  test.status = "DRAFT";
+  test.isPublished = false;
   await test.save();
-
-  // Trigger bulk notification dispatch asynchronously if not a draft
-  if (test.status !== "Draft") {
-    dispatchNotificationToStudents(user, {
-      title: "New Test Assigned",
-      message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
-      type: "TEST_ASSIGNED",
-      link: `/student/dashboard/tests/${test._id}/instructions`,
-      metadata: { testId: test._id }
-    }).catch(err => console.error("Notification dispatch failed", err));
-  }
 
   return test;
 }
@@ -81,24 +72,17 @@ export async function updateTest(test, payload, user) {
   const hasFixedSchedule = Boolean(test.startTime && test.endTime);
   if (hasFixedSchedule) {
     test.scheduleType = "FIXED";
-    test.isPublished = true;
   }
 
-  // Compute and update status
-  test.status = computeTestStatus(test);
+  // Preserve DRAFT status on update unless already published
+  if (prevStatus === "DRAFT" && test.status !== "PUBLISHED") {
+    test.status = "DRAFT";
+    test.isPublished = false;
+  } else if (test.status !== "DRAFT") {
+    test.status = computeTestStatus(test);
+  }
 
   await test.save();
-
-  // Dispatch notification if the test was just assigned/published
-  if (prevStatus === "DRAFT" && (test.status === "UPCOMING" || test.status === "ACTIVE") && user) {
-    dispatchNotificationToStudents(user, {
-      title: "New Test Assigned",
-      message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
-      type: "TEST_ASSIGNED",
-      link: `/student/dashboard/tests/${test._id}/instructions`,
-      metadata: { testId: test._id }
-    }).catch(err => console.error("Notification dispatch failed", err));
-  }
 
   return test;
 }
@@ -189,9 +173,9 @@ export const getMyTests = async ({ userId, search = "" }) => {
     .sort({ createdAt: -1 });
 };
 
-export const getAssignedTests = async ({ search = "", userCreatedAt = null } = {}) => {
+export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null } = {}) => {
   const filters = {
-    isPublished: true,
+    status: "PUBLISHED",
     isDeleted: { $ne: 1 },
     isIQRoomTest: { $ne: true },
   };
@@ -207,11 +191,39 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null } = {
     ];
   }
 
-  return Test.find(filters)
+  const tests = await Test.find(filters)
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
       select: "title description visibility createdAt",
     })
     .sort({ createdAt: -1 });
+
+  if (studentId) {
+    const assignments = await TestAssignment.find({
+      studentId,
+      testId: { $in: tests.map((t) => t._id) },
+    }).lean();
+
+    const assignmentMap = new Map(
+      assignments.map((a) => [String(a.testId), a])
+    );
+
+    return tests
+      .map((test) => {
+        const assignment = assignmentMap.get(String(test._id));
+        return {
+          ...test.toObject(),
+          id: String(test._id),
+          assignmentStatus: assignment ? assignment.status : "PENDING",
+        };
+      })
+      .filter((test) => test.assignmentStatus !== "HIDDEN");
+  }
+
+  return tests.map((test) => ({
+    ...test.toObject(),
+    id: String(test._id),
+    assignmentStatus: "PENDING",
+  }));
 };

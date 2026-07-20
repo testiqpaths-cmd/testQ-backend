@@ -5,11 +5,15 @@
 export const computeTestStatus = (test) => {
   if (!test) return "DRAFT";
 
+  if (!test.isPublished) {
+    return "DRAFT";
+  }
+
   const now = new Date();
 
   // IMMEDIATE tests
   if (test.scheduleType === "IMMEDIATE") {
-    return test.isPublished ? "ACTIVE" : "DRAFT";
+    return "ACTIVE";
   }
 
   // DELAYED tests (scheduled for later, not yet started)

@@ -174,7 +174,7 @@ export const getAssignedTests = async (req, res) => {
       }
     }
 
-    const tests = await service.getAssignedTests({ search, userCreatedAt });
+    const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId });
 
     // Attach current user's attempt count so the UI can hide Start when attempts are exhausted.
     const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
@@ -182,10 +182,10 @@ export const getAssignedTests = async (req, res) => {
     const enriched = await Promise.all(
       tests.map(async (test) => {
         const attemptsMade = userId
-          ? await TestAttempt.countDocuments({ testId: test._id, studentId: userId })
+          ? await TestAttempt.countDocuments({ testId: test.id || test._id, studentId: userId })
           : 0;
 
-        const obj = test.toObject ? test.toObject() : { ...test };
+        const obj = { ...test };
         obj.attemptsMade = attemptsMade;
 
         if (Number(obj.maxAttempts || 1) <= attemptsMade) {
@@ -200,5 +200,128 @@ export const getAssignedTests = async (req, res) => {
   } catch (err) {
     logger.error(`getAssignedTests error: ${err.message}`);
     return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+export const publishTest = async (req, res, next) => {
+  try {
+    if (!canManageTest(req.test, req.user)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    req.test.status = "PUBLISHED";
+    req.test.isPublished = true;
+    req.test.publishedAt = new Date();
+    await req.test.save();
+
+    const { dispatchNotificationToStudents } = await import("../notification/notification.service.js");
+    dispatchNotificationToStudents(req.user, {
+      title: "New Test Assigned",
+      message: `You have been assigned a new test: "${req.test.title}". Complete it before the deadline.`,
+      type: "TEST_ASSIGNED",
+      link: `/student/dashboard/tests/${req.test._id}/instructions`,
+      metadata: { testId: req.test._id }
+    }).catch(err => logger.error(`Notification dispatch failed: ${err.message}`));
+
+    res.json({ success: true, data: req.test });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const acceptTestAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const testId = req.params.id;
+
+    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+    const assignment = await TestAssignment.findOneAndUpdate(
+      { testId, studentId },
+      { status: "ACCEPTED", acceptedAt: new Date() },
+      { new: true, upsert: true }
+    );
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const declineTestAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const testId = req.params.id;
+
+    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+    const assignment = await TestAssignment.findOneAndUpdate(
+      { testId, studentId },
+      { status: "DECLINED", declinedAt: new Date() },
+      { new: true, upsert: true }
+    );
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const pendingTestAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const testId = req.params.id;
+
+    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+    const assignment = await TestAssignment.findOneAndUpdate(
+      { testId, studentId },
+      { status: "PENDING" },
+      { new: true, upsert: true }
+    );
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const hideTestAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const testId = req.params.id;
+
+    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+    const assignment = await TestAssignment.findOneAndUpdate(
+      { testId, studentId },
+      { status: "HIDDEN", hiddenAt: new Date() },
+      { new: true, upsert: true }
+    );
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const startTestAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const testId = req.params.id;
+
+    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+    const assignment = await TestAssignment.findOne({ testId, studentId });
+
+    if (!assignment || assignment.status !== "ACCEPTED") {
+      return res.status(400).json({
+        success: false,
+        message: "You must accept the test assignment before starting the test"
+      });
+    }
+
+    assignment.status = "STARTED";
+    assignment.startedAt = new Date();
+    await assignment.save();
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
   }
 };

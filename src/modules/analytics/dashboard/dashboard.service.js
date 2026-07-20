@@ -284,6 +284,8 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     scopedTests,
     scopedStudents,
     planDistributionRaw,
+    draftTestsCount,
+    publishedTestsCount,
   ] = await Promise.all([
     User.countDocuments(studentFilter),
     isAdmin ? Organization.countDocuments() : Promise.resolve(0),
@@ -298,6 +300,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       ],
     })),
     Test.countDocuments(withTestFilter({
+      isPublished: true,
       $or: [
         { status: "UPCOMING" },
         { scheduleType: { $in: ["DELAYED", "FIXED"] } },
@@ -334,11 +337,29 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
           count: { $sum: 1 }
         }
       }
-    ])
+    ]),
+    Test.countDocuments({ ...testFilter, status: "DRAFT" }),
+    Test.countDocuments({ ...testFilter, status: "PUBLISHED" }),
   ]);
 
   const testIds = scopedTests.map((test) => test._id);
   const studentIds = scopedStudents.map((student) => student._id);
+
+  const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
+  const assignmentFilter = isAdmin
+    ? {}
+    : { testId: { $in: testIds }, studentId: { $in: studentIds } };
+
+  const [
+    acceptedAssignments,
+    declinedAssignments,
+    missedAssignments,
+  ] = await Promise.all([
+    TestAssignment.countDocuments({ ...assignmentFilter, status: "ACCEPTED" }),
+    TestAssignment.countDocuments({ ...assignmentFilter, status: "DECLINED" }),
+    TestAssignment.countDocuments({ ...assignmentFilter, status: "MISSED" }),
+  ]);
+
   const attemptFilter = {
     status: { $in: ["SUBMITTED", "EVALUATED"] },
     ...(isAdmin ? {} : { testId: { $in: testIds }, studentId: { $in: studentIds } }),
@@ -397,6 +418,13 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       completed: completedTests,
       today: todayTests,
       scheduled: scheduledTests,
+      drafts: draftTestsCount,
+      published: publishedTestsCount,
+    },
+    assignments: {
+      accepted: acceptedAssignments,
+      declined: declinedAssignments,
+      missed: missedAssignments,
     },
     supportQueries: {
       total: supportTotal,
