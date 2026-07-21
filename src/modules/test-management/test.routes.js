@@ -52,7 +52,7 @@ router.get(
 router.patch(
   "/tests/:id/publish",
   authMiddleware,
-  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
   loadTest,
   publishTest
 );
