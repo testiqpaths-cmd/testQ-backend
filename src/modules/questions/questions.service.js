@@ -79,6 +79,8 @@ export const uploadQuestionsExcelService = async ({
   subject: fallbackSubjectValue,
   topicId: formTopicValue,
   topic: fallbackTopicValue,
+  excelBatchId: clientBatchId,
+  excelBatchName: clientBatchName,
   user = null,
 }) => {
   if (!fileBuffer) {
@@ -91,7 +93,7 @@ export const uploadQuestionsExcelService = async ({
 
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
   const uploadedBy = user?._id;
-  const batchMeta = buildExcelBatchMetadata(originalname);
+  const batchMeta = buildExcelBatchMetadata(originalname, clientBatchId, clientBatchName);
   const selectedSubjectValue = formSubjectValue ?? fallbackSubjectValue;
   const selectedTopicValue = formTopicValue ?? fallbackTopicValue;
 

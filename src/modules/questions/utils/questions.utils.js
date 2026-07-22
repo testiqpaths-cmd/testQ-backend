@@ -95,8 +95,22 @@ export const sanitizeFileStem = (value) =>
     .replace(/_+/g, "_")
     .replace(/^_+|_+$/g, "") || "questions";
 
-export const buildExcelBatchMetadata = (originalName) => {
+export const buildExcelBatchMetadata = (originalName, clientBatchId, clientBatchName) => {
   const fileName = normalizeText(originalName) || "questions.xlsx";
+
+  // When the client splits one file into several upload requests (for progress
+  // reporting on large files), it generates one batch id/name up front and sends
+  // it with every request so all chunks land in the same batch. Only fall back to
+  // generating our own (timestamp-based) id for single-shot, non-chunked uploads.
+  const normalizedClientBatchId = normalizeText(clientBatchId);
+  if (normalizedClientBatchId) {
+    return {
+      excelBatchId: normalizedClientBatchId,
+      excelBatchName: normalizeText(clientBatchName) || fileName,
+      originalFileName: fileName,
+    };
+  }
+
   const fileStem = sanitizeFileStem(fileName);
   const timestamp = toTimestampString();
 

@@ -37,6 +37,8 @@ export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
     subject: req.body.subject,
     topicId: req.body.topicId,
     topic: req.body.topic,
+    excelBatchId: req.body.excelBatchId,
+    excelBatchName: req.body.excelBatchName,
     user: req.user,
   });
 
