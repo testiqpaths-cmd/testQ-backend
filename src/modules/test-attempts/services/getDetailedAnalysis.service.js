@@ -1,4 +1,4 @@
-import TestAttempt from "../../../models/testAttempt.model.js";
+import { countAttemptsByTestForClassAverageRepo } from "../repositories/testAttempt.repository.js";
 import { getAttemptResult } from "./getAttemptResult.service.js";
 
 export const getDetailedAnalysis = async (attemptId) => {
@@ -61,10 +61,9 @@ export const getDetailedAnalysis = async (attemptId) => {
 
   // 4. Compute Comparison with Average (Class Average & Percentile)
   // Fetch all other submitted/evaluated attempts for this test
-  const allAttempts = await TestAttempt.find({
-    testId: testId || attempt.testId?._id || attempt.testId,
-    status: { $in: ["SUBMITTED", "EVALUATED"] },
-  }).select("percentage").lean();
+  const allAttempts = await countAttemptsByTestForClassAverageRepo(
+    testId || attempt.testId?._id || attempt.testId
+  );
 
   let classAverage = 0;
   let percentile = 0;

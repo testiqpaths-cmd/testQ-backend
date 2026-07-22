@@ -1,6 +1,5 @@
 // src/modules/testAttempts/services/attemptTimer.service.js
-import TestAttempt from "../../../models/testAttempt.model.js";
-import Test from "../../../models/test.model.js";
+import { findAttemptByIdRepo, saveAttemptRepo } from "../repositories/testAttempt.repository.js";
 
 /**
  * Check if an attempt has exceeded its time limit
@@ -63,7 +62,7 @@ export const autoExpireAttempt = async (attempt, reason = "TIME_EXPIRED") => {
   attempt.submittedAt = new Date();
   attempt.expireReason = reason;
 
-  await attempt.save();
+  await saveAttemptRepo(attempt);
   return attempt;
 };
 
@@ -74,7 +73,7 @@ export const autoExpireAttemptById = async (
   attemptId,
   reason = "TIME_EXPIRED"
 ) => {
-  const attempt = await TestAttempt.findById(attemptId);
+  const attempt = await findAttemptByIdRepo(attemptId);
   if (!attempt) return null;
   return autoExpireAttempt(attempt, reason);
 };

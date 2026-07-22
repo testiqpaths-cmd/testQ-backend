@@ -1,4 +1,4 @@
-import Question from "../../../models/question.model.js";
+import { findQuestionsByFiltersLeanRepo } from "../repositories/question.repository.js";
 
 const FRONTEND_TYPE_MAP = {
   MCQ: "multiple-choice",
@@ -68,9 +68,7 @@ export const selectAttemptQuestions = async (test) => {
   const filters = buildFilters(test);
   const desiredCount = Math.max(1, Number(test.totalQuestions) || 0);
 
-  const questions = await Question.find(filters)
-    .select("_id questionText type options correctAnswer")
-    .lean();
+  const questions = await findQuestionsByFiltersLeanRepo(filters);
 
   const selectedQuestions = shuffle(questions).slice(0, Math.min(desiredCount, questions.length));
 

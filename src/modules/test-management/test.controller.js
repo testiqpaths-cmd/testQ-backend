@@ -1,6 +1,5 @@
 import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
-import { computeTestStatus } from "./utils/status.js";
 
 const canManageTest = (test, user) => {
   if (!test || !user) return false;
@@ -43,16 +42,12 @@ export const createTest = async (req, res) => {
 
 export async function getTest(req, res) {
   try {
-    if (req.user?.role === "STUDENT") {
-      const User = (await import("../../modules/auth/models/User.model.js")).default;
-      const dbUser = await User.findById(req.user._id || req.user.id).select("createdAt");
-      if (dbUser && req.test?.createdAt && new Date(req.test.createdAt) < new Date(dbUser.createdAt)) {
-        return res.status(403).json({
-          success: false,
-          message: "You cannot access a test created before your registration date",
-        });
-      }
+    const result = await service.getTestForViewerService(req.test, req.user);
+
+    if (result.error) {
+      return res.status(result.status).json({ success: false, message: result.error });
     }
+
     res.json({ success: true, data: req.test });
   } catch (err) {
     logger.error(`getTest error: ${err.message}`);
@@ -89,26 +84,7 @@ export async function deleteTest(req, res, next) {
 export const getMyTests = async (req, res) => {
   try {
     const userId = req.user._id || req.user.id;
-    const tests = await service.getMyTests({ userId, search: req.query.search || "" });
-
-    // Attach attemptsMade and override status for UI when maxAttempts reached
-    const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
-
-    const enriched = await Promise.all(
-      tests.map(async (t) => {
-        const attemptsMade = await TestAttempt.countDocuments({ testId: t._id, studentId: userId });
-        // count evaluated attempts (results) for this test across all students
-        const evaluatedCount = await TestAttempt.countDocuments({ testId: t._id, status: 'EVALUATED' });
-        const obj = t.toObject ? t.toObject() : { ...t };
-        obj.attemptsMade = attemptsMade;
-        obj.hasResults = evaluatedCount > 0;
-        if (Number(obj.maxAttempts || 1) <= attemptsMade) {
-          // For UI purposes mark as completed so no Start button shows
-          obj.status = 'COMPLETED';
-        }
-        return obj;
-      })
-    );
+    const enriched = await service.getMyTests({ userId, search: req.query.search || "" });
 
     return res.json({ success: true, data: enriched });
   } catch (err) {
@@ -123,34 +99,13 @@ export const getMyTests = async (req, res) => {
 export const getAllTests = async (req, res) => {
   try {
     const userId = req.user?._id || req.user?.id;
-    const tests = req.query.leaderboard === "true"
-      ? await service.getLeaderboardTests()
-      : await service.getAllTests();
+    const leaderboard = req.query.leaderboard === "true";
 
-    // Attach attemptsMade for each test (current student's perspective)
-    if (userId) {
-      const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
-      const enriched = await Promise.all(
-        tests.map(async (t) => {
-          const attemptsMade = await TestAttempt.countDocuments({ 
-            testId: t._id, 
-            studentId: userId,
-            status: { $in: ['SUBMITTED', 'EVALUATED'] }
-          });
-          const obj = t.toObject ? t.toObject() : { ...t };
-          obj.attemptsMade = attemptsMade;
-          return obj;
-        })
-      );
-      return res.json({
-        success: true,
-        data: enriched
-      });
-    }
+    const tests = await service.getAllTests({ leaderboard, userId });
 
     return res.json({
       success: true,
-      data: tests
+      data: tests,
     });
   } catch (err) {
     logger.error(`getAllTests error: ${err.message}`);
@@ -166,36 +121,12 @@ export const getAssignedTests = async (req, res) => {
     const userId = req.user?._id || req.user?.id;
     const search = req.query.search || "";
 
-    let userCreatedAt = null;
-    if (userId && req.user?.role === "STUDENT") {
-      const User = (await import("../../modules/auth/models/User.model.js")).default;
-      const dbUser = await User.findById(userId).select("createdAt");
-      if (dbUser) {
-        userCreatedAt = dbUser.createdAt;
-      }
-    }
-
-    const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId });
-
-    // Attach current user's attempt count so the UI can hide Start when attempts are exhausted.
-    const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
-
-    const enriched = await Promise.all(
-      tests.map(async (test) => {
-        const attemptsMade = userId
-          ? await TestAttempt.countDocuments({ testId: test.id || test._id, studentId: userId })
-          : 0;
-
-        const obj = { ...test };
-        obj.attemptsMade = attemptsMade;
-
-        if (Number(obj.maxAttempts || 1) <= attemptsMade) {
-          obj.status = "COMPLETED";
-        }
-
-        return obj;
-      })
-    );
+    const enriched = await service.getAssignedTests({
+      search,
+      userId,
+      userRole: req.user?.role,
+      studentId: userId,
+    });
 
     return res.json({ success: true, data: enriched });
   } catch (err) {
@@ -210,26 +141,8 @@ export const publishTest = async (req, res, next) => {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    req.test.isPublished = true;
-    req.test.publishedAt = new Date();
-    // Derive the real lifecycle status (UPCOMING/ACTIVE/COMPLETED) from
-    // isPublished + schedule instead of hardcoding "PUBLISHED" — the literal
-    // "PUBLISHED" string doesn't match `getAssignedTests`' filter or the
-    // frontend's status-driven UI once a schedule is involved (or once the
-    // test is later rescheduled and its status gets recomputed).
-    req.test.status = computeTestStatus(req.test);
-    await req.test.save();
-
-    const { dispatchNotificationToStudents } = await import("../notification/notification.service.js");
-    dispatchNotificationToStudents(req.user, {
-      title: "New Test Assigned",
-      message: `You have been assigned a new test: "${req.test.title}". Complete it before the deadline.`,
-      type: "TEST_ASSIGNED",
-      link: `/student/dashboard/tests/${req.test._id}/instructions`,
-      metadata: { testId: req.test._id }
-    }).catch(err => logger.error(`Notification dispatch failed: ${err.message}`));
-
-    res.json({ success: true, data: req.test });
+    const test = await service.publishTestService(req.test, req.user);
+    res.json({ success: true, data: test });
   } catch (e) {
     next(e);
   }
@@ -240,12 +153,7 @@ export const acceptTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
-    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-    const assignment = await TestAssignment.findOneAndUpdate(
-      { testId, studentId },
-      { status: "ACCEPTED", acceptedAt: new Date() },
-      { new: true, upsert: true }
-    );
+    const assignment = await service.acceptTestAssignmentService(testId, studentId);
 
     res.json({ success: true, data: assignment });
   } catch (e) {
@@ -258,12 +166,7 @@ export const declineTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
-    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-    const assignment = await TestAssignment.findOneAndUpdate(
-      { testId, studentId },
-      { status: "DECLINED", declinedAt: new Date() },
-      { new: true, upsert: true }
-    );
+    const assignment = await service.declineTestAssignmentService(testId, studentId);
 
     res.json({ success: true, data: assignment });
   } catch (e) {
@@ -276,12 +179,7 @@ export const pendingTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
-    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-    const assignment = await TestAssignment.findOneAndUpdate(
-      { testId, studentId },
-      { status: "PENDING" },
-      { new: true, upsert: true }
-    );
+    const assignment = await service.pendingTestAssignmentService(testId, studentId);
 
     res.json({ success: true, data: assignment });
   } catch (e) {
@@ -294,12 +192,7 @@ export const hideTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
-    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-    const assignment = await TestAssignment.findOneAndUpdate(
-      { testId, studentId },
-      { status: "HIDDEN", hiddenAt: new Date() },
-      { new: true, upsert: true }
-    );
+    const assignment = await service.hideTestAssignmentService(testId, studentId);
 
     res.json({ success: true, data: assignment });
   } catch (e) {
@@ -312,21 +205,13 @@ export const startTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
-    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-    const assignment = await TestAssignment.findOne({ testId, studentId });
+    const result = await service.startTestAssignmentService(testId, studentId);
 
-    if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
-      return res.status(400).json({
-        success: false,
-        message: "You must accept the test assignment before starting the test"
-      });
+    if (result.error) {
+      return res.status(result.status).json({ success: false, message: result.error });
     }
 
-    assignment.status = "STARTED";
-    assignment.startedAt = new Date();
-    await assignment.save();
-
-    res.json({ success: true, data: assignment });
+    res.json({ success: true, data: result.assignment });
   } catch (e) {
     next(e);
   }

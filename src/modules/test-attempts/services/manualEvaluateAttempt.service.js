@@ -1,7 +1,6 @@
-import TestAttempt from "../../../models/testAttempt.model.js";
-import Question from "../../../models/question.model.js"; // adjust to your actual path
-import Notification from "../../../modules/notification/notification.model.js";
-import Test from "../../../models/test.model.js";
+import { findAttemptByIdRepo, saveAttemptRepo } from "../repositories/testAttempt.repository.js";
+import { getTestTitleRepo } from "../../test-management/repositories/test.repository.js";
+import { createNotification } from "../../notification/notification.service.js";
 
 const answerHasValue = (answer) =>
   (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
@@ -26,7 +25,7 @@ const updateAttemptStats = (attempt) => {
 };
 
 export const manualEvaluateAttempt = async (attemptId, evaluations) => {
-  const attempt = await TestAttempt.findById(attemptId);
+  const attempt = await findAttemptByIdRepo(attemptId);
   if (!attempt) return { error: "Attempt not found", status: 404 };
 
   // ✅ Only evaluate after submission (recommended)
@@ -112,12 +111,12 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
   // ✅ final status
   attempt.status = "EVALUATED";
 
-  await attempt.save();
+  await saveAttemptRepo(attempt);
 
   // Dispatch notification to the student about the evaluation
   if (attempt.studentId) {
-    const test = await Test.findById(attempt.testId).select("title");
-    await Notification.create({
+    const test = await getTestTitleRepo(attempt.testId);
+    await createNotification({
       userId: attempt.studentId,
       title: "Test Evaluated",
       message: `Your test attempt for "${test?.title || 'a test'}" has been evaluated.`,

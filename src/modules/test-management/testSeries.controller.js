@@ -1,13 +1,6 @@
 import * as service from "./testSeries.service.js";
 import logger from "../../config/logger.js";
 import mongoose from "mongoose";
-import TestSeries from "../../models/testSeries.model.js";
-
-// export const createSeries = async (req, res) => {
-//   const series = await service.createSeries(req.body, req.user);
-//   res.status(201).json({ success: true, data: series });
-
-// };
 
 export const createSeries = async (req, res, next) => {
   try {
@@ -54,36 +47,6 @@ export const updateSeries = async (req, res) => {
     const payload = req.body || {};
 
     const series = await service.updateSeries(id, payload);
-
-    // If client requested schedule update, compute start/end for tests
-    if (Array.isArray(payload.tests) && payload.scheduleStart) {
-      const Test = (await import('../../models/test.model.js')).default;
-
-      // parse scheduleStart
-      let cursor = new Date(payload.scheduleStart);
-      if (Number.isNaN(cursor.getTime())) cursor = new Date();
-
-      for (const testId of payload.tests) {
-        try {
-          const test = await Test.findById(testId);
-          if (!test) continue;
-
-          const durationMinutes = Number(test.duration) || 0;
-          const startTime = new Date(cursor);
-          const endTime = new Date(cursor.getTime() + durationMinutes * 60 * 1000);
-
-          test.startTime = startTime;
-          test.endTime = endTime;
-          await test.save();
-
-          // advance cursor
-          cursor = endTime;
-        } catch (e) {
-          // continue on per-test error
-          logger.error(`updateSeries: failed to update schedule for test ${testId}: ${e.message}`);
-        }
-      }
-    }
 
     res.json({ success: true, data: series });
   } catch (err) {
@@ -134,8 +97,7 @@ export const createSeriesTest = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Series id is required' });
     }
 
-    const TestSeriesService = await import('./testSeries.service.js');
-    const test = await TestSeriesService.createSeriesTest(seriesId, data, req.user);
+    const test = await service.createSeriesTest(seriesId, data, req.user);
 
     return res.status(201).json({ success: true, data: test });
   } catch (err) {

@@ -1,17 +1,27 @@
 import crypto from "crypto";
-import Test from "../../models/test.model.js";
-import TestSeries from "../../models/testSeries.model.js";
-import TestAssignment from "../../models/testAssignment.model.js";
+import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
-
-const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
-
-const leaderboardCreatorFields = [
-  { $ifNull: ["$creatorUser.firstName", ""] },
-  " ",
-  { $ifNull: ["$creatorUser.lastName", ""] },
-];
+import {
+  createTestRepo,
+  saveTestRepo,
+  findAllStandaloneTestsRepo,
+  aggregateLeaderboardTestsRepo,
+  getMyTestsRepo,
+  getAssignedTestsRepo,
+  getUserCreatedAtByIdRepo,
+} from "./repositories/test.repository.js";
+import {
+  upsertAssignmentStatusRepo,
+  getAssignmentByTestAndStudentRepo,
+  saveAssignmentRepo,
+  getAssignmentsForTestsRepo,
+} from "./repositories/testAssignment.repository.js";
+import {
+  countAttemptsByTestAndStudentRepo,
+  countEvaluatedAttemptsByTestRepo,
+  countCompletedAttemptsByTestAndStudentRepo,
+} from "../test-attempts/repositories/testAttempt.repository.js";
 
 const toIdArray = (...values) =>
   values
@@ -54,7 +64,7 @@ export async function createTest(data, user) {
     createdBy: { userId: user._id || user.id, role: user.role },
   };
 
-  const test = await Test.create(payload);
+  const test = await createTestRepo(payload);
 
   // Students create tests only for themselves to practice on — there's no
   // review/schedule workflow for them, so their tests go live immediately
@@ -67,7 +77,7 @@ export async function createTest(data, user) {
     test.status = "DRAFT";
     test.isPublished = false;
   }
-  await test.save();
+  await saveTestRepo(test);
 
   return test;
 }
@@ -90,140 +100,73 @@ export async function updateTest(test, payload, user) {
   // field, silently undoing publish attempts that only sent isPublished: true.
   test.status = computeTestStatus(test);
 
-  await test.save();
+  await saveTestRepo(test);
 
   return test;
 }
 
 export async function deleteTest(test) {
   test.isDeleted = 1;
-  await test.save();
+  await saveTestRepo(test);
 }
 
-export const getAllTests = async () => {
-  // Exclude tests that belong to a series or IQ Room
-  return await Test.find({ isSeriesTest: { $ne: true }, isIQRoomTest: { $ne: true } }).sort({
-    createdAt: -1,
-  });
-};
+export const getAllTests = async ({ leaderboard = false, userId = null } = {}) => {
+  const tests = leaderboard
+    ? await aggregateLeaderboardTestsRepo()
+    : await findAllStandaloneTestsRepo();
 
-export const getLeaderboardTests = async () => {
-  return Test.aggregate([
-    {
-      $match: {
-        isSeriesTest: { $ne: true },
-        isIQRoomTest: { $ne: true },
-        "createdBy.role": { $in: creatorRoleFilter },
-      },
-    },
-    {
-      $lookup: {
-        from: "users",
-        localField: "createdBy.userId",
-        foreignField: "_id",
-        as: "creatorUser",
-      },
-    },
-    {
-      $unwind: {
-        path: "$creatorUser",
-        preserveNullAndEmptyArrays: true,
-      },
-    },
-    {
-      $lookup: {
-        from: "organizations",
-        localField: "creatorUser.organizationId",
-        foreignField: "_id",
-        as: "creatorOrganization",
-      },
-    },
-    {
-      $unwind: {
-        path: "$creatorOrganization",
-        preserveNullAndEmptyArrays: true,
-      },
-    },
-    {
-      $addFields: {
-        creatorName: {
-          $trim: {
-            input: { $concat: leaderboardCreatorFields },
-          },
-        },
-        creatorEmail: "$creatorUser.email",
-        creatorOrganizationName: "$creatorOrganization.name",
-      },
-    },
-    { $sort: { createdAt: -1 } },
-  ]);
+  if (!userId) {
+    return tests;
+  }
+
+  return Promise.all(
+    tests.map(async (t) => {
+      const attemptsMade = await countCompletedAttemptsByTestAndStudentRepo(t._id, userId);
+      const obj = t.toObject ? t.toObject() : { ...t };
+      obj.attemptsMade = attemptsMade;
+      return obj;
+    })
+  );
 };
 
 export const getMyTests = async ({ userId, search = "" }) => {
-  const filters = {
-    "createdBy.userId": userId,
-    isDeleted: { $ne: 1 },
-  };
+  const tests = await getMyTestsRepo({ userId, search });
 
-  if (String(search || "").trim()) {
-    filters.$or = [
-      { title: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } },
-    ];
-  }
-
-  // Exclude series and IQ Room tests from normal user's test listings
-  filters.isSeriesTest = { $ne: true };
-  filters.isIQRoomTest = { $ne: true };
-
-  return Test.find(filters)
-    .populate("subjectId", "name")
-    .sort({ createdAt: -1 });
+  return Promise.all(
+    tests.map(async (t) => {
+      const attemptsMade = await countAttemptsByTestAndStudentRepo(t._id, userId);
+      const evaluatedCount = await countEvaluatedAttemptsByTestRepo(t._id);
+      const obj = t.toObject ? t.toObject() : { ...t };
+      obj.attemptsMade = attemptsMade;
+      obj.hasResults = evaluatedCount > 0;
+      if (Number(obj.maxAttempts || 1) <= attemptsMade) {
+        // For UI purposes mark as completed so no Start button shows
+        obj.status = "COMPLETED";
+      }
+      return obj;
+    })
+  );
 };
 
-export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null } = {}) => {
-  // `isPublished` is the canonical "is this live" flag (see computeTestStatus,
-  // which every publish/update path derives `status` from). Matching on the
-  // literal string "PUBLISHED" instead used to exclude every series test
-  // (whose status is always UPCOMING/ACTIVE/COMPLETED/DRAFT, never that exact
-  // string) and any standalone test that had been rescheduled since being
-  // published (which recomputes status away from "PUBLISHED" too).
-  const filters = {
-    isPublished: true,
-    isDeleted: { $ne: 1 },
-    isIQRoomTest: { $ne: true },
-  };
-
-  if (userCreatedAt) {
-    filters.createdAt = { $gte: new Date(userCreatedAt) };
+export const getAssignedTests = async ({ search = "", userId = null, userRole = null, studentId = null } = {}) => {
+  let userCreatedAt = null;
+  if (userId && userRole === "STUDENT") {
+    const dbUser = await getUserCreatedAtByIdRepo(userId);
+    if (dbUser) {
+      userCreatedAt = dbUser.createdAt;
+    }
   }
 
-  if (String(search || "").trim()) {
-    filters.$or = [
-      { title: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } },
-    ];
-  }
+  const tests = await getAssignedTestsRepo({ search, userCreatedAt });
 
-  const tests = await Test.find(filters)
-    .populate("subjectId", "name")
-    .populate({
-      path: "testSeriesId",
-      select: "title description visibility createdAt",
-    })
-    .sort({ createdAt: -1 });
-
+  let mapped;
   if (studentId) {
-    const assignments = await TestAssignment.find({
-      studentId,
-      testId: { $in: tests.map((t) => t._id) },
-    }).lean();
-
+    const assignments = await getAssignmentsForTestsRepo(studentId, tests.map((t) => t._id));
     const assignmentMap = new Map(
       assignments.map((a) => [String(a.testId), a])
     );
 
-    return tests
+    mapped = tests
       .map((test) => {
         const assignment = assignmentMap.get(String(test._id));
         return {
@@ -233,11 +176,102 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
         };
       })
       .filter((test) => test.assignmentStatus !== "HIDDEN");
+  } else {
+    mapped = tests.map((test) => ({
+      ...test.toObject(),
+      id: String(test._id),
+      assignmentStatus: "PENDING",
+    }));
   }
 
-  return tests.map((test) => ({
-    ...test.toObject(),
-    id: String(test._id),
-    assignmentStatus: "PENDING",
-  }));
+  // Attach current user's attempt count so the UI can hide Start when attempts are exhausted.
+  return Promise.all(
+    mapped.map(async (test) => {
+      const attemptsMade = studentId
+        ? await countAttemptsByTestAndStudentRepo(test.id || test._id, studentId)
+        : 0;
+
+      const obj = { ...test };
+      obj.attemptsMade = attemptsMade;
+
+      if (Number(obj.maxAttempts || 1) <= attemptsMade) {
+        obj.status = "COMPLETED";
+      }
+
+      return obj;
+    })
+  );
+};
+
+export const getTestForViewerService = async (test, user) => {
+  if (user?.role === "STUDENT") {
+    const dbUser = await getUserCreatedAtByIdRepo(user._id || user.id);
+    if (dbUser && test?.createdAt && new Date(test.createdAt) < new Date(dbUser.createdAt)) {
+      return {
+        error: "You cannot access a test created before your registration date",
+        status: 403,
+      };
+    }
+  }
+  return { test };
+};
+
+export const publishTestService = async (test, user) => {
+  test.isPublished = true;
+  test.publishedAt = new Date();
+  // Derive the real lifecycle status (UPCOMING/ACTIVE/COMPLETED) from
+  // isPublished + schedule instead of hardcoding "PUBLISHED" — the literal
+  // "PUBLISHED" string doesn't match `getAssignedTests`' filter or the
+  // frontend's status-driven UI once a schedule is involved (or once the
+  // test is later rescheduled and its status gets recomputed).
+  test.status = computeTestStatus(test);
+  await saveTestRepo(test);
+
+  dispatchNotificationToStudents(user, {
+    title: "New Test Assigned",
+    message: `You have been assigned a new test: "${test.title}". Complete it before the deadline.`,
+    type: "TEST_ASSIGNED",
+    link: `/student/dashboard/tests/${test._id}/instructions`,
+    metadata: { testId: test._id },
+  }).catch((err) => logger.error(`Notification dispatch failed: ${err.message}`));
+
+  return test;
+};
+
+export const acceptTestAssignmentService = (testId, studentId) =>
+  upsertAssignmentStatusRepo(testId, studentId, {
+    status: "ACCEPTED",
+    acceptedAt: new Date(),
+  });
+
+export const declineTestAssignmentService = (testId, studentId) =>
+  upsertAssignmentStatusRepo(testId, studentId, {
+    status: "DECLINED",
+    declinedAt: new Date(),
+  });
+
+export const pendingTestAssignmentService = (testId, studentId) =>
+  upsertAssignmentStatusRepo(testId, studentId, { status: "PENDING" });
+
+export const hideTestAssignmentService = (testId, studentId) =>
+  upsertAssignmentStatusRepo(testId, studentId, {
+    status: "HIDDEN",
+    hiddenAt: new Date(),
+  });
+
+export const startTestAssignmentService = async (testId, studentId) => {
+  const assignment = await getAssignmentByTestAndStudentRepo(testId, studentId);
+
+  if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
+    return {
+      error: "You must accept the test assignment before starting the test",
+      status: 400,
+    };
+  }
+
+  assignment.status = "STARTED";
+  assignment.startedAt = new Date();
+  await saveAssignmentRepo(assignment);
+
+  return { assignment };
 };

@@ -1,22 +1,18 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
-import TestSeries from "../../models/testSeries.model.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
-
-const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
-
-const creatorNameExpression = {
-  $trim: {
-    input: {
-      $concat: [
-        { $ifNull: ["$creatorUser.firstName", ""] },
-        " ",
-        { $ifNull: ["$creatorUser.lastName", ""] },
-      ],
-    },
-  },
-};
+import {
+  createSeriesRepo,
+  findSeriesByTitleRepo,
+  updateSeriesByIdRepo,
+  deleteSeriesByIdRepo,
+  getSeriesByIdRepo,
+  getSeriesListRepo,
+  aggregateLeaderboardSeriesRepo,
+  addTestToSeriesRepo,
+} from "./repositories/testSeries.repository.js";
+import { createTestRepo, saveTestRepo, findTestByIdRepo } from "./repositories/test.repository.js";
 
 const toIdArray = (...values) =>
   values
@@ -49,12 +45,7 @@ export const createSeries = async (data, user) => {
 
   console.log("Checking duplicate title:", data.title);
 
-  const existingSeries = await TestSeries.findOne({
-    title: {
-      $regex: `^${data.title.trim()}$`,
-      $options: "i",
-    },
-  });
+  const existingSeries = await findSeriesByTitleRepo(data.title);
 
   console.log("Existing Series:", existingSeries);
 
@@ -66,7 +57,7 @@ export const createSeries = async (data, user) => {
       ? crypto.randomBytes(4).toString("hex")
       : undefined;
 
-  return TestSeries.create({
+  return createSeriesRepo({
     ...data,
     seriesCode,
     createdBy: {
@@ -76,89 +67,52 @@ export const createSeries = async (data, user) => {
   });
 };
 
-export const updateSeries = (id, data) =>
-  TestSeries.findByIdAndUpdate(id, data, { new: true });
+export const updateSeries = async (id, payload) => {
+  const series = await updateSeriesByIdRepo(id, payload);
 
-export const deleteSeries = (id) =>
-  TestSeries.findByIdAndDelete(id);
+  // If client requested schedule update, compute start/end for tests
+  if (Array.isArray(payload.tests) && payload.scheduleStart) {
+    // parse scheduleStart
+    let cursor = new Date(payload.scheduleStart);
+    if (Number.isNaN(cursor.getTime())) cursor = new Date();
 
-export const getSeriesById = (id) =>
-  TestSeries.findById(id).populate({
-    path: "tests",
-    select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status",
-  });
+    for (const testId of payload.tests) {
+      try {
+        const test = await findTestByIdRepo(testId);
+        if (!test) continue;
 
-export const getSeriesList = async ({ userId, search = "" } = {}) => {
-  const filters = userId ? { "createdBy.userId": userId } : {};
+        const durationMinutes = Number(test.duration) || 0;
+        const startTime = new Date(cursor);
+        const endTime = new Date(cursor.getTime() + durationMinutes * 60 * 1000);
 
-  if (String(search || "").trim()) {
-    filters.$or = [
-      { title: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } },
-    ];
+        test.startTime = startTime;
+        test.endTime = endTime;
+        await saveTestRepo(test);
+
+        // advance cursor
+        cursor = endTime;
+      } catch (e) {
+        // continue on per-test error
+        logger.error(`updateSeries: failed to update schedule for test ${testId}: ${e.message}`);
+      }
+    }
   }
 
-  return TestSeries.find(filters)
-    .populate({
-      path: "tests",
-      select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status",
-    })
-    .sort({ createdAt: -1 });
+  return series;
 };
 
-export const getLeaderboardSeriesList = async () => {
-  return TestSeries.aggregate([
-    {
-      $match: {
-        "createdBy.role": { $in: creatorRoleFilter },
-      },
-    },
-    {
-      $lookup: {
-        from: "users",
-        localField: "createdBy.userId",
-        foreignField: "_id",
-        as: "creatorUser",
-      },
-    },
-    {
-      $unwind: {
-        path: "$creatorUser",
-        preserveNullAndEmptyArrays: true,
-      },
-    },
-    {
-      $lookup: {
-        from: "organizations",
-        localField: "creatorUser.organizationId",
-        foreignField: "_id",
-        as: "creatorOrganization",
-      },
-    },
-    {
-      $unwind: {
-        path: "$creatorOrganization",
-        preserveNullAndEmptyArrays: true,
-      },
-    },
-    {
-      $addFields: {
-        creatorName: creatorNameExpression,
-        creatorEmail: "$creatorUser.email",
-        creatorOrganizationName: "$creatorOrganization.name",
-        testsCount: { $size: { $ifNull: ["$tests", []] } },
-      },
-    },
-    { $sort: { createdAt: -1 } },
-  ]);
-};
+export const deleteSeries = (id) => deleteSeriesByIdRepo(id);
+
+export const getSeriesById = (id) => getSeriesByIdRepo(id);
+
+export const getSeriesList = async ({ userId, search = "" } = {}) =>
+  getSeriesListRepo({ userId, search });
+
+export const getLeaderboardSeriesList = async () => aggregateLeaderboardSeriesRepo();
 
 // Create a new test that belongs to a series. The test will be marked as a series test
 // and linked to the series' tests array.
 export const createSeriesTest = async (seriesId, data, user) => {
-  const mongoose = (await import('mongoose')).default;
-  const Test = (await import('../../models/test.model.js')).default;
-
   const payload = {
     ...normalizeSeriesTestPayload(data),
     testSeriesId: seriesId,
@@ -168,14 +122,14 @@ export const createSeriesTest = async (seriesId, data, user) => {
     createdBy: { userId: user._id || user.id, role: user.role },
   };
 
-  const test = await Test.create(payload);
+  const test = await createTestRepo(payload);
 
   // add to series tests array
-  await TestSeries.findByIdAndUpdate(seriesId, { $addToSet: { tests: test._id } });
+  await addTestToSeriesRepo(seriesId, test._id);
 
   // Compute and persist status for the created series test
   test.status = computeTestStatus(test);
-  await test.save();
+  await saveTestRepo(test);
 
   return test;
 };

@@ -1,12 +1,19 @@
-import Test from "../../../models/test.model.js";
-import TestAttempt from "../../../models/testAttempt.model.js";
-import User from "../../../models/user.model.js";
-import TestAssignment from "../../../models/testAssignment.model.js";
+import {
+  findAttemptForMissedSyncRepo,
+  createMissedAttemptRepo,
+  saveAttemptRepo,
+} from "../repositories/testAttempt.repository.js";
+import { getUserByIdRepo, getAllStudentsRepo } from "../repositories/user.repository.js";
+import {
+  getAssignmentByTestAndStudentRepo,
+  saveAssignmentRepo,
+} from "../../test-management/repositories/testAssignment.repository.js";
+import { getExpiredPublishedTestsRepo } from "../../test-management/repositories/test.repository.js";
 
 const syncMissed = async (studentId, test, now) => {
   // Find assignment
-  const assignment = await TestAssignment.findOne({ testId: test._id, studentId });
-  
+  const assignment = await getAssignmentByTestAndStudentRepo(test._id, studentId);
+
   // Only sync missed if they ACCEPTED or STARTED
   if (!assignment || !["ACCEPTED", "STARTED"].includes(assignment.status)) {
     return;
@@ -16,16 +23,13 @@ const syncMissed = async (studentId, test, now) => {
   assignment.status = "MISSED";
   assignment.score = 0;
   assignment.submittedAt = test.endTime || now;
-  await assignment.save();
+  await saveAssignmentRepo(assignment);
 
   // Find if there is an existing attempt
-  const existingAttempt = await TestAttempt.findOne({
-    testId: test._id,
-    studentId
-  });
+  const existingAttempt = await findAttemptForMissedSyncRepo(test._id, studentId);
 
   if (!existingAttempt) {
-    await TestAttempt.create({
+    await createMissedAttemptRepo({
       testId: test._id,
       studentId,
       status: "MISSED",
@@ -42,7 +46,7 @@ const syncMissed = async (studentId, test, now) => {
     existingAttempt.totalScore = 0;
     existingAttempt.percentage = 0;
     existingAttempt.submittedAt = test.endTime || now;
-    await existingAttempt.save();
+    await saveAttemptRepo(existingAttempt);
   }
 };
 
@@ -50,17 +54,12 @@ export const syncAllMissedAttempts = async () => {
   try {
     const now = new Date();
     // Find all expired tests that are published, not deleted, and not IQ room tests
-    const expiredTests = await Test.find({
-      isPublished: true,
-      isDeleted: { $ne: 1 },
-      isIQRoomTest: { $ne: true },
-      endTime: { $lt: now }
-    });
+    const expiredTests = await getExpiredPublishedTestsRepo(now);
 
     if (expiredTests.length === 0) return;
 
     // Get all students
-    const students = await User.find({ role: "STUDENT" });
+    const students = await getAllStudentsRepo();
 
     for (const student of students) {
       for (const test of expiredTests) {
@@ -74,17 +73,12 @@ export const syncAllMissedAttempts = async () => {
 
 export const syncMissedAttemptsForStudent = async (studentId) => {
   try {
-    const student = await User.findById(studentId);
+    const student = await getUserByIdRepo(studentId);
     if (!student) return;
 
     const now = new Date();
     // Find all expired tests that are published, not deleted, and not IQ room tests
-    const expiredTests = await Test.find({
-      isPublished: true,
-      isDeleted: { $ne: 1 },
-      isIQRoomTest: { $ne: true },
-      endTime: { $lt: now }
-    });
+    const expiredTests = await getExpiredPublishedTestsRepo(now);
 
     for (const test of expiredTests) {
       await syncMissed(studentId, test, now);

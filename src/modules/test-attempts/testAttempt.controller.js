@@ -1,40 +1,10 @@
 // modules/testAttempts/testAttempt.controller.js
-import mongoose from "mongoose";
-import Test from "../../models/test.model.js"; // adjust path
-import TestAttempt from "../../models/testAttempt.model.js"; // adjust path";
-import { computeAttemptTiming } from "../test-attempts/utils/attemptTimer.util.js";
-import { saveAnswerSchema } from "./schemas/saveAnswer.schema.js";
-import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempts.service.js";
+import { normalizeAttemptQuestion } from "./services/questionSelection.service.js";
 import { manualEvaluateAttempt } from "./services/manualEvaluateAttempt.service.js";
 import { evaluateAttemptSchema } from "./schemas/evaluateAttempt.schema.js";
 import { getAttemptResult } from "./services/getAttemptResult.service.js";
 import { getDetailedAnalysis } from "./services/getDetailedAnalysis.service.js";
-import {
-  normalizeAttemptQuestion,
-  selectAttemptQuestions,
-} from "./services/questionSelection.service.js";
-import { getIO } from "../../sockets/index.js";
-import IQRoom from "../../models/iqRoom.model.js";
-
-const canStartTest = (test, user) => {
-  if (!test || !user) return false;
-
-  if (test.visibility === "PUBLIC") return true;
-  if (test.visibility === "LINK_ONLY") return true;
-
-  if (test.visibility === "ORG_ONLY") {
-    const userOrganizationId = String(user.organizationId || "");
-    if (!userOrganizationId) return false;
-
-    const allowedOrganizations = Array.isArray(test.allowedOrganizations)
-      ? test.allowedOrganizations.map((id) => String(id))
-      : [];
-
-    return allowedOrganizations.length === 0 || allowedOrganizations.includes(userOrganizationId);
-  }
-
-  return false;
-};
+import * as service from "./services/testAttempt.service.js";
 
 export const startTestAttemptController = async (req, res, next) => {
   try {
@@ -42,242 +12,27 @@ export const startTestAttemptController = async (req, res, next) => {
     const studentId = req.user?._id;
     const { iqRoomId } = req.body;
 
-    if (!mongoose.Types.ObjectId.isValid(testId)) {
-      return res
-        .status(400)
-        .json({ success: false, message: "Invalid testId" });
-    }
-
-    // 1) Load test
-    const test = await Test.findById(testId).lean();
-    if (!test) {
-      return res
-        .status(404)
-        .json({ success: false, message: "Test not found" });
-    }
-
-    // 2) Validate visibility and organization access
-    if (!canStartTest(test, req.user)) {
-      return res.status(403).json({
-        success: false,
-        message: "You are not allowed to start this test",
-      });
-    }
-
-    if (req.user?.role === "STUDENT") {
-      const User = (await import("../../modules/auth/models/User.model.js")).default;
-      const dbUser = await User.findById(studentId).select("createdAt");
-      if (dbUser && test.createdAt && new Date(test.createdAt) < new Date(dbUser.createdAt)) {
-        return res.status(403).json({
-          success: false,
-          message: "You cannot start a test created before your registration date",
-        });
-      }
-    }
-
-    if (test.scheduleType === "IMMEDIATE" && !test.isPublished) {
-      return res.status(403).json({
-        success: false,
-        message: "This test is not published yet",
-      });
-    }
-
-    // 3) Validate schedule (adapt to your test fields)
-    // Example fields: test.startTime, test.endTime (Date)
-    if (!iqRoomId) {
-      const now = new Date();
-      if (test.startTime && now < new Date(test.startTime)) {
-        return res.status(400).json({
-          success: false,
-          message: "Test has not started yet",
-        });
-      }
-      if (test.endTime && now > new Date(test.endTime)) {
-        return res.status(400).json({
-          success: false,
-          message: "Test has already ended",
-        });
-      }
-    }
-
-    // Verify assignment is accepted for student. Acceptance only needs to happen
-    // once per test — `acceptedAt` is the persistent record of that, unlike
-    // `status`, which also tracks per-attempt lifecycle (STARTED/SUBMITTED) and
-    // gets overwritten after every attempt, so it can't be used as the gate here.
-    if (req.user?.role === "STUDENT" && !iqRoomId) {
-      const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-      const assignment = await TestAssignment.findOne({ testId, studentId });
-      if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
-        return res.status(400).json({
-          success: false,
-          message: "You must accept the test assignment before starting the test"
-        });
-      }
-    }
-
-    // 4) Prevent multiple in-progress attempts and enforce maxAttempts
-    const baseQuery = { testId, studentId };
-    if (iqRoomId) {
-      baseQuery.iqRoomId = iqRoomId;
-    } else {
-      baseQuery.$or = [{ iqRoomId: null }, { iqRoomId: { $exists: false } }];
-    }
-
-    // Check if there is an in-progress attempt for this specific context
-    const existingInProgress = await TestAttempt.findOne({ ...baseQuery, status: 'IN_PROGRESS' }).lean();
-    if (existingInProgress) {
-      const existingTiming = computeAttemptTiming(existingInProgress);
-      return res.status(409).json({
-        success: false,
-        message: 'Attempt already exists for this test',
-        data: {
-          attemptId: existingInProgress._id,
-          status: existingInProgress.status,
-          startedAt: existingInProgress.startedAt,
-          endsAt: existingInProgress.endsAt,
-          duration: existingInProgress.duration,
-          maxScore: existingInProgress.maxScore,
-          timing: existingTiming,
-        },
-      });
-    }
-
-    // Count completed/submitted attempts to enforce maxAttempts
-    const completedAttemptsCount = await TestAttempt.countDocuments({
-      ...baseQuery,
-      status: { $in: ['SUBMITTED', 'EVALUATED'] },
-    });
-
-    if (iqRoomId) {
-      // IQ Room attempts are strictly 1 per user per room
-      if (completedAttemptsCount >= 1) {
-        return res.status(403).json({
-          success: false,
-          message: 'You have already completed this live contest',
-        });
-      }
-    } else {
-      // Normal test attempts follow the test.maxAttempts rule
-      const allowedAttempts = Number(test.maxAttempts) || 1;
-      if (completedAttemptsCount >= allowedAttempts) {
-        return res.status(403).json({
-          success: false,
-          message: 'Maximum attempts reached for this test',
-        });
-      }
-    }
-
-    const { questionSnapshots, questions } = await selectAttemptQuestions(test);
-
-    if (!questionSnapshots.length) {
-      return res.status(400).json({
-        success: false,
-        message: "No eligible questions were found for this test",
-      });
-    }
-
-    // 5) Copy duration & marks server-side
-    let duration = Number(test.duration); // minutes (recommended)
-    const maxScore = Number(test.totalMarks);
-
-    if (!Number.isFinite(duration) || duration <= 0) {
-      return res.status(500).json({
-        success: false,
-        message: "Test duration is invalid on server",
-      });
-    }
-    if (!Number.isFinite(maxScore) || maxScore <= 0) {
-      return res.status(500).json({
-        success: false,
-        message: "Test totalMarks is invalid on server",
-      });
-    }
-
-    const startedAt = new Date();
-    let endsAt = new Date(startedAt.getTime() + duration * 60 * 1000);
-
-    let endTime = test.endTime;
-    if (iqRoomId) {
-      const room = await IQRoom.findById(iqRoomId).lean();
-      if (room && room.endTime) {
-        endTime = room.endTime;
-      }
-    }
-
-    if (endTime) {
-      const endTimeDate = new Date(endTime);
-      const diffMs = endTimeDate.getTime() - startedAt.getTime();
-      const diffMinutes = diffMs / (60 * 1000);
-      if (diffMinutes < duration) {
-        duration = Math.max(0, diffMinutes);
-        endsAt = endTimeDate;
-      }
-    }
-
-    // 6) Create attempt
-    const attempt = await TestAttempt.create({
+    const result = await service.startTestAttemptService({
       testId,
       studentId,
-      iqRoomId: iqRoomId || null,
-      startedAt,
-      endsAt,
-      duration,
-      maxScore,
-      questionSnapshots,
-      status: "IN_PROGRESS",
-      answers: [],
+      iqRoomId,
+      user: req.user,
     });
 
-    if (!iqRoomId && req.user?.role === "STUDENT") {
-      const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-      await TestAssignment.updateOne(
-        { testId, studentId },
-        { $set: { status: "STARTED", startedAt } }
-      );
+    if (!result.success) {
+      return res.status(result.status).json({
+        success: false,
+        message: result.message,
+        ...(result.data !== undefined ? { data: result.data } : {}),
+      });
     }
 
-    const timing = computeAttemptTiming(attempt);
     return res.status(201).json({
       success: true,
       message: "Test attempt started",
-      data: {
-        attemptId: attempt._id,
-        testId: attempt.testId,
-        studentId: attempt.studentId,
-        status: attempt.status,
-        startedAt: attempt.startedAt,
-        endsAt: attempt.endsAt,
-        duration: attempt.duration,
-        maxScore: attempt.maxScore,
-        questions,
-        timing, // ✅ backend remaining time
-      },
+      data: result.data,
     });
   } catch (err) {
-    // Handle unique index error (one attempt per student per test)
-    if (err?.code === 11000) {
-      const { testId, studentId } = req.params ? { testId: req.params.testId, studentId: req.user?._id } : {};
-      const existingAttempt = await TestAttempt.findOne({
-        testId,
-        studentId,
-        status: 'IN_PROGRESS',
-      }).lean();
-
-      return res.status(409).json({
-        success: false,
-        message: "Attempt already exists for this test",
-        data: existingAttempt
-          ? {
-              attemptId: existingAttempt._id,
-              status: existingAttempt.status,
-              startedAt: existingAttempt.startedAt,
-              endsAt: existingAttempt.endsAt,
-              duration: existingAttempt.duration,
-              maxScore: existingAttempt.maxScore,
-            }
-          : undefined,
-      });
-    }
     return next(err);
   }
 };
@@ -287,7 +42,7 @@ export const getAttemptController = async (req, res, next) => {
   try {
     const attempt = req.attempt;
     const timing = req.timing;
-    const test = await Test.findById(attempt.testId).select("title duration createdBy isIQRoomTest").lean();
+    const test = await service.getAttemptTestSummaryService(attempt.testId);
 
     const questions = Array.isArray(attempt.questionSnapshots)
       ? attempt.questionSnapshots.map((snapshot) => normalizeAttemptQuestion(snapshot))
@@ -339,186 +94,63 @@ export const getAttemptController = async (req, res, next) => {
   }
 };
 
-  export const saveAnswerController = async (req, res, next) => {
-    try {
-      const attempt = req.attempt; // from loadAttempt
-      const timing = req.timing; // from enforceAttemptTimer
+export const saveAnswerController = async (req, res, next) => {
+  try {
+    const attempt = req.attempt; // from loadAttempt
+    const timing = req.timing; // from enforceAttemptTimer
 
-      // ✅ Block if not in progress (Acceptance Criteria)
-      if (attempt.status !== "IN_PROGRESS") {
-        return res.status(409).json({
-          success: false,
-          message: "Attempt is not in progress",
-          errors: null,
-        });
-      }
+    const result = await service.saveAnswerService(attempt, timing, req.body);
 
-      // ✅ If timer says expired, block (your middleware may auto-expire already)
-      if (timing?.expired) {
-        return res.status(409).json({
-          success: false,
-          message: "Time expired. Attempt ended.",
-          errors: null,
-        });
-      }
-
-      // ✅ Validate request body
-      const parsed = saveAnswerSchema.parse(req.body);
-      const questionId = new mongoose.Types.ObjectId(parsed.questionId);
-      const timeSpentMs = Number(parsed.timeSpentMs || 0);
-
-      const snapshotIndex = Array.isArray(attempt.questionSnapshots)
-        ? attempt.questionSnapshots.findIndex(
-            (item) => item.questionId.toString() === questionId.toString(),
-          )
-        : -1;
-
-      if (snapshotIndex === -1) {
-        return res.status(404).json({
-          success: false,
-          message: "Question is not part of this attempt",
-          errors: null,
-        });
-      }
-
-      const snapshot = attempt.questionSnapshots[snapshotIndex];
-      if (Number.isFinite(timeSpentMs) && timeSpentMs > 0) {
-        snapshot.timeSpentMs = (snapshot.timeSpentMs || 0) + timeSpentMs;
-        snapshot.lastViewedAt = new Date();
-        if (!snapshot.startedAt) {
-          snapshot.startedAt = snapshot.lastViewedAt;
-        }
-      }
-
-      // ✅ Upsert by questionId (no duplicates)
-      const idx = attempt.answers.findIndex(
-        (a) => a.questionId.toString() === questionId.toString(),
-      );
-
-      const updatedAnswer = {
-        questionId,
-        selectedOption: parsed.selectedOption ?? null,
-        textAnswer: parsed.textAnswer ?? null,
-        answeredAt: new Date(),
-        timeSpentMs: Number.isFinite(timeSpentMs) ? timeSpentMs : 0,
-      };
-
-      if (parsed.selectedOption !== undefined || parsed.textAnswer !== undefined) {
-        updatedAnswer.timeSpentMs = snapshot.timeSpentMs || updatedAnswer.timeSpentMs;
-
-        if (idx >= 0) {
-          // update existing entry
-          attempt.answers[idx].selectedOption = updatedAnswer.selectedOption;
-          attempt.answers[idx].textAnswer = updatedAnswer.textAnswer;
-          attempt.answers[idx].answeredAt = updatedAnswer.answeredAt;
-          attempt.answers[idx].timeSpentMs = updatedAnswer.timeSpentMs;
-        } else {
-          // add new entry
-          attempt.answers.push(updatedAnswer);
-        }
-      } else if (idx >= 0) {
-        attempt.answers[idx].timeSpentMs = snapshot.timeSpentMs || attempt.answers[idx].timeSpentMs || 0;
-      }
-
-      await attempt.save();
-
-      return res.status(200).json({
-        success: true,
-        message: "Answer saved successfully",
-        data: {
-          attemptId: attempt._id,
-          questionId: parsed.questionId,
-          timeSpentMs: snapshot.timeSpentMs || 0,
-          timing: req.timing,
-        },
+    if (result.error) {
+      return res.status(result.status).json({
+        success: false,
+        message: result.error,
+        errors: null,
       });
-    } catch (err) {
-      // Zod error
-      if (err?.errors) {
-        return res.status(400).json({
-          success: false,
-          message: "Validation failed",
-          errors: err.errors,
-        });
-      }
-      return next(err);
     }
-  };
+
+    return res.status(200).json({
+      success: true,
+      message: "Answer saved successfully",
+      data: {
+        attemptId: attempt._id,
+        questionId: result.questionId,
+        timeSpentMs: result.timeSpentMs,
+        timing: req.timing,
+      },
+    });
+  } catch (err) {
+    // Zod error
+    if (err?.errors) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors: err.errors,
+      });
+    }
+    return next(err);
+  }
+};
 
 export const submitAttemptController = async (req, res, next) => {
   try {
     const attempt = req.attempt;
     const timing = req.timing;
 
-    // Prevent submission if not in progress and not already expired
-    if (attempt.status !== "IN_PROGRESS" && attempt.status !== "EXPIRED") {
-      return res.status(409).json({
+    const result = await service.submitAttemptService(attempt, timing, req.body);
+
+    if (!result.success) {
+      return res.status(result.status).json({
         success: false,
-        message: `Cannot submit attempt - status is ${attempt.status.toLowerCase()}`,
-        data: {
-          status: attempt.status,
-          submittedAt: attempt.submittedAt,
-          timing: {
-            remainingSeconds: timing.remainingSeconds,
-            remainingMs: timing.remainingMs,
-            expired: timing.expired,
-            serverNow: timing.serverNow,
-          },
-        },
+        message: result.message,
+        data: result.data,
       });
-    }
-
-    // ✅ Manually submit before time expires, unless it already expired
-    if (attempt.status !== "EXPIRED") {
-      attempt.status = "SUBMITTED";
-      attempt.submittedAt = new Date();
-      const cheatingReasons = ["CHEATING", "PROLONGED_ABSENCE", "PHONE_PERSISTENCE", "PHONE_DETECTED", "FACE_ABSENT"];
-      if (cheatingReasons.includes(req.body.expireReason)) {
-        attempt.expireReason = "CHEATING";
-      } else if (req.body.expireReason === "TIME_EXPIRED") {
-        attempt.expireReason = "TIME_EXPIRED";
-      } else {
-        attempt.expireReason = "MANUAL_SUBMIT";
-      }
-      await attempt.save();
-    }
-
-    const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
-
-    // ✅ If part of an IQ Room, notify the room
-    if (attempt.iqRoomId) {
-      try {
-        const room = await IQRoom.findById(attempt.iqRoomId);
-        if (room) {
-          const io = getIO();
-          io.of("/iq-room").to(room.roomCode).emit("leaderboard-update", {
-            userId: attempt.studentId,
-            attemptId: attempt._id,
-          });
-        }
-      } catch (err) {
-        console.error("Failed to emit socket update for IQ Room:", err);
-      }
     }
 
     return res.json({
       success: true,
       message: "Test submitted successfully",
-      data: {
-        attemptId: attempt._id.toString(),
-        testId: attempt.testId,
-        resultId: attempt._id.toString(), // ✅ attemptId IS the result
-        status: evaluatedAttempt?.status || "SUBMITTED",
-        submittedAt: evaluatedAttempt?.submittedAt || attempt.submittedAt,
-        totalScore: evaluatedAttempt?.totalScore ?? 0,
-        percentage: evaluatedAttempt?.percentage ?? 0,
-        timing: {
-          remainingSeconds: Math.max(0, timing.remainingSeconds),
-          remainingMs: Math.max(0, timing.remainingMs),
-          expired: false,
-          serverNow: timing.serverNow,
-        },
-      },
+      data: result.data,
     });
   } catch (err) {
     next(err);
@@ -528,7 +160,7 @@ export const submitAttemptController = async (req, res, next) => {
 
 export const evaluateAttemptController = async (req, res, next) => {
   try {
-    
+
 
     const parsed = evaluateAttemptSchema.parse(req.body);
     const { attemptId } = req.params;
@@ -570,61 +202,19 @@ export const getEvaluationStatusController = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
 
-    if (!mongoose.Types.ObjectId.isValid(attemptId)) {
-      return res.status(400).json({
+    const result = await service.getEvaluationStatusService(attemptId);
+
+    if (result.error) {
+      return res.status(result.status).json({
         success: false,
-        message: "Invalid attemptId",
+        message: result.error,
       });
     }
-
-    const attempt = await TestAttempt.findById(attemptId)
-      .select("testId status submittedAt totalScore percentage maxScore answers questionSnapshots")
-      .lean();
-
-    if (!attempt) {
-      return res.status(404).json({
-        success: false,
-        message: "Attempt not found",
-      });
-    }
-
-    const test = await Test.findById(attempt.testId)
-      .select("title evaluationType")
-      .lean();
-
-    // Determine evaluation type: auto (all MCQ), manual (has subjective), hybrid (mixed)
-    const hasSubjective = Array.isArray(attempt.questionSnapshots) &&
-      attempt.questionSnapshots.some(q => q.type === "SUBJECTIVE" || q.type === "SHORT_ANSWER");
-
-    const evaluationType = hasSubjective ? "hybrid" : "auto";
-    const evaluationStatus = attempt.status === "SUBMITTED" || attempt.status === "EVALUATED" ? "completed" : "pending";
-
-    // Calculate analytics
-    const totalQuestions = attempt.questionSnapshots?.length || 0;
-    const attemptedQuestions = attempt.answers?.length || 0;
-    const correctAnswers = attempt.answers?.filter(a => a.isCorrect === true)?.length || 0;
 
     return res.json({
       success: true,
       message: "Evaluation status retrieved",
-      data: {
-        testId: attempt.testId,
-        attemptId: attemptId,
-        testName: test?.title || "Test",
-        evaluationType,
-        evaluationStatus,
-        submittedAt: attempt.submittedAt,
-        totalScore: attempt.totalScore || 0,
-        maxScore: attempt.maxScore || 0,
-        percentage: attempt.percentage || 0,
-        analytics: {
-          total: totalQuestions,
-          attempted: attemptedQuestions,
-          unattempted: totalQuestions - attemptedQuestions,
-          correct: correctAnswers,
-          incorrect: attemptedQuestions - correctAnswers,
-        },
-      },
+      data: result.data,
     });
   } catch (err) {
     next(err);
@@ -700,7 +290,7 @@ export const getDetailedAnalysisController = async (req, res, next) => {
     const { attemptId } = req.params;
 
     const detailedAnalysis = await getDetailedAnalysis(attemptId);
-    
+
     if (!detailedAnalysis) {
       return res.status(404).json({
         success: false,
@@ -724,34 +314,21 @@ export const getDetailedAnalysisController = async (req, res, next) => {
 export const updateCheatingStatusController = async (req, res, next) => {
   try {
     const attempt = req.attempt;
-    const { cheatingScore, violations } = req.body;
 
-    if (attempt.status !== "IN_PROGRESS") {
-      return res.status(409).json({
+    const result = await service.updateCheatingStatusService(attempt, req.body);
+
+    if (result.error) {
+      return res.status(result.status).json({
         success: false,
-        message: "Attempt is not in progress",
+        message: result.error,
         errors: null,
       });
     }
 
-    if (typeof cheatingScore === "number") {
-      attempt.cheatingScore = cheatingScore;
-    }
-
-    if (Array.isArray(violations)) {
-      attempt.violations = violations;
-    }
-
-    await attempt.save();
-
     return res.status(200).json({
       success: true,
       message: "Cheating status updated successfully",
-      data: {
-        attemptId: attempt._id,
-        cheatingScore: attempt.cheatingScore,
-        violations: attempt.violations,
-      },
+      data: result.data,
     });
   } catch (err) {
     next(err);

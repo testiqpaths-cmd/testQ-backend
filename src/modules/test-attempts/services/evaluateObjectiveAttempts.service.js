@@ -1,7 +1,7 @@
-import TestAttempt from "../../../models/testAttempt.model.js";
-import Question from "../../../models/question.model.js";
-import Notification from "../../../modules/notification/notification.model.js";
-import Test from "../../../models/test.model.js";
+import { findAttemptByIdRepo, saveAttemptRepo } from "../repositories/testAttempt.repository.js";
+import { findQuestionsByIdsRepo } from "../repositories/question.repository.js";
+import { markAssignmentSubmittedRepo } from "../../test-management/repositories/testAssignment.repository.js";
+import { getTestByIdLeanRepo } from "../../test-management/repositories/test.repository.js";
 
 const PASS_PERCENTAGE = 40;
 
@@ -49,10 +49,10 @@ const resolveStudentAnswer = (answer, snapshot) => {
 };
 
 export const evaluateObjectiveForAttempt = async (attemptId) => {
-  const attempt = await TestAttempt.findById(attemptId);
+  const attempt = await findAttemptByIdRepo(attemptId);
   if (!attempt) return null;
 
-  const test = await Test.findById(attempt.testId).lean();
+  const test = await getTestByIdLeanRepo(attempt.testId);
 
   // only run after submission (or re-run if already evaluated or expired)
   if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED" && attempt.status !== "EXPIRED") {
@@ -66,16 +66,14 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     updateAttemptStats(attempt);
     // keep it SUBMITTED so manual evaluation can happen if needed
     attempt.status = "SUBMITTED";
-    await attempt.save();
+    await saveAttemptRepo(attempt);
     return attempt;
   }
 
 
 
   const qIds = attempt.answers.map((a) => a.questionId);
-  const questions = await Question.find({ _id: { $in: qIds } }).select(
-    "_id type correctAnswer"
-  );
+  const questions = await findQuestionsByIdsRepo(qIds);
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
   const snapshotMap = new Map(
@@ -98,7 +96,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       const isCorrect = normalizeValue(studentAnswer) === normalizeValue(q.correctAnswer);
 
       ans.isCorrect = isCorrect;
-      
+
       const marksForQ = test?.marksPerQuestion || q.marks || 1;
       const negPercentage = test?.negativeMarkingPercentage || 0;
 
@@ -146,23 +144,15 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
   if (!attempt.iqRoomId) {
     try {
-      const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
-      await TestAssignment.updateOne(
-        { testId: attempt.testId, studentId: attempt.studentId },
-        {
-          $set: {
-            status: "SUBMITTED",
-            submittedAt: attempt.submittedAt || new Date(),
-            score: attempt.totalScore ?? 0,
-          },
-        },
-        { upsert: true }
-      );
+      await markAssignmentSubmittedRepo(attempt.testId, attempt.studentId, {
+        submittedAt: attempt.submittedAt || new Date(),
+        score: attempt.totalScore ?? 0,
+      });
     } catch (err) {
       console.error("Failed to sync TestAssignment during evaluateObjectiveForAttempt:", err);
     }
   }
 
-  await attempt.save();
+  await saveAttemptRepo(attempt);
   return attempt;
 };

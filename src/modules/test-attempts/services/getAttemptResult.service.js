@@ -1,19 +1,9 @@
-import TestAttempt from "../../../models/testAttempt.model.js";
+import { getAttemptWithPopulatesRepo } from "../repositories/testAttempt.repository.js";
 
 export const getAttemptResult = async (attemptId) => {
   // Populate questionId but DO NOT expose correctAnswer from DB
   // We'll use snapshots for correctAnswer (point-in-time capture)
-  const attempt = await TestAttempt.findById(attemptId).populate({
-    path: "testId",
-    select: "title name duration totalQuestions testSeriesId createdBy totalMarks",
-    populate: {
-      path: "testSeriesId",
-      select: "title description",
-    },
-  }).populate({
-    path: "answers.questionId",
-    select: "questionText type options topic subTopic", // ✅ no correctAnswer
-  });
+  const attempt = await getAttemptWithPopulatesRepo(attemptId);
 
   if (!attempt) return null;
 
