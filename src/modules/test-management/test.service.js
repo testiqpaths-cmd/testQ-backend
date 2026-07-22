@@ -56,9 +56,17 @@ export async function createTest(data, user) {
 
   const test = await Test.create(payload);
 
-  // New tests are ALWAYS created as DRAFT
-  test.status = "DRAFT";
-  test.isPublished = false;
+  // Students create tests only for themselves to practice on — there's no
+  // review/schedule workflow for them, so their tests go live immediately
+  // instead of sitting in an un-startable DRAFT state.
+  if (user.role === "STUDENT") {
+    test.isPublished = true;
+    test.publishedAt = new Date();
+    test.status = computeTestStatus(test);
+  } else {
+    test.status = "DRAFT";
+    test.isPublished = false;
+  }
   await test.save();
 
   return test;
