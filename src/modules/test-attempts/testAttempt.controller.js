@@ -100,11 +100,14 @@ export const startTestAttemptController = async (req, res, next) => {
       }
     }
 
-    // Verify assignment is accepted for student
+    // Verify assignment is accepted for student. Acceptance only needs to happen
+    // once per test — `acceptedAt` is the persistent record of that, unlike
+    // `status`, which also tracks per-attempt lifecycle (STARTED/SUBMITTED) and
+    // gets overwritten after every attempt, so it can't be used as the gate here.
     if (req.user?.role === "STUDENT" && !iqRoomId) {
       const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
       const assignment = await TestAssignment.findOne({ testId, studentId });
-      if (!assignment || !["ACCEPTED", "STARTED"].includes(assignment.status)) {
+      if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
         return res.status(400).json({
           success: false,
           message: "You must accept the test assignment before starting the test"

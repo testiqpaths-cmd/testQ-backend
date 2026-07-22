@@ -1,5 +1,6 @@
 import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
+import { computeTestStatus } from "./utils/status.js";
 
 const canManageTest = (test, user) => {
   if (!test || !user) return false;
@@ -209,9 +210,14 @@ export const publishTest = async (req, res, next) => {
       return res.status(403).json({ success: false, message: "Forbidden" });
     }
 
-    req.test.status = "PUBLISHED";
     req.test.isPublished = true;
     req.test.publishedAt = new Date();
+    // Derive the real lifecycle status (UPCOMING/ACTIVE/COMPLETED) from
+    // isPublished + schedule instead of hardcoding "PUBLISHED" — the literal
+    // "PUBLISHED" string doesn't match `getAssignedTests`' filter or the
+    // frontend's status-driven UI once a schedule is involved (or once the
+    // test is later rescheduled and its status gets recomputed).
+    req.test.status = computeTestStatus(req.test);
     await req.test.save();
 
     const { dispatchNotificationToStudents } = await import("../notification/notification.service.js");
@@ -309,7 +315,7 @@ export const startTestAssignment = async (req, res, next) => {
     const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
     const assignment = await TestAssignment.findOne({ testId, studentId });
 
-    if (!assignment || assignment.status !== "ACCEPTED") {
+    if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
       return res.status(400).json({
         success: false,
         message: "You must accept the test assignment before starting the test"

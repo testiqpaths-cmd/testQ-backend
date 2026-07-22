@@ -51,7 +51,7 @@ export const syncAllMissedAttempts = async () => {
     const now = new Date();
     // Find all expired tests that are published, not deleted, and not IQ room tests
     const expiredTests = await Test.find({
-      status: "PUBLISHED",
+      isPublished: true,
       isDeleted: { $ne: 1 },
       isIQRoomTest: { $ne: true },
       endTime: { $lt: now }
@@ -80,7 +80,7 @@ export const syncMissedAttemptsForStudent = async (studentId) => {
     const now = new Date();
     // Find all expired tests that are published, not deleted, and not IQ room tests
     const expiredTests = await Test.find({
-      status: "PUBLISHED",
+      isPublished: true,
       isDeleted: { $ne: 1 },
       isIQRoomTest: { $ne: true },
       endTime: { $lt: now }

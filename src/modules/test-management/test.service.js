@@ -73,8 +73,6 @@ export async function createTest(data, user) {
 }
 
 export async function updateTest(test, payload, user) {
-  const prevStatus = test.status || "DRAFT";
-  
   Object.assign(test, payload);
 
   const hasFixedSchedule = Boolean(test.startTime && test.endTime);
@@ -82,13 +80,15 @@ export async function updateTest(test, payload, user) {
     test.scheduleType = "FIXED";
   }
 
-  // Preserve DRAFT status on update unless already published
-  if (prevStatus === "DRAFT" && test.status !== "PUBLISHED") {
-    test.status = "DRAFT";
-    test.isPublished = false;
-  } else if (test.status !== "DRAFT") {
-    test.status = computeTestStatus(test);
-  }
+  // Always derive status fresh from isPublished + schedule. computeTestStatus
+  // already returns "DRAFT" whenever isPublished is false, so a draft test
+  // edited without an explicit isPublished:true stays DRAFT; an explicit
+  // publish (isPublished: true) or a reschedule of an already-published test
+  // both get the correct UPCOMING/ACTIVE/COMPLETED status. The previous
+  // prevStatus-based guard here reverted isPublished/status back to DRAFT
+  // whenever the payload didn't also include a literal status: "PUBLISHED"
+  // field, silently undoing publish attempts that only sent isPublished: true.
+  test.status = computeTestStatus(test);
 
   await test.save();
 
@@ -182,8 +182,14 @@ export const getMyTests = async ({ userId, search = "" }) => {
 };
 
 export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null } = {}) => {
+  // `isPublished` is the canonical "is this live" flag (see computeTestStatus,
+  // which every publish/update path derives `status` from). Matching on the
+  // literal string "PUBLISHED" instead used to exclude every series test
+  // (whose status is always UPCOMING/ACTIVE/COMPLETED/DRAFT, never that exact
+  // string) and any standalone test that had been rescheduled since being
+  // published (which recomputes status away from "PUBLISHED" too).
   const filters = {
-    status: "PUBLISHED",
+    isPublished: true,
     isDeleted: { $ne: 1 },
     isIQRoomTest: { $ne: true },
   };

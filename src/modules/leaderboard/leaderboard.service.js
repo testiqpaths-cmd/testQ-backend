@@ -163,7 +163,19 @@ export const getTestLeaderboard = async (testId, query) => {
     status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
   };
 
-  const totalPromise = TestAttempt.countDocuments(matchStage);
+  // Rank by distinct students, not attempts — a student with multiple attempts
+  // should occupy one leaderboard row (their best attempt), not one row each.
+  const totalPromise = TestAttempt.distinct("studentId", matchStage).then(
+    (ids) => ids.length
+  );
+
+  const rankSortStage = {
+    $sort: {
+      totalScore: -1,
+      accuracy: -1,
+      timeTakenSeconds: 1,
+    },
+  };
 
   // ✅ get sorted results
   const itemsPromise = TestAttempt.aggregate([
@@ -171,6 +183,32 @@ export const getTestLeaderboard = async (testId, query) => {
 
     addResolvedAttemptStatsStage,
     finalizeResolvedAttemptStatsStage,
+
+    // Sort attempts best-first, then keep only each student's first (= best) one.
+    rankSortStage,
+    {
+      $group: {
+        _id: "$studentId",
+        studentId: { $first: "$studentId" },
+        totalScore: { $first: "$totalScore" },
+        maxScore: { $first: "$maxScore" },
+        percentage: { $first: "$percentage" },
+        accuracy: { $first: "$accuracy" },
+        timeTakenSeconds: { $first: "$timeTakenSeconds" },
+        correctAnswersCount: { $first: "$correctAnswersCount" },
+        incorrectAnswersCount: { $first: "$incorrectAnswersCount" },
+        unattemptedCount: { $first: "$unattemptedCount" },
+        attemptedCount: { $first: "$attemptedCount" },
+        totalQuestions: { $first: "$totalQuestions" },
+      },
+    },
+
+    // $group doesn't preserve order, so re-rank the one-row-per-student results.
+    rankSortStage,
+
+    { $skip: skip },
+
+    { $limit: limit },
 
     {
       $lookup: {
@@ -183,15 +221,6 @@ export const getTestLeaderboard = async (testId, query) => {
 
     {
       $unwind: "$student",
-    },
-
-    // ✅ sorting logic
-    {
-      $sort: {
-        totalScore: -1,
-        accuracy: -1,
-        timeTakenSeconds: 1,
-      },
     },
 
     {
@@ -211,10 +240,6 @@ export const getTestLeaderboard = async (testId, query) => {
         email: "$student.email",
       },
     },
-
-    { $skip: skip },
-
-    { $limit: limit },
   ]);
 
   const [results, total] = await Promise.all([itemsPromise, totalPromise]);

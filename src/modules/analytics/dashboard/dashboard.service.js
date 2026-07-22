@@ -338,8 +338,8 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
         }
       }
     ]),
-    Test.countDocuments({ ...testFilter, status: "DRAFT" }),
-    Test.countDocuments({ ...testFilter, status: "PUBLISHED" }),
+    Test.countDocuments({ ...testFilter, isPublished: false }),
+    Test.countDocuments({ ...testFilter, isPublished: true }),
   ]);
 
   const testIds = scopedTests.map((test) => test._id);
