@@ -8,10 +8,9 @@ import { errorMiddleware } from "./common/middlewares/error.middleware.js";
 import { requestLogger } from "./common/middlewares/logger.middleware.js";
 import logger from "./config/logger.js";
 import { corsOptions } from "./config/cors.js";
-
+import newsUpdatesRoutes from "./modules/news-updates/newsUpdates.routes";
 
 const app = express();
-
 
 
 app.use(cors(corsOptions));
@@ -34,7 +33,7 @@ app.use(requestLogger);
 
 // Routes
 app.use("/api", routes);
-
+app.use("/news-updates", newsUpdatesRoutes);
 
 // Default route
 app.get("/", (req, res) => {
@@ -43,9 +42,6 @@ app.get("/", (req, res) => {
 
 // Error middleware (after routes)
 app.use(errorMiddleware);
-
-
-
 
 
 export default app;
