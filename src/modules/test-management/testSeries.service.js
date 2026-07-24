@@ -1,6 +1,7 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
 import TestSeries from "../../models/testSeries.model.js";
+import TestAssignment from "../../models/testAssignment.model.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
 
@@ -106,8 +107,8 @@ export const getSeriesList = async ({ userId, search = "" } = {}) => {
     .sort({ createdAt: -1 });
 };
 
-export const getLeaderboardSeriesList = async () => {
-  return TestSeries.aggregate([
+export const getLeaderboardSeriesList = async ({ userId = null, userRole = null } = {}) => {
+  const series = await TestSeries.aggregate([
     {
       $match: {
         "createdBy.role": { $in: creatorRoleFilter },
@@ -151,6 +152,35 @@ export const getLeaderboardSeriesList = async () => {
     },
     { $sort: { createdAt: -1 } },
   ]);
+
+  // Same reasoning as getLeaderboardTests: a student should only see a series'
+  // leaderboard if they accepted at least one test within it — otherwise every
+  // published admin/org series shows up regardless of assignment/acceptance.
+  if (userRole === "STUDENT" && userId) {
+    const seriesTestIds = series.flatMap((s) =>
+      Array.isArray(s.tests) ? s.tests.map(String) : []
+    );
+    if (!seriesTestIds.length) return [];
+
+    const assignments = await TestAssignment.find({
+      studentId: userId,
+      testId: { $in: seriesTestIds },
+    })
+      .select("testId acceptedAt status")
+      .lean();
+
+    const acceptedTestIds = new Set(
+      assignments
+        .filter((a) => a.acceptedAt && a.status !== "DECLINED")
+        .map((a) => String(a.testId))
+    );
+
+    return series.filter(
+      (s) => Array.isArray(s.tests) && s.tests.some((t) => acceptedTestIds.has(String(t)))
+    );
+  }
+
+  return series;
 };
 
 // Create a new test that belongs to a series. The test will be marked as a series test

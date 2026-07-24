@@ -3,7 +3,8 @@ import {authMiddleware} from '../../common/middlewares/auth.middleware.js';
 import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
 import {startTestAttemptController , saveAnswerController, submitAttemptController,
   getAttemptController,
-  evaluateAttemptController,getAttemptResultController,getEvaluationStatusController, updateCheatingStatusController} from '../test-attempts/testAttempt.controller.js';
+  evaluateAttemptController,getAttemptResultController,getEvaluationStatusController, updateCheatingStatusController,
+  getMyAttemptForTestController} from '../test-attempts/testAttempt.controller.js';
 import {loadAttempt  , enforceAttemptTimer} from '../test-attempts/middlewares/enforceAttemptTimer.middleware.js';
 import { validate } from '../../common/middlewares/validate.middleware.js';
 import { evaluateAttemptSchema } from './schemas/evaluateAttempt.schema.js';
@@ -33,5 +34,8 @@ router.get('/evaluation-status/:attemptId', authMiddleware, getEvaluationStatusC
 
 // ✅ Update cheating status for attempt
 router.put('/update-cheating-status/:attemptId', authMiddleware, loadAttempt, updateCheatingStatusController);
+
+// ✅ Does the current student already have a completed attempt for this test?
+router.get('/my-attempt/:testId', authMiddleware, getMyAttemptForTestController);
 
 export default router;

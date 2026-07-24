@@ -107,12 +107,17 @@ export const getAllTests = async () => {
   });
 };
 
-export const getLeaderboardTests = async () => {
-  return Test.aggregate([
+export const getLeaderboardTests = async ({ userId = null, userRole = null } = {}) => {
+  const tests = await Test.aggregate([
     {
       $match: {
         isSeriesTest: { $ne: true },
         isIQRoomTest: { $ne: true },
+        isDeleted: { $ne: 1 },
+        // A test with no attempts can't have a leaderboard yet — only show
+        // tests that are actually published (previously any DRAFT test the
+        // creator started but never published still showed up here).
+        isPublished: true,
         "createdBy.role": { $in: creatorRoleFilter },
       },
     },
@@ -157,6 +162,40 @@ export const getLeaderboardTests = async () => {
     },
     { $sort: { createdAt: -1 } },
   ]);
+
+  // `status` is only ever (re)computed when a test is created/updated/published —
+  // nothing recomputes it as real time passes, so a FIXED-schedule test whose
+  // window already ended stays frozen at whatever it was last written as (often
+  // "UPCOMING" forever). Recompute it live here instead of trusting the stale
+  // stored value.
+  const withLiveStatus = tests.map((test) => ({
+    ...test,
+    status: computeTestStatus(test),
+  }));
+
+  // A student should only be offered a leaderboard for a test they actually
+  // accepted — otherwise every published admin/org test shows up as a
+  // selectable leaderboard source regardless of whether this student was ever
+  // assigned it or chose to accept it. Admins/orgs browsing this same list to
+  // review their own tests' leaderboards are unaffected.
+  if (userRole === "STUDENT" && userId) {
+    const assignments = await TestAssignment.find({
+      studentId: userId,
+      testId: { $in: withLiveStatus.map((t) => t._id) },
+    })
+      .select("testId acceptedAt status")
+      .lean();
+
+    const acceptedTestIds = new Set(
+      assignments
+        .filter((a) => a.acceptedAt && a.status !== "DECLINED")
+        .map((a) => String(a.testId))
+    );
+
+    return withLiveStatus.filter((t) => acceptedTestIds.has(String(t._id)));
+  }
+
+  return withLiveStatus;
 };
 
 export const getMyTests = async ({ userId, search = "" }) => {

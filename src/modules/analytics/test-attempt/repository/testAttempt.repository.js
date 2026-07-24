@@ -1,4 +1,5 @@
 import TestAttempt from "../../../../models/testAttempt.model.js";
+import TestAssignment from "../../../../models/testAssignment.model.js";
 import mongoose from "mongoose";
 
 export const findAttemptsByStudent = async (studentId) => {
@@ -12,14 +13,45 @@ export const findAttemptsByStudent = async (studentId) => {
       status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
     })
       .select(
-        "testId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
+        "testId iqRoomId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
       )
       .populate({ path: 'testId', select: 'title duration totalQuestions testSeriesId totalMarks createdBy isIQRoomTest' })
       .sort({ submittedAt: -1 })
       .lean();
 
+    // IQ Room attempts have no assignment concept (no accept/decline step), so
+    // only gate normal test attempts on the student having actually accepted
+    // that test — otherwise a result can keep showing forever even after the
+    // assignment was reset to PENDING/DECLINED, since nothing else re-checks
+    // acceptance once an attempt document already exists.
+    const normalTestIds = attempts
+      .filter((a) => !a.iqRoomId)
+      .map((a) => a.testId?._id || a.testId)
+      .filter(Boolean);
+
+    const assignments = normalTestIds.length
+      ? await TestAssignment.find({
+          studentId: new mongoose.Types.ObjectId(studentId),
+          testId: { $in: normalTestIds },
+        })
+          .select("testId acceptedAt status")
+          .lean()
+      : [];
+
+    const assignmentMap = new Map(
+      assignments.map((assignment) => [String(assignment.testId), assignment])
+    );
+
+    const acceptedAttempts = attempts.filter((a) => {
+      if (a.iqRoomId) return true;
+
+      const testId = String(a.testId?._id || a.testId || "");
+      const assignment = assignmentMap.get(testId);
+      return Boolean(assignment?.acceptedAt) && assignment.status !== "DECLINED";
+    });
+
     // Map to frontend-friendly shape
-    return attempts.map((a) => {
+    return acceptedAttempts.map((a) => {
       const test = a.testId || {};
       const testName = test.title || (test.testCode ? `Test (${test.testCode})` : 'Untitled Test');
       const testType = test.testSeriesId ? 'Test Series' : 'Single Test';

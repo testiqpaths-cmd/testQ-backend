@@ -2,6 +2,7 @@ import * as service from "./testSeries.service.js";
 import logger from "../../config/logger.js";
 import mongoose from "mongoose";
 import TestSeries from "../../models/testSeries.model.js";
+import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 
 // export const createSeries = async (req, res) => {
 //   const series = await service.createSeries(req.body, req.user);
@@ -85,6 +86,10 @@ export const updateSeries = async (req, res) => {
       }
     }
 
+    broadcastAssignedTestsChanged(req.user).catch((err) =>
+      logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
+    );
+
     res.json({ success: true, data: series });
   } catch (err) {
     logger.error(`updateSeries error: ${err.message}`);
@@ -94,6 +99,9 @@ export const updateSeries = async (req, res) => {
 
 export const deleteSeries = async (req, res) => {
   await service.deleteSeries(req.params.id);
+  broadcastAssignedTestsChanged(req.user).catch((err) =>
+    logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
+  );
   res.json({ success: true });
 };
 
@@ -105,7 +113,10 @@ export const getSeries = async (req, res) => {
 export const getSeriesList = async (req, res, next) => {
   try {
     const series = req.query.leaderboard === "true"
-      ? await service.getLeaderboardSeriesList()
+      ? await service.getLeaderboardSeriesList({
+        userId: req.user?._id || req.user?.id,
+        userRole: req.user?.role,
+      })
       : await service.getSeriesList({
         userId: req.user?._id || req.user?.id,
         search: req.query.search || "",
@@ -136,6 +147,10 @@ export const createSeriesTest = async (req, res, next) => {
 
     const TestSeriesService = await import('./testSeries.service.js');
     const test = await TestSeriesService.createSeriesTest(seriesId, data, req.user);
+
+    broadcastAssignedTestsChanged(req.user).catch((err) =>
+      logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
+    );
 
     return res.status(201).json({ success: true, data: test });
   } catch (err) {

@@ -1,6 +1,7 @@
 import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
+import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 
 const canManageTest = (test, user) => {
   if (!test || !user) return false;
@@ -67,6 +68,9 @@ export async function updateTest(req, res, next) {
     }
 
     const test = await service.updateTest(req.test, req.body, req.user);
+    broadcastAssignedTestsChanged(req.user).catch((err) =>
+      logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
+    );
     res.json({ success: true, data: test });
   } catch (e) {
     next(e);
@@ -80,6 +84,9 @@ export async function deleteTest(req, res, next) {
     }
 
     await service.deleteTest(req.test);
+    broadcastAssignedTestsChanged(req.user).catch((err) =>
+      logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
+    );
     res.status(204).end();
   } catch (e) {
     next(e);
@@ -124,7 +131,7 @@ export const getAllTests = async (req, res) => {
   try {
     const userId = req.user?._id || req.user?.id;
     const tests = req.query.leaderboard === "true"
-      ? await service.getLeaderboardTests()
+      ? await service.getLeaderboardTests({ userId, userRole: req.user?.role })
       : await service.getAllTests();
 
     // Attach attemptsMade for each test (current student's perspective)
@@ -182,12 +189,29 @@ export const getAssignedTests = async (req, res) => {
 
     const enriched = await Promise.all(
       tests.map(async (test) => {
+        const testId = test.id || test._id;
         const attemptsMade = userId
-          ? await TestAttempt.countDocuments({ testId: test.id || test._id, studentId: userId })
+          ? await TestAttempt.countDocuments({ testId, studentId: userId })
           : 0;
+
+        // So the UI can link straight to this student's own result (e.g. the
+        // "Results" button, or a stale "New Test Assigned" notification click
+        // after the test's been completed) instead of a generic list/instructions
+        // page that doesn't know which attempt to show.
+        const latestAttempt = userId
+          ? await TestAttempt.findOne({
+              testId,
+              studentId: userId,
+              status: { $in: ['SUBMITTED', 'EVALUATED', 'MISSED'] },
+            })
+              .sort({ submittedAt: -1 })
+              .select('_id')
+              .lean()
+          : null;
 
         const obj = { ...test };
         obj.attemptsMade = attemptsMade;
+        obj.latestAttemptId = latestAttempt?._id || null;
 
         if (Number(obj.maxAttempts || 1) <= attemptsMade) {
           obj.status = "COMPLETED";

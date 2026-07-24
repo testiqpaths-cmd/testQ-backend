@@ -757,3 +757,38 @@ export const updateCheatingStatusController = async (req, res, next) => {
     next(err);
   }
 };
+
+// Resolves whether the current student already has a completed attempt for a
+// given test — used to redirect stale "New Test Assigned" notification/link
+// clicks to the result page instead of the instructions page once the test
+// has actually been taken.
+export const getMyAttemptForTestController = async (req, res, next) => {
+  try {
+    const { testId } = req.params;
+    const studentId = req.user?._id || req.user?.id;
+
+    if (!mongoose.Types.ObjectId.isValid(testId)) {
+      return res.status(400).json({ success: false, message: "Invalid testId" });
+    }
+
+    const attempt = await TestAttempt.findOne({
+      testId,
+      studentId,
+      status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
+    })
+      .sort({ submittedAt: -1 })
+      .select("_id status")
+      .lean();
+
+    return res.json({
+      success: true,
+      data: {
+        hasCompletedAttempt: Boolean(attempt),
+        attemptId: attempt?._id || null,
+        status: attempt?.status || null,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+};

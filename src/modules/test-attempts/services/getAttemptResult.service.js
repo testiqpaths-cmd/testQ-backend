@@ -1,11 +1,37 @@
 import TestAttempt from "../../../models/testAttempt.model.js";
 
+// A test is shared by every student assigned/attempting it — if one student
+// finishes early and can already see the correct answers, they can pass them
+// on to classmates still taking the same test, regardless of schedule type
+// (IMMEDIATE tests can absolutely have several students mid-attempt at once,
+// there's just no shared deadline forcing them to finish together).
+//
+// FIXED-schedule tests have an unambiguous "over" signal: the scheduled
+// endTime. For IMMEDIATE/DELAYED tests there's no such deadline, so instead
+// we check whether anyone else still has this test IN_PROGRESS right now —
+// once nobody does, it's safe to reveal.
+const isTestOverForEveryone = async (test, attemptId) => {
+  if (!test) return true;
+
+  if (test.scheduleType === "FIXED") {
+    if (test.status === "COMPLETED") return true;
+    return Boolean(test.endTime) && new Date() >= new Date(test.endTime);
+  }
+
+  const someoneStillAttempting = await TestAttempt.exists({
+    testId: test._id,
+    status: "IN_PROGRESS",
+    _id: { $ne: attemptId },
+  });
+  return !someoneStillAttempting;
+};
+
 export const getAttemptResult = async (attemptId) => {
   // Populate questionId but DO NOT expose correctAnswer from DB
   // We'll use snapshots for correctAnswer (point-in-time capture)
   const attempt = await TestAttempt.findById(attemptId).populate({
     path: "testId",
-    select: "title name duration totalQuestions testSeriesId createdBy totalMarks",
+    select: "title name duration totalQuestions testSeriesId createdBy totalMarks endTime scheduleType status",
     populate: {
       path: "testSeriesId",
       select: "title description",
@@ -16,6 +42,8 @@ export const getAttemptResult = async (attemptId) => {
   });
 
   if (!attempt) return null;
+
+  const isTestOver = await isTestOverForEveryone(attempt.testId, attempt._id);
 
   // ✅ Enrich answers with correctAnswer from questionSnapshots
   const snapshotMap = new Map(
@@ -116,12 +144,61 @@ export const getAttemptResult = async (attemptId) => {
     accuracy: st.total > 0 ? Math.round((st.correct / st.total) * 100) : 0,
   }));
 
+  // Aggregate counts are safe to expose even while locked — knowing "you got
+  // 6/10 correct" doesn't tell you (or anyone you might tell) WHICH question
+  // or WHAT the correct answer was, unlike the per-question fields below.
+  const correctCount = perQuestion.filter((q) => q.isCorrect === true).length;
+  const incorrectCount = perQuestion.filter((q) => q.isCorrect === false).length;
+  const unattemptedCount = perQuestion.filter((q) => q.isCorrect === null).length;
+
+  // While the test is still open for other students, strip everything that
+  // could reveal or imply the correct answer: the question text/options, the
+  // correct answer itself, whether this attempt got it right, and the marks
+  // awarded (full marks on an MCQ is itself a giveaway that the selected
+  // option was correct).
+  const perQuestionForResponse = isTestOver
+    ? perQuestion
+    : perQuestion.map((q) => ({
+        questionId: q.questionId,
+        questionText: null,
+        selected: null,
+        correctAnswer: null,
+        isCorrect: null,
+        marks: q.marks,
+        marksObtained: null,
+        timeSpentMs: q.timeSpentMs,
+        locked: true,
+      }));
+
+  if (!isTestOver) {
+    attemptObj.answers = (attemptObj.answers || []).map((a) => ({
+      ...a,
+      // `questionId` was populated with the real questionText/options — strip
+      // it back down to a bare id rather than leaving the populated subdoc in
+      // the response.
+      questionId: a.questionId?._id || a.questionId,
+      selectedOption: null,
+      textAnswer: null,
+      isCorrect: null,
+      marksObtained: null,
+    }));
+    attemptObj.questionSnapshots = (attemptObj.questionSnapshots || []).map((s) => ({
+      ...s,
+      questionText: null,
+      options: null,
+      correctAnswer: null,
+    }));
+  }
+
   const analysis = {
     totalQuestions,
     totalScore,
     maxScore,
     percentage,
-    perQuestion,
+    correctCount,
+    incorrectCount,
+    unattemptedCount,
+    perQuestion: perQuestionForResponse,
     topicBreakdown,
     submittedAt: attemptObj.submittedAt,
     evaluatedAt: attemptObj.evaluatedAt,
@@ -131,5 +208,6 @@ export const getAttemptResult = async (attemptId) => {
   return {
     attempt: attemptObj,
     analysis,
+    isTestOver,
   };
 };
