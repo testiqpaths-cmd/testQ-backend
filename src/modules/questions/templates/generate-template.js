@@ -30,7 +30,8 @@ export const generateQuestionTemplate = async () => {
       'type',
       'options',
       'correctAnswer',
-      'difficulty'
+      'difficulty',
+      'imageUrl'
     ];
 
     // Add headers
@@ -52,18 +53,19 @@ export const generateQuestionTemplate = async () => {
       { width: 15 },  // type (MCQ, TRUE_FALSE, SHORT, LONG)
       { width: 25 },  // options (pipe-separated)
       { width: 15 },  // correctAnswer
-      { width: 15 }   // difficulty
+      { width: 15 },  // difficulty
+      { width: 40 }   // imageUrl (optional)
     ];
 
     // Add sample rows with different question types
     const sampleQuestions = [
-      ['Mathematics', 'Algebra', 'What is 2 + 2?', 'MCQ', '1|2|3|4', '4', 'EASY'],
-      ['Science', 'Physics', 'The earth revolves around the sun', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'MEDIUM'],
-      ['Mathematics', 'Arithmetic', 'What is the sum of 5 + 6 + 7 + 8?', 'MCQ', '25|26|27|28', '26', 'EASY'],
-      ['Science', 'Chemistry', 'Water boils at 100 degrees Celsius', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'EASY'],
-      ['English', 'Vocabulary', 'Synonym of Happy', 'MCQ', 'Sad|Joyful|Angry|Depressed', 'Joyful', 'EASY'],
-      ['Mathematics', 'Geometry', 'Number of sides in a square', 'MCQ', '2|3|4|5', '4', 'EASY'],
-      ['Science', 'Biology', 'Humans breathe oxygen', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'EASY']
+      ['Mathematics', 'Algebra', 'What is 2 + 2?', 'MCQ', '1|2|3|4', '4', 'EASY', ''],
+      ['Science', 'Physics', 'The earth revolves around the sun', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'MEDIUM', ''],
+      ['Mathematics', 'Arithmetic', 'What is the sum of 5 + 6 + 7 + 8?', 'MCQ', '25|26|27|28', '26', 'EASY', ''],
+      ['Science', 'Chemistry', 'Water boils at 100 degrees Celsius', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'EASY', ''],
+      ['English', 'Vocabulary', 'Synonym of Happy', 'MCQ', 'Sad|Joyful|Angry|Depressed', 'Joyful', 'EASY', ''],
+      ['Mathematics', 'Geometry', 'Number of sides in a square (see image)', 'MCQ', '2|3|4|5', '4', 'EASY', 'https://example.com/images/square.png'],
+      ['Science', 'Biology', 'Humans breathe oxygen', 'TRUE_FALSE', 'TRUE|FALSE', 'TRUE', 'EASY', '']
     ];
 
     sampleQuestions.forEach(question => {
@@ -85,15 +87,17 @@ export const generateQuestionTemplate = async () => {
       ['options', 'Pipe-separated options (e.g., "1|2|3|4" or "TRUE|FALSE").'],
       ['correctAnswer', 'The correct answer value (e.g., "4" for MCQ, "TRUE" for TRUE_FALSE)'],
       ['difficulty', 'EASY, MEDIUM, or HARD'],
+      ['imageUrl', 'Optional. A direct link to an image (e.g., a diagram) to show below the question text. Leave blank if not needed.'],
       [],
       ['Important Notes:'],
-      ['- All fields are required'],
+      ['- All fields are required except imageUrl'],
       ['- questionText must not be empty'],
       ['- options should be pipe-separated (|) with no spaces'],
       ['- correctAnswer must match one of the provided options exactly'],
       ['- For TRUE_FALSE type, use "TRUE" or "FALSE" in options'],
       ['- For SHORT/LONG types, leave options empty and put the expected answer in correctAnswer'],
-      ['- difficulty should be EASY, MEDIUM, or HARD']
+      ['- difficulty should be EASY, MEDIUM, or HARD'],
+      ['- imageUrl must be a direct, publicly accessible image link (e.g. ending in .png/.jpg) if provided']
     ];
 
     instructions.forEach((row, index) => {

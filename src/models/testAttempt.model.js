@@ -63,6 +63,10 @@ const testAttemptSchema = new mongoose.Schema(
           type: String,
           default: null,
         },
+        imageUrl: {
+          type: String,
+          default: null,
+        },
         marks: {
           type: Number,
           default: 0,

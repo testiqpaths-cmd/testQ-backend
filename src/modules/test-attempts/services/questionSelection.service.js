@@ -61,6 +61,7 @@ const toSafeQuestion = (question, order) => ({
         text: option,
       }))
     : [],
+  image: question.imageUrl ?? null,
   order,
 });
 
@@ -69,7 +70,7 @@ export const selectAttemptQuestions = async (test) => {
   const desiredCount = Math.max(1, Number(test.totalQuestions) || 0);
 
   const questions = await Question.find(filters)
-    .select("_id questionText type options correctAnswer")
+    .select("_id questionText type options correctAnswer imageUrl")
     .lean();
 
   const selectedQuestions = shuffle(questions).slice(0, Math.min(desiredCount, questions.length));
@@ -83,6 +84,7 @@ export const selectAttemptQuestions = async (test) => {
     type: question.type,
     options: Array.isArray(question.options) ? question.options : [],
     correctAnswer: question.correctAnswer ?? null,
+    imageUrl: question.imageUrl ?? null,
     marks: marksPerQuestion,
     order: index,
     startedAt: null,
@@ -110,5 +112,6 @@ export const normalizeAttemptQuestion = (snapshot) => ({
         text: option,
       }))
     : [],
+  image: snapshot.imageUrl ?? null,
   order: snapshot.order ?? 0,
 });

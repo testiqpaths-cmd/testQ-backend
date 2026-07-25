@@ -1,10 +1,26 @@
 // src/modules/testAttempts/middlewares/enforceAttemptTimer.middleware.js
 import TestAttempt from "../../../models/testAttempt.model.js";
+import UserModel from "../../../models/user.model.js";
 import { computeAttemptTiming } from "../utils/attemptTimer.util.js";
 import {
   autoExpireAttempt,
   checkAttemptExpiry,
 } from "../services/attemptTimer.service.js";
+
+// ORGANIZATION callers may only touch attempts belonging to their own
+// org's students — used to be "ADMIN / ORG for any attempt", which let any
+// org account read or (via manualevaluate) mutate another org's student's
+// in-progress/submitted attempt.
+const isOwnOrgStudent = async (requester, studentId) => {
+  let orgId = requester.organizationId || null;
+  if (!orgId) {
+    const dbUser = await UserModel.findById(requester._id).select("organizationId").lean();
+    orgId = dbUser?.organizationId ?? null;
+  }
+  if (!orgId) return false;
+  const student = await UserModel.findById(studentId).select("organizationId").lean();
+  return Boolean(student?.organizationId && String(student.organizationId) === String(orgId));
+};
 
 /**
  * Load attempt from database
@@ -54,15 +70,20 @@ export const loadAttempt = async (req, res, next) => {
       });
     }
 
-    // ✅ Allow student only for own attempt
-    // ✅ Allow ADMIN / ORG for any attempt
-    if (
-      userRole === "STUDENT" &&
-      attempt.studentId.toString() !== userId.toString()
-    ) {
+    // ✅ Student: only their own attempt.
+    // ✅ IQPATH_ADMIN: any attempt.
+    // ✅ ORGANIZATION: only attempts belonging to their own org's students.
+    if (userRole === "STUDENT" && attempt.studentId.toString() !== userId.toString()) {
       return res.status(403).json({
         success: false,
         message: "Unauthorized: This is not your attempt",
+      });
+    }
+
+    if (userRole === "ORGANIZATION" && !(await isOwnOrgStudent(req.user, attempt.studentId))) {
+      return res.status(403).json({
+        success: false,
+        message: "Unauthorized: This attempt does not belong to your organization",
       });
     }
 

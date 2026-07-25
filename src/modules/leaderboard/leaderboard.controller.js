@@ -5,7 +5,8 @@ export const getTestLeaderboard = async (req, res, next) => {
   try {
     const data = await leaderboardService.getTestLeaderboard(
       req.params.testId,
-      req.query
+      req.query,
+      req.user
     );
 
     res.json({
@@ -23,7 +24,8 @@ export const getSeriesLeaderboard = async (req, res, next) => {
   try {
     const data = await leaderboardService.getSeriesLeaderboard(
       req.params.seriesId,
-      req.query
+      req.query,
+      req.user
     );
 
     res.json({

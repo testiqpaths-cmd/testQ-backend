@@ -96,8 +96,8 @@ export const register = async (userData) => {
 
       return {
         user,
-        accessToken: generateAccessToken({ id: user._id, role: user.role }),
-        refreshToken: generateRefreshToken({ id: user._id, role: user.role }),
+        accessToken: generateAccessToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
+        refreshToken: generateRefreshToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
       };
     } else {
       throw new AuthError("User already exists");
@@ -133,8 +133,8 @@ export const register = async (userData) => {
 
   return {
     user,
-    accessToken: generateAccessToken({ id: user._id, role: user.role }),
-    refreshToken: generateRefreshToken({ id: user._id, role: user.role }),
+    accessToken: generateAccessToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
+    refreshToken: generateRefreshToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
   };
 };
 
@@ -189,8 +189,8 @@ export const login = async ({ email, password }) => {
 
   return {
     user,
-    accessToken: generateAccessToken({ id: user._id, role: user.role }),
-    refreshToken: generateRefreshToken({ id: user._id, role: user.role }),
+    accessToken: generateAccessToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
+    refreshToken: generateRefreshToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
   };
 };
 
@@ -228,6 +228,13 @@ export const firebaseAuth = async ({
       },
       { new: true, includeDeleted: true }
     );
+  }
+
+  // Organizations are provisioned by an admin with an email/password login
+  // only — block Firebase before the "found by email" branch below, which
+  // would otherwise unconditionally overwrite this account's role to STUDENT.
+  if (user && user.role === "ORGANIZATION") {
+    throw new AuthError("Organizations must log in with email & password, not Google or GitHub.");
   }
 
   if (!user) {
@@ -321,8 +328,8 @@ export const firebaseAuth = async ({
     throw new AuthError("Your account is blocked. Please contact admin.");
   }
 
-  const accessToken = generateAccessToken({ id: user._id, role: user.role });
-  const refreshToken = generateRefreshToken({ id: user._id, role: user.role });
+  const accessToken = generateAccessToken({ id: user._id, role: user.role, organizationId: user.organizationId });
+  const refreshToken = generateRefreshToken({ id: user._id, role: user.role, organizationId: user.organizationId });
 
   return { user, accessToken, refreshToken, photoURL };
 };
@@ -405,6 +412,11 @@ export const githubAuth = async (code) => {
     );
   }
 
+  // Organizations are provisioned by an admin with an email/password login only.
+  if (user && user.role === "ORGANIZATION") {
+    throw new AuthError("Organizations must log in with email & password, not Google or GitHub.");
+  }
+
   if (!user) {
     const displayName = profile.name || profile.login || "GitHub User";
     const [derivedFirstName = "Student", ...rest] = displayName.trim().split(" ");
@@ -452,11 +464,13 @@ export const githubAuth = async (code) => {
 
   const accessToken = generateAccessToken({
     id: user._id,
-    role: user.role
+    role: user.role,
+    organizationId: user.organizationId
   });
   const refreshToken = generateRefreshToken({
     id: user._id,
-    role: user.role
+    role: user.role,
+    organizationId: user.organizationId
   });
 
   return {

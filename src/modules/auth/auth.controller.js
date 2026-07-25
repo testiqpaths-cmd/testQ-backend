@@ -171,10 +171,12 @@ export const refreshTokenController = async (req, res) => {
     const newAccessToken = generateAccessToken({
       id: user._id,
       role: user.role,
+      organizationId: user.organizationId,
     });
     const newRefreshToken = generateRefreshToken({
       id: user._id,
       role: user.role,
+      organizationId: user.organizationId,
     });
 
     res

@@ -28,6 +28,47 @@ import sendEmail from "../../config/email.js";
 import { loginTemplate } from "../../template/login.template.js";
 import env from "../../config/env.js";
 
+// Resolve the requester's own organizationId, falling back to a DB lookup
+// for tokens issued before organizationId was embedded in the JWT payload.
+const resolveRequesterOrgId = async (req) => {
+	if (req.user?.organizationId) return String(req.user.organizationId);
+	const dbUser = await getUserById(req.user._id);
+	return dbUser?.organizationId ? String(dbUser.organizationId._id || dbUser.organizationId) : null;
+};
+
+// A caller may access a given target user record only if: they are a
+// platform admin, the record is their own, or they are the ORGANIZATION
+// account that the target STUDENT is registered under. This is the single
+// place that enforces org-to-org data isolation for the generic/student
+// by-id endpoints below — every GET/PUT/DELETE on a specific user must run
+// through it before touching the record.
+const assertUserAccess = async (req, res, targetUser) => {
+	if (!targetUser) {
+		res.status(404).json({ success: false, message: "User not found" });
+		return false;
+	}
+	if (req.user.role === "IQPATH_ADMIN") return true;
+	if (String(req.user._id) === String(targetUser._id)) return true;
+	if (req.user.role === "ORGANIZATION" && targetUser.role === "STUDENT") {
+		const requesterOrgId = await resolveRequesterOrgId(req);
+		const targetOrgId = targetUser.organizationId
+			? String(targetUser.organizationId._id || targetUser.organizationId)
+			: null;
+		if (requesterOrgId && targetOrgId && requesterOrgId === targetOrgId) return true;
+	}
+	res.status(403).json({ success: false, message: "Forbidden" });
+	return false;
+};
+
+// Fields only IQPATH_ADMIN may set via update — otherwise a self-edit or an
+// org editing "their" student could escalate role or move the record into a
+// different organization's scope.
+const stripPrivilegedFields = (updates, requesterRole) => {
+	if (requesterRole === "IQPATH_ADMIN") return updates;
+	const { role, organizationId, isDeleted, deletedAt, deletedBy, ...safeUpdates } = updates || {};
+	return safeUpdates;
+};
+
 const sendWelcomeEmail = async (user, password) => {
 	if (!user?.email) return;
 	const loginUrl = (env.CORS_ORIGIN || "http://localhost:5173") + "/login";
@@ -82,7 +123,7 @@ export const listUsersController = async (req, res) => {
 export const getUserController = async (req, res) => {
 	const { id } = req.params;
 	const user = await getUserById(id);
-	if (!user) return res.status(404).json({ success: false, message: "User not found" });
+	if (!(await assertUserAccess(req, res, user))) return;
 
 	const data = { ...user };
 
@@ -123,13 +164,19 @@ export const getUserController = async (req, res) => {
 
 export const updateUserController = async (req, res) => {
 	const { id } = req.params;
-	const updates = req.body;
+	const target = await getUserById(id);
+	if (!(await assertUserAccess(req, res, target))) return;
+
+	const updates = stripPrivilegedFields(req.body, req.user.role);
 	const user = await updateUser(id, updates);
 	res.json({ success: true, user });
 };
 
 export const deleteUserController = async (req, res) => {
 	const { id } = req.params;
+	const target = await getUserById(id);
+	if (!(await assertUserAccess(req, res, target))) return;
+
 	await softDeleteUser(id, req.user ? req.user._id : null);
 	res.json({ success: true, message: "User deleted" });
 };
@@ -200,17 +247,27 @@ export const getStudentController = async (req, res) => {
 	const { id } = req.params;
 	const user = await getUserById(id);
 	if (!user || user.role !== "STUDENT") return res.status(404).json({ success: false, message: "Student not found" });
+	if (!(await assertUserAccess(req, res, user))) return;
 	res.json({ success: true, user });
 };
 
 export const updateStudentController = async (req, res) => {
 	const { id } = req.params;
-	const user = await updateUser(id, req.body);
+	const target = await getUserById(id);
+	if (!target || target.role !== "STUDENT") return res.status(404).json({ success: false, message: "Student not found" });
+	if (!(await assertUserAccess(req, res, target))) return;
+
+	const updates = stripPrivilegedFields(req.body, req.user.role);
+	const user = await updateUser(id, updates);
 	res.json({ success: true, user });
 };
 
 export const deleteStudentController = async (req, res) => {
 	const { id } = req.params;
+	const target = await getUserById(id);
+	if (!target || target.role !== "STUDENT") return res.status(404).json({ success: false, message: "Student not found" });
+	if (!(await assertUserAccess(req, res, target))) return;
+
 	await softDeleteUser(id, req.user ? req.user._id : null);
 	res.json({ success: true, message: "Student deleted" });
 };

@@ -1,7 +1,30 @@
 import mongoose from "mongoose";
 import TestAttempt from "../../models/testAttempt.model.js";
 import TestSeries from "../../models/testSeries.model.js";
+import UserModel from "../../models/user.model.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
+
+// An ORGANIZATION-role caller must only ever see their own students on a
+// leaderboard — without this, any org account could read another org's
+// students' names/emails/scores for a shared/public test by just hitting
+// this endpoint with that test's id. STUDENT/IQPATH_ADMIN callers are
+// unaffected (a leaderboard is expected to show every participant to the
+// students taking the same test, and admins need full visibility).
+const restrictMatchToRequesterOrgStudents = async (matchStage, requester) => {
+  if (!requester || requester.role !== "ORGANIZATION") return matchStage;
+
+  let orgId = requester.organizationId || null;
+  if (!orgId) {
+    const dbUser = await UserModel.findById(requester._id).select("organizationId").lean();
+    orgId = dbUser?.organizationId ?? null;
+  }
+  if (!orgId) return { ...matchStage, studentId: { $in: [] } };
+
+  const orgStudentIds = await UserModel.find({ role: "STUDENT", organizationId: orgId, isDeleted: false })
+    .distinct("_id");
+
+  return { ...matchStage, studentId: { $in: orgStudentIds } };
+};
 
 const buildStudentName = {
   $trim: {
@@ -152,16 +175,17 @@ const finalizeResolvedAttemptStatsStage = {
 };
 
 // 🧪 TEST leaderboard
-export const getTestLeaderboard = async (testId, query) => {
+export const getTestLeaderboard = async (testId, query, requester) => {
   if (!mongoose.Types.ObjectId.isValid(testId)) {
     throw new ApiError(400, "Invalid testId");
   }
 
   const { page, limit, skip } = normalizePageAndLimit(query);
-  const matchStage = {
+  let matchStage = {
     testId: new mongoose.Types.ObjectId(testId),
     status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
   };
+  matchStage = await restrictMatchToRequesterOrgStudents(matchStage, requester);
 
   // Rank by distinct students, not attempts — a student with multiple attempts
   // should occupy one leaderboard row (their best attempt), not one row each.
@@ -262,7 +286,7 @@ export const getTestLeaderboard = async (testId, query) => {
 };
 
 // 📚 SERIES leaderboard
-export const getSeriesLeaderboard = async (seriesId, query) => {
+export const getSeriesLeaderboard = async (seriesId, query, requester) => {
   if (!mongoose.Types.ObjectId.isValid(seriesId)) {
     throw new ApiError(400, "Invalid seriesId");
   }
@@ -279,12 +303,13 @@ export const getSeriesLeaderboard = async (seriesId, query) => {
 
   const testIds = series.tests;
 
-  const matchStage = {
+  let matchStage = {
     testId: {
       $in: testIds.map((id) => new mongoose.Types.ObjectId(id)),
     },
     status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
   };
+  matchStage = await restrictMatchToRequesterOrgStudents(matchStage, requester);
 
   const totalPromise = TestAttempt.aggregate([
     { $match: matchStage },

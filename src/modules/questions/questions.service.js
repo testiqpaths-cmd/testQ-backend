@@ -2,6 +2,8 @@ import XLSX from "xlsx";
 import mongoose from "mongoose";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import Question from "../../models/question.model.js";
+import UserModel from "../../models/user.model.js";
+import { uploadBufferToCloudinary } from "../../common/utils/cloudinary.js";
 import { validateQuestion } from "./questions.validator.js";
 import {
   createQuestionRepo,
@@ -45,18 +47,51 @@ export const createQuestionService = async (payload) => {
   return createQuestionRepo(payload);
 };
 
-export const updateQuestionService = async (id, payload) => {
+// An ORGANIZATION-role caller may only edit/delete questions authored by
+// someone in their own organization — otherwise any org could edit or
+// delete another org's (or admin's) question bank entries just by knowing
+// the id. IQPATH_ADMIN retains full access.
+const assertQuestionAccess = async (id, requester) => {
+  const question = await getQuestionByIdRepo(id);
+  if (!question) {
+    throw new ApiError(404, "Question not found");
+  }
+  if (!requester || requester.role === "IQPATH_ADMIN") return question;
+
+  if (requester.role === "ORGANIZATION") {
+    const authorIds = await resolveOwnOrgQuestionAuthorIds(requester);
+    const authorId = question.createdBy?._id || question.createdBy;
+    if (authorId && authorIds.some((authorIdInOrg) => String(authorIdInOrg) === String(authorId))) {
+      return question;
+    }
+  }
+
+  throw new ApiError(403, "Forbidden");
+};
+
+export const updateQuestionService = async (id, payload, requester = null) => {
   const errors = validateQuestion(payload);
 
   if (errors.length) {
     throw new ApiError(400, errors.join(", "));
   }
 
+  await assertQuestionAccess(id, requester);
   return updateQuestionRepo(id, payload);
 };
 
-export const deleteQuestionService = async (id) => {
+export const deleteQuestionService = async (id, requester = null) => {
+  await assertQuestionAccess(id, requester);
   return deleteQuestionRepo(id);
+};
+
+export const uploadQuestionImageService = async (file) => {
+  try {
+    const result = await uploadBufferToCloudinary(file.buffer, file.mimetype, "question-images");
+    return result.secure_url;
+  } catch (error) {
+    throw new ApiError(502, `Image upload failed: ${error.message}`);
+  }
 };
 
 export const bulkUploadQuestionsService = async (questions, user = null) => {
@@ -165,6 +200,9 @@ export const uploadQuestionsExcelService = async ({
       ]),
       options,
     });
+    const imageUrl = normalizeText(
+      read(["imageUrl", "Image URL", "image", "Image", "Image Link"])
+    ) || null;
 
     const rowNumber = index + 2;
     const missingFields = [];
@@ -201,6 +239,7 @@ export const uploadQuestionsExcelService = async ({
       options,
       correctAnswer,
       difficulty,
+      imageUrl,
       excelBatchId: batchMeta.excelBatchId,
       excelBatchName: batchMeta.excelBatchName,
     });
@@ -348,13 +387,28 @@ export const getQuestionsByExcelBatchService = async ({ userId, batchId, quantit
   return query;
 };
 
-export const getAllQuestionsService = async (query = {}) => {
+// The Question schema has no organizationId field — an organization's
+// question authorship can only be recovered by joining createdBy -> the
+// creator's own User.organizationId. Used to scope the "Questions" page
+// (mine=true) to only this organization's own uploaded/created questions,
+// without touching test-creation's question-picker, which must keep
+// drawing from the full shared bank.
+const resolveOwnOrgQuestionAuthorIds = async (requester) => {
+  let orgId = requester.organizationId || null;
+  if (!orgId) {
+    const dbUser = await UserModel.findById(requester._id).select("organizationId").lean();
+    orgId = dbUser?.organizationId ?? null;
+  }
+  if (!orgId) return [];
+  return UserModel.find({ organizationId: orgId }).distinct("_id");
+};
+
+export const getAllQuestionsService = async (query = {}, requester = null) => {
   const {
     subjectId,
     topicId,
     type,
     difficulty,
-    organizationId,
     page = 1,
     limit,
     quantity,
@@ -371,7 +425,14 @@ export const getAllQuestionsService = async (query = {}) => {
   if (topicIds.length > 1) filters.topicId = { $in: topicIds };
   if (type) filters.type = type;
   if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
-  if (organizationId) filters.organizationId = organizationId;
+
+  // Only the "Questions" management page sends mine=true — test creation's
+  // question picker calls this same endpoint without it and must keep
+  // seeing the full shared bank.
+  if (String(query.mine) === "true" && requester?.role === "ORGANIZATION") {
+    const authorIds = await resolveOwnOrgQuestionAuthorIds(requester);
+    filters.createdBy = { $in: authorIds };
+  }
 
   const pageNum = Math.max(1, Number(page));
   const resolvedLimit = limit ?? quantity ?? 10;

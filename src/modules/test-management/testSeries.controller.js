@@ -3,6 +3,16 @@ import logger from "../../config/logger.js";
 import mongoose from "mongoose";
 import TestSeries from "../../models/testSeries.model.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
+import UserModel from "../../models/user.model.js";
+
+// Fall back to a DB lookup for tokens issued before organizationId was
+// embedded in the JWT payload.
+const resolveOrganizationId = async (user) => {
+  if (!user) return null;
+  if (user.organizationId) return user.organizationId;
+  const dbUser = await UserModel.findById(user._id || user.id).select("organizationId").lean();
+  return dbUser?.organizationId ?? null;
+};
 
 // export const createSeries = async (req, res) => {
 //   const series = await service.createSeries(req.body, req.user);
@@ -116,6 +126,7 @@ export const getSeriesList = async (req, res, next) => {
       ? await service.getLeaderboardSeriesList({
         userId: req.user?._id || req.user?.id,
         userRole: req.user?.role,
+        userOrganizationId: req.user?.role === "ORGANIZATION" ? await resolveOrganizationId(req.user) : null,
       })
       : await service.getSeriesList({
         userId: req.user?._id || req.user?.id,

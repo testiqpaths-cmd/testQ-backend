@@ -107,7 +107,7 @@ export const getAllTests = async () => {
   });
 };
 
-export const getLeaderboardTests = async ({ userId = null, userRole = null } = {}) => {
+export const getLeaderboardTests = async ({ userId = null, userRole = null, userOrganizationId = null } = {}) => {
   const tests = await Test.aggregate([
     {
       $match: {
@@ -193,6 +193,28 @@ export const getLeaderboardTests = async ({ userId = null, userRole = null } = {
     );
 
     return withLiveStatus.filter((t) => acceptedTestIds.has(String(t._id)));
+  }
+
+  // An organization should only see its own tests' leaderboards, plus any
+  // admin-created test that specifically targeted this org (ORG_ONLY +
+  // allowedOrganizations includes them) — NOT every other org's tests, and
+  // NOT an admin's PUBLIC test just because this org's students happen to be
+  // able to take it.
+  if (userRole === "ORGANIZATION") {
+    const orgId = userOrganizationId ? String(userOrganizationId) : null;
+    if (!orgId) return [];
+
+    return withLiveStatus.filter((t) => {
+      const creatorOrgId = t.creatorUser?.organizationId ? String(t.creatorUser.organizationId) : null;
+      const isOwnTest = creatorOrgId === orgId;
+      const isAdminTestTargetingUs =
+        t.createdBy?.role === "IQPATH_ADMIN" &&
+        t.visibility === "ORG_ONLY" &&
+        Array.isArray(t.allowedOrganizations) &&
+        t.allowedOrganizations.some((id) => String(id) === orgId);
+
+      return isOwnTest || isAdminTestTargetingUs;
+    });
   }
 
   return withLiveStatus;

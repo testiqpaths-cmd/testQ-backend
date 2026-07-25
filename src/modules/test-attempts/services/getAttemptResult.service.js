@@ -38,7 +38,7 @@ export const getAttemptResult = async (attemptId) => {
     },
   }).populate({
     path: "answers.questionId",
-    select: "questionText type options topic subTopic", // ✅ no correctAnswer
+    select: "questionText type options topic subTopic imageUrl", // ✅ no correctAnswer
   });
 
   if (!attempt) return null;
@@ -54,6 +54,7 @@ export const getAttemptResult = async (attemptId) => {
         questionText: s.questionText,
         options: s.options,
         marks: s.marks,
+        imageUrl: s.imageUrl,
       },
     ])
   );
@@ -96,6 +97,7 @@ export const getAttemptResult = async (attemptId) => {
     return {
       questionId: qId,
       questionText: snapshot.questionText || a.questionId.questionText || '',
+      imageUrl: snapshot.imageUrl ?? a.questionId.imageUrl ?? null,
       selected: a.selectedOption ?? a.textAnswer ?? null,
       correctAnswer: snapshot.correctAnswer ?? null,
       isCorrect: a.isCorrect ?? correct,
@@ -161,6 +163,7 @@ export const getAttemptResult = async (attemptId) => {
     : perQuestion.map((q) => ({
         questionId: q.questionId,
         questionText: null,
+        imageUrl: null,
         selected: null,
         correctAnswer: null,
         isCorrect: null,
@@ -187,6 +190,7 @@ export const getAttemptResult = async (attemptId) => {
       questionText: null,
       options: null,
       correctAnswer: null,
+      imageUrl: null,
     }));
   }
 

@@ -1,8 +1,9 @@
-import { 
-  getStudentDashboardData, 
-  getAdminDashboardData, 
-  getOrganizationDashboardData 
+import {
+  getStudentDashboardData,
+  getAdminDashboardData,
+  getOrganizationDashboardData
 } from "./dashboard.service.js";
+import UserModel from "../../../models/user.model.js";
 
 export const getStudentDashboardController = async (req, res, next) => {
   try {
@@ -42,7 +43,15 @@ export const getAdminDashboardController = async (req, res, next) => {
 
 export const getOrganizationDashboardController = async (req, res, next) => {
   try {
-    const orgId = req.user.organizationId;
+    // Fall back to a DB lookup for tokens issued before organizationId was
+    // embedded in the JWT payload — without this, orgId is silently null and
+    // every "own org" filter downstream (student count, etc.) drops out,
+    // returning platform-wide totals instead of this organization's data.
+    let orgId = req.user.organizationId || null;
+    if (!orgId) {
+      const dbUser = await UserModel.findById(req.user._id).select("organizationId").lean();
+      orgId = dbUser?.organizationId ?? null;
+    }
     const adminUserId = req.user._id;
     const dashboardData = await getOrganizationDashboardData(orgId, adminUserId);
     return res.status(200).json({

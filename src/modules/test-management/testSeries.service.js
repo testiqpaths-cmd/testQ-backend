@@ -107,7 +107,7 @@ export const getSeriesList = async ({ userId, search = "" } = {}) => {
     .sort({ createdAt: -1 });
 };
 
-export const getLeaderboardSeriesList = async ({ userId = null, userRole = null } = {}) => {
+export const getLeaderboardSeriesList = async ({ userId = null, userRole = null, userOrganizationId = null } = {}) => {
   const series = await TestSeries.aggregate([
     {
       $match: {
@@ -178,6 +178,27 @@ export const getLeaderboardSeriesList = async ({ userId = null, userRole = null 
     return series.filter(
       (s) => Array.isArray(s.tests) && s.tests.some((t) => acceptedTestIds.has(String(t)))
     );
+  }
+
+  // Same reasoning as getLeaderboardTests: an organization should only see
+  // its own series' leaderboards, plus any admin-created series that
+  // specifically targeted this org — not every other org's series, and not
+  // an admin's PUBLIC series just because it's technically open.
+  if (userRole === "ORGANIZATION") {
+    const orgId = userOrganizationId ? String(userOrganizationId) : null;
+    if (!orgId) return [];
+
+    return series.filter((s) => {
+      const creatorOrgId = s.creatorUser?.organizationId ? String(s.creatorUser.organizationId) : null;
+      const isOwnSeries = creatorOrgId === orgId;
+      const isAdminSeriesTargetingUs =
+        s.createdBy?.role === "IQPATH_ADMIN" &&
+        s.visibility === "ORG_ONLY" &&
+        Array.isArray(s.allowedOrganizations) &&
+        s.allowedOrganizations.some((id) => String(id) === orgId);
+
+      return isOwnSeries || isAdminSeriesTargetingUs;
+    });
   }
 
   return series;

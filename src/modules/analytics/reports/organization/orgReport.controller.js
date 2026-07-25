@@ -1,10 +1,23 @@
 import { generateOrgReportService } from "./orgReport.service.js";
+import { getUserById } from "../../../user/user.service.js";
 
 export const generateOrgReport = async (req, res, next) => {
   try {
     // ✅ Extract format and orgId
     const format = req.query.format?.toLowerCase().trim();
     const orgId = req.params.orgId; // comes from route param
+
+    // This route is ORGANIZATION-role only (see orgReport.routes.js) — without
+    // this check, any org account could download any other org's full
+    // student report just by changing orgId in the URL.
+    let requesterOrgId = req.user?.organizationId ? String(req.user.organizationId) : null;
+    if (!requesterOrgId) {
+      const dbUser = await getUserById(req.user._id);
+      requesterOrgId = dbUser?.organizationId ? String(dbUser.organizationId._id || dbUser.organizationId) : null;
+    }
+    if (!requesterOrgId || requesterOrgId !== String(orgId)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
 
     // ✅ Validate format
     if (!format || !["pdf", "excel"].includes(format)) {

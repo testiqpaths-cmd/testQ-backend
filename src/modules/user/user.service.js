@@ -6,11 +6,20 @@ import UserSubscription from "../subscription/models/UserSubscription.model.js";
 import sendEmail from "../../config/email.js";
 import { loginTemplate } from "../../template/login.template.js";
 import env from "../../config/env.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
 
 const hashPassword = async (password) => {
 	if (!password) return undefined;
+	// Must match login()'s normalizeRequiredString (auth.service.js), which
+	// trims the password before bcrypt.compare. Without trimming here too,
+	// any accidental leading/trailing whitespace (very easy to introduce via
+	// copy-paste, which is how an admin is likely to enter a generated
+	// password when creating an organization/user account) gets baked into
+	// the hash but stripped at login — a guaranteed "Invalid credentials"
+	// even with the "same" password.
+	const trimmed = String(password).trim();
 	const salt = await bcrypt.genSalt(10);
-	return bcrypt.hash(password, salt);
+	return bcrypt.hash(trimmed, salt);
 };
 
 const generateOrganizationCode = (name = "ORG") => {
@@ -30,7 +39,10 @@ export const createUser = async (payload) => {
 };
 
 export const getUserById = async (id) => {
-	return UserModel.findById(id).where({ isDeleted: false }).lean();
+	return UserModel.findById(id)
+		.where({ isDeleted: false })
+		.populate("organizationId", "name")
+		.lean();
 };
 
 export const listUsers = async (query = {}) => {
@@ -49,7 +61,11 @@ export const listUsers = async (query = {}) => {
 		q._id = { $in: subs.map((sub) => sub.userId) };
 	}
 
-	const users = await UserModel.find(q).lean();
+	// Populate the organization's own name — for ORGANIZATION-role users, the
+	// User document's firstName is the contact person's name, not the
+	// organization's name, and the frontend list falls back to that name
+	// whenever organizationId isn't populated with a `name`.
+	const users = await UserModel.find(q).populate("organizationId", "name").lean();
 	const activeSubs = await UserSubscription.find({ userId: { $in: users.map((u) => u._id) }, status: "ACTIVE" })
 		.populate("planId", "name")
 		.lean();
@@ -119,19 +135,29 @@ export const createOrganization = async (payload) => {
 	if (!data.code) data.code = generateOrganizationCode(data.name || "ORG");
 	if (!data.createdBy) delete data.createdBy;
 
+	// Without both of these, no login-capable User document gets created below
+	// — the Organization record would exist with no way to ever log in, and
+	// the only symptom later is a generic "Invalid credentials" at login time
+	// with no indication that no account was ever created. Fail loudly here
+	// instead of silently producing an unusable organization.
+	if (!data.contactEmail || !data.password) {
+		throw new ApiError(
+			400,
+			"A contact email and password are required to create the organization's login account."
+		);
+	}
+
 	const org = await Organization.create(data);
 
-	if (data.contactEmail && data.password) {
-		await createUser({
-			firstName: data.contactPerson || data.name,
-			email: data.contactEmail,
-			password: data.password,
-			role: "ORGANIZATION",
-			organizationId: org._id,
-			status: "ACTIVE",
-			plan: data.plan || "FREE",
-		});
-	}
+	await createUser({
+		firstName: data.contactPerson || data.name,
+		email: data.contactEmail,
+		password: data.password,
+		role: "ORGANIZATION",
+		organizationId: org._id,
+		status: "ACTIVE",
+		plan: data.plan || "FREE",
+	});
 
 	return org;
 };

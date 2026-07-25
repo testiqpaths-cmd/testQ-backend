@@ -8,6 +8,7 @@ import {
   createStudent,
   createUsersFromArray,
   getOrganizationById,
+  getUserById,
 } from "../../../modules/user/user.service.js";
 import { generateUserTemplate } from "../../../modules/user/template/generate-userTemplate.js";
 
@@ -15,6 +16,20 @@ export const getOrganizationAnalytics = async (req, res, next) => {
   try {
     // Extract organization ID from route parameters
     const { orgId } = req.params;
+
+    // An ORGANIZATION-role caller may only ever view their own org's
+    // analytics — without this check, any org account could read any other
+    // org's analytics just by changing the orgId in the URL.
+    if (req.user?.role === "ORGANIZATION") {
+      let requesterOrgId = req.user.organizationId ? String(req.user.organizationId) : null;
+      if (!requesterOrgId) {
+        const dbUser = await getUserById(req.user._id);
+        requesterOrgId = dbUser?.organizationId ? String(dbUser.organizationId._id || dbUser.organizationId) : null;
+      }
+      if (!requesterOrgId || requesterOrgId !== String(orgId)) {
+        return res.status(403).json({ success: false, message: "Forbidden" });
+      }
+    }
 
     // Extract optional date range filters from query parameters
     const { startDate, endDate } = req.query;
@@ -37,8 +52,12 @@ export const getOrganizationAnalytics = async (req, res, next) => {
 
 export const getOrganizations = async (req, res, next) => {
   try {
+    // This list is reachable by any ORGANIZATION-role account (used to
+    // populate "restrict visibility to these organizations" pickers when
+    // creating a test/series), so it must not leak other orgs' contact
+    // details — only the name/code needed to identify an org in a picker.
     const organizations = await Organization.find({})
-      .select("name code address contactEmail createdAt")
+      .select("name code createdAt")
       .sort({ name: 1 })
       .lean();
 

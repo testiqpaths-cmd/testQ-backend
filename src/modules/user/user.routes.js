@@ -36,12 +36,16 @@ router.post(
 	featureMiddleware("USER_MANAGEMENT"),
 	asyncHandler(createStudentController)
 );
-router.get("/students/:id", asyncHandler(getStudentController));
-router.put("/students/:id", asyncHandler(updateStudentController));
-router.delete("/students/:id", asyncHandler(deleteStudentController));
+router.get("/students/:id", authMiddleware, asyncHandler(getStudentController));
+router.put("/students/:id", authMiddleware, asyncHandler(updateStudentController));
+router.delete("/students/:id", authMiddleware, asyncHandler(deleteStudentController));
 
 // Organization CRUD (mounted under /users/organizations to avoid collision)
-router.get("/organizations", authMiddleware, featureMiddleware("USER_MANAGEMENT"), asyncHandler(listOrganizationsController));
+// Listing/managing organization records is an admin-only capability — an
+// ORGANIZATION-role account has no legitimate reason to browse or edit other
+// organizations' records (their own org-scoped student data goes through the
+// /students routes above, which are org-ownership-checked in the controller).
+router.get("/organizations", authMiddleware, roleMiddleware("IQPATH_ADMIN"), featureMiddleware("USER_MANAGEMENT"), asyncHandler(listOrganizationsController));
 router.post(
 	"/organizations",
 	authMiddleware,
@@ -49,9 +53,9 @@ router.post(
 	featureMiddleware("USER_MANAGEMENT"),
 	asyncHandler(createOrganizationController)
 );
-router.get("/organizations/:id", asyncHandler(getOrganizationController));
-router.put("/organizations/:id", asyncHandler(updateOrganizationController));
-router.delete("/organizations/:id", asyncHandler(deleteOrganizationController));
+router.get("/organizations/:id", authMiddleware, roleMiddleware("IQPATH_ADMIN"), asyncHandler(getOrganizationController));
+router.put("/organizations/:id", authMiddleware, roleMiddleware("IQPATH_ADMIN"), asyncHandler(updateOrganizationController));
+router.delete("/organizations/:id", authMiddleware, roleMiddleware("IQPATH_ADMIN"), asyncHandler(deleteOrganizationController));
 
 // Bulk upload users via Excel (field name: file)
 router.post(
@@ -69,8 +73,8 @@ router.get("/bulk-import/template", asyncHandler(generateUserTemplateController)
 // Generic user CRUD
 router.get("/", authMiddleware, featureMiddleware("USER_MANAGEMENT"), asyncHandler(listUsersController));
 router.post("/", authMiddleware, featureMiddleware("USER_MANAGEMENT"), asyncHandler(createUserController));
-router.get("/:id", asyncHandler(getUserController));
-router.put("/:id", asyncHandler(updateUserController));
-router.delete("/:id", asyncHandler(deleteUserController));
+router.get("/:id", authMiddleware, asyncHandler(getUserController));
+router.put("/:id", authMiddleware, asyncHandler(updateUserController));
+router.delete("/:id", authMiddleware, asyncHandler(deleteUserController));
 
 export default router;

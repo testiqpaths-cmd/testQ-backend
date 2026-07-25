@@ -2,6 +2,16 @@ import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
+import UserModel from "../../models/user.model.js";
+
+// Fall back to a DB lookup for tokens issued before organizationId was
+// embedded in the JWT payload.
+const resolveOrganizationId = async (user) => {
+  if (!user) return null;
+  if (user.organizationId) return user.organizationId;
+  const dbUser = await UserModel.findById(user._id || user.id).select("organizationId").lean();
+  return dbUser?.organizationId ?? null;
+};
 
 const canManageTest = (test, user) => {
   if (!test || !user) return false;
@@ -131,7 +141,11 @@ export const getAllTests = async (req, res) => {
   try {
     const userId = req.user?._id || req.user?.id;
     const tests = req.query.leaderboard === "true"
-      ? await service.getLeaderboardTests({ userId, userRole: req.user?.role })
+      ? await service.getLeaderboardTests({
+        userId,
+        userRole: req.user?.role,
+        userOrganizationId: req.user?.role === "ORGANIZATION" ? await resolveOrganizationId(req.user) : null,
+      })
       : await service.getAllTests();
 
     // Attach attemptsMade for each test (current student's perspective)

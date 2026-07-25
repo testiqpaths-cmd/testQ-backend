@@ -1,11 +1,22 @@
 import * as service from "./helpSupport.service.js";
+import UserModel from "../../models/user.model.js";
+
+// Fall back to a DB lookup for tokens issued before organizationId was
+// embedded in the JWT payload — without this, ORGANIZATION-role requests
+// below fell back to the user's own _id (never a real organizationId),
+// which silently broke "my org's support tickets" rather than leaking data,
+// but is still wrong.
+const resolveOrganizationId = async (user) => {
+  if (user.organizationId) return user.organizationId;
+  const dbUser = await UserModel.findById(user._id).select("organizationId").lean();
+  return dbUser?.organizationId ?? null;
+};
 
 export const createHelpSupportController = async (req, res) => {
   try {
     const { fullName, email, subject, message } = req.body;
     const studentId = req.user._id;
-    // Assuming organizationId is available on req.user for students belonging to an org
-    const organizationId = req.user.organizationId || null;
+    const organizationId = await resolveOrganizationId(req.user);
 
     const query = await service.createHelpSupport({
       studentId,
@@ -24,13 +35,13 @@ export const createHelpSupportController = async (req, res) => {
 
 export const getHelpSupportsController = async (req, res) => {
   try {
-    const { role, _id, organizationId } = req.user;
+    const { role, _id } = req.user;
     let filters = {};
 
     if (role === "STUDENT") {
       filters.studentId = _id;
     } else if (role === "ORGANIZATION") {
-      filters.organizationId = organizationId || _id;
+      filters.organizationId = await resolveOrganizationId(req.user);
     } else if (role === "IQPATH_ADMIN") {
       // IQPATH_ADMIN sees everything
       filters = {};
@@ -46,7 +57,7 @@ export const getHelpSupportsController = async (req, res) => {
 export const resolveHelpSupportController = async (req, res) => {
   try {
     const { id } = req.params;
-    const { role, organizationId, _id } = req.user;
+    const { role } = req.user;
 
     if (role === "STUDENT") {
       return res.status(403).json({ success: false, message: "Forbidden: Students cannot resolve queries" });
@@ -58,8 +69,8 @@ export const resolveHelpSupportController = async (req, res) => {
     }
 
     if (role === "ORGANIZATION") {
-      const userOrgId = organizationId || _id;
-      if (String(query.organizationId) !== String(userOrgId)) {
+      const userOrgId = await resolveOrganizationId(req.user);
+      if (!userOrgId || String(query.organizationId) !== String(userOrgId)) {
         return res.status(403).json({ success: false, message: "Forbidden: Not your organization's query" });
       }
     }

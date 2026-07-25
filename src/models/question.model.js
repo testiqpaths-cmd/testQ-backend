@@ -28,6 +28,10 @@ const questionSchema = new mongoose.Schema({
   correctAnswer: {
     type: String,
   },
+  imageUrl: {
+    type: String,
+    default: null,
+  },
   difficulty: {
     type: String,
     enum: ["EASY", "MEDIUM", "HARD"],

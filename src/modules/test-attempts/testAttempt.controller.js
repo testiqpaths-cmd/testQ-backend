@@ -15,6 +15,24 @@ import {
 } from "./services/questionSelection.service.js";
 import { getIO } from "../../sockets/index.js";
 import IQRoom from "../../models/iqRoom.model.js";
+import UserModel from "../../models/user.model.js";
+
+// An ORGANIZATION-role caller may only view/manage attempts belonging to
+// students registered under their own organization — role alone ("is this
+// an ORGANIZATION account") is not enough, since without this a curious org
+// admin could read (or, via manualEvaluate, mutate) any other org's
+// student's attempt just by guessing/incrementing an attemptId.
+const isOwnOrgStudent = async (requester, studentId) => {
+  if (!requester || requester.role !== "ORGANIZATION") return false;
+  let orgId = requester.organizationId || null;
+  if (!orgId) {
+    const dbUser = await UserModel.findById(requester._id).select("organizationId").lean();
+    orgId = dbUser?.organizationId ?? null;
+  }
+  if (!orgId) return false;
+  const student = await UserModel.findById(studentId).select("organizationId").lean();
+  return Boolean(student?.organizationId && String(student.organizationId) === String(orgId));
+};
 
 const canStartTest = (test, user) => {
   if (!test || !user) return false;
@@ -646,12 +664,17 @@ export const getAttemptResultController = async (req, res, next) => {
     const attempt = result.attempt || result;
     const analysis = result.analysis || null;
 
-    // ✅ Student can view own results. Admins and Organizations can view student results.
+    // ✅ Student can view own results. Admins can view any. Organizations can
+    // only view results for students registered under their own org.
     const requesterId = String(req.user?._id);
     const requesterRole = req.user?.role;
     const ownerId = String(attempt.studentId);
 
-    if (requesterId !== ownerId && requesterRole !== "IQPATH_ADMIN" && requesterRole !== "ORGANIZATION") {
+    const isSelf = requesterId === ownerId;
+    const isAdmin = requesterRole === "IQPATH_ADMIN";
+    const isOwnStudent = requesterRole === "ORGANIZATION" && (await isOwnOrgStudent(req.user, attempt.studentId));
+
+    if (!isSelf && !isAdmin && !isOwnStudent) {
       return res.status(403).json({
         success: false,
         message: "You are not allowed to view this result",
@@ -699,9 +722,11 @@ export const getDetailedAnalysisController = async (req, res, next) => {
   try {
     const { attemptId } = req.params;
 
-    const detailedAnalysis = await getDetailedAnalysis(attemptId);
-    
-    if (!detailedAnalysis) {
+    // No roleMiddleware on this route, so without an ownership check any
+    // authenticated user (including another student) could pull the full
+    // detailed analysis of an arbitrary attemptId.
+    const attemptOwner = await TestAttempt.findById(attemptId).select("studentId").lean();
+    if (!attemptOwner) {
       return res.status(404).json({
         success: false,
         message: "Attempt not found",
@@ -709,7 +734,29 @@ export const getDetailedAnalysisController = async (req, res, next) => {
       });
     }
 
-    // You could also add owner validation here similar to getAttemptResultController if needed
+    const requesterId = String(req.user?._id);
+    const requesterRole = req.user?.role;
+    const isSelf = requesterId === String(attemptOwner.studentId);
+    const isAdmin = requesterRole === "IQPATH_ADMIN";
+    const isOwnStudent = requesterRole === "ORGANIZATION" && (await isOwnOrgStudent(req.user, attemptOwner.studentId));
+
+    if (!isSelf && !isAdmin && !isOwnStudent) {
+      return res.status(403).json({
+        success: false,
+        message: "You are not allowed to view this analysis",
+        errors: null,
+      });
+    }
+
+    const detailedAnalysis = await getDetailedAnalysis(attemptId);
+
+    if (!detailedAnalysis) {
+      return res.status(404).json({
+        success: false,
+        message: "Attempt not found",
+        errors: null,
+      });
+    }
 
     return res.status(200).json({
       success: true,

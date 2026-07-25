@@ -2,6 +2,7 @@
 import { asyncHandler } from "../../common/utils/asyncHandler.js";
 import * as service from "./questions.service.js";
 import { generateQuestionTemplate } from "./templates/generate-template.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
 
 export const createQuestion = asyncHandler(async (req, res) => {
   const payload = {
@@ -12,6 +13,7 @@ export const createQuestion = asyncHandler(async (req, res) => {
     options: Array.isArray(req.body.options) ? req.body.options : [],
     correctAnswer: req.body.correctAnswer,
     difficulty: req.body.difficulty,
+    imageUrl: req.body.imageUrl || null,
     createdBy: req.user._id,
   };
 
@@ -20,13 +22,22 @@ export const createQuestion = asyncHandler(async (req, res) => {
 });
 
 export const updateQuestion = asyncHandler(async (req, res) => {
-  const question = await service.updateQuestionService(req.params.id, req.body);
+  const question = await service.updateQuestionService(req.params.id, req.body, req.user);
   res.json({ success: true, data: question });
 });
 
 export const deleteQuestion = asyncHandler(async (req, res) => {
-  await service.deleteQuestionService(req.params.id);
+  await service.deleteQuestionService(req.params.id, req.user);
   res.json({ success: true, message: "Question deleted" });
+});
+
+export const uploadQuestionImage = asyncHandler(async (req, res) => {
+  if (!req.file?.buffer) {
+    throw new ApiError(400, "Image file is required (field name: image)");
+  }
+
+  const url = await service.uploadQuestionImageService(req.file);
+  res.status(201).json({ success: true, url });
 });
 
 export const uploadQuestionsExcel = asyncHandler(async (req, res) => {
@@ -66,7 +77,7 @@ export const getQuestionsByExcelBatchController = asyncHandler(async (req, res) 
 });
 
 export const getAllQuestionsController = asyncHandler(async (req, res) => {
-  const result = await service.getAllQuestionsService(req.query);
+  const result = await service.getAllQuestionsService(req.query, req.user);
 
   return res.status(200).json({
     success: true,

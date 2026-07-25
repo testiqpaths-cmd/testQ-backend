@@ -6,6 +6,7 @@ import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
 import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
 import { validate } from "../../common/middlewares/validate.middleware.js";
 import { upload } from "../../common/middlewares/upload.middleware.js";
+import { imageUpload } from "../../common/middlewares/imageUpload.middleware.js";
 import { generateQuestionTemplate } from "./templates/generate-template.js";
 import { 
   getAllQuestionsController, 
@@ -20,6 +21,7 @@ import {
   updateQuestion,
   deleteQuestion,
   uploadQuestionsExcel,
+  uploadQuestionImage,
   getMyExcelBatchesController,
   getQuestionsByExcelBatchController,
 } from "./questions.controller.js";
@@ -40,6 +42,13 @@ router.post(
   featureMiddleware("QUESTION_BANK", true),
   upload.single("file"),
   uploadQuestionsExcel
+);
+router.post(
+  "/upload-image",
+  authMiddleware,
+  featureMiddleware("QUESTION_BANK"),
+  imageUpload.single("image"),
+  uploadQuestionImage
 );
 router.get("/excel-batches/my", authMiddleware, featureMiddleware("QUESTION_BANK"), getMyExcelBatchesController);
 router.get("/excel-batches/:batchId/questions", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsByExcelBatchController);
