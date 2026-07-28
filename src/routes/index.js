@@ -19,6 +19,7 @@ import platformReportsRoutes from "../modules/analytics/reports/platform-analyti
 import leaderboardRoutes from "../modules/leaderboard/leaderboard.routes.js";
 import notificationRoutes from "../modules/notification/notification.routes.js";
 import helpSupportRoutes from "../modules/help-support/helpSupport.routes.js";
+import contactUsRoutes from "../modules/contact-us/contactUs.routes.js";
 import dashboardRoutes from "../modules/analytics/dashboard/dashboard.routes.js";
 import iqRoomRoutes from "../modules/iq-room/iqRoom.routes.js";
 import subscriptionRoutes from "../modules/subscription/routes/subscription.routes.js";
@@ -79,6 +80,7 @@ router.use("/reports", platformReportsRoutes);
 router.use("/leaderboard", leaderboardRoutes);
 router.use("/notifications", notificationRoutes);
 router.use("/help-support", helpSupportRoutes);
+router.use("/contact-us", contactUsRoutes);
 router.use("/iq-room", iqRoomRoutes);
 router.use("/subscriptions", subscriptionRoutes);
 
