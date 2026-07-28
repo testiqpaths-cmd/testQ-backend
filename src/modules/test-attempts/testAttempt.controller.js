@@ -16,6 +16,59 @@ import {
 import { getIO } from "../../sockets/index.js";
 import IQRoom from "../../models/iqRoom.model.js";
 import UserModel from "../../models/user.model.js";
+import { createNotification } from "../notification/notification.service.js";
+
+// Let an organization know when a student completes one of its tests —
+// skipped for IQ Room attempts (a shared live-quiz format where every
+// participant submitting would spam the org) and for tests created by
+// anyone other than an ORGANIZATION account (admin-created tests don't
+// have a single "owner" account to notify this way).
+const notifyOrgOfCompletedAttempt = async (attempt, evaluatedAttempt) => {
+  if (attempt.iqRoomId) return;
+
+  const test = await Test.findById(attempt.testId).select("title createdBy").lean();
+  if (test?.createdBy?.role !== "ORGANIZATION") return;
+
+  const student = await UserModel.findById(attempt.studentId).select("firstName lastName").lean();
+  const studentName = [student?.firstName, student?.lastName].filter(Boolean).join(" ") || "A student";
+
+  const isFullyEvaluated = evaluatedAttempt?.status === "EVALUATED";
+  const message = isFullyEvaluated
+    ? `${studentName} completed "${test.title}" — scored ${evaluatedAttempt.percentage}%.`
+    : `${studentName} completed "${test.title}".`;
+
+  await createNotification({
+    userId: test.createdBy.userId,
+    title: "Test Completed",
+    message,
+    type: "TEST_COMPLETED",
+    link: `/dashboard/result/${attempt._id}`,
+    metadata: { attemptId: attempt._id, testId: test._id, studentId: attempt.studentId },
+  });
+};
+
+// Let the student know their result is ready, right when it actually
+// becomes ready — pure-objective tests finish evaluating synchronously
+// here at submit time, so waiting for a separate "evaluation" step (as
+// manualEvaluateAttempt.service.js does for subjective-question tests)
+// would mean these students never got notified at all. Tests with
+// subjective questions stay "SUBMITTED" here and get their own EVALUATION
+// notification later from manualEvaluateAttempt once a human grades them —
+// skip here to avoid a premature/duplicate notification for those.
+const notifyStudentOfEvaluatedAttempt = async (attempt, evaluatedAttempt) => {
+  if (evaluatedAttempt?.status !== "EVALUATED") return;
+
+  const test = await Test.findById(attempt.testId).select("title").lean();
+
+  await createNotification({
+    userId: attempt.studentId,
+    title: "Test Evaluated",
+    message: `Your result for "${test?.title || "a test"}" is ready — you scored ${evaluatedAttempt.percentage}%.`,
+    type: "EVALUATION",
+    link: `/student/dashboard/result/${attempt._id}`,
+    metadata: { attemptId: attempt._id, testId: attempt.testId },
+  });
+};
 
 // An ORGANIZATION-role caller may only view/manage attempts belonging to
 // students registered under their own organization — role alone ("is this
@@ -502,6 +555,13 @@ export const submitAttemptController = async (req, res, next) => {
     }
 
     const evaluatedAttempt = await evaluateObjectiveForAttempt(attempt._id);
+
+    notifyOrgOfCompletedAttempt(attempt, evaluatedAttempt).catch((err) =>
+      console.error("Failed to notify organization of completed attempt:", err)
+    );
+    notifyStudentOfEvaluatedAttempt(attempt, evaluatedAttempt).catch((err) =>
+      console.error("Failed to notify student of evaluated attempt:", err)
+    );
 
     // ✅ If part of an IQ Room, notify the room
     if (attempt.iqRoomId) {
