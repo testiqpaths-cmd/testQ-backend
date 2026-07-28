@@ -4,6 +4,7 @@ import TestSeries from "../../models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
+import { ensureCreatorOrgIncluded } from "./utils/visibility.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
 
@@ -67,18 +68,29 @@ export const createSeries = async (data, user) => {
       ? crypto.randomBytes(4).toString("hex")
       : undefined;
 
-  return TestSeries.create({
+  const payload = {
     ...data,
     seriesCode,
     createdBy: {
       userId: new mongoose.Types.ObjectId(user._id || user.id),
       role: user.role,
     },
-  });
+  };
+  await ensureCreatorOrgIncluded(payload);
+
+  return TestSeries.create(payload);
 };
 
-export const updateSeries = (id, data) =>
-  TestSeries.findByIdAndUpdate(id, data, { new: true });
+export const updateSeries = async (id, data) => {
+  const series = await TestSeries.findById(id);
+  if (!series) return null;
+
+  Object.assign(series, data);
+  await ensureCreatorOrgIncluded(series);
+  await series.save();
+
+  return series;
+};
 
 export const deleteSeries = (id) =>
   TestSeries.findByIdAndDelete(id);
@@ -218,6 +230,7 @@ export const createSeriesTest = async (seriesId, data, user) => {
     testCode: data.visibility === 'LINK_ONLY' ? crypto.randomBytes(4).toString('hex') : null,
     createdBy: { userId: user._id || user.id, role: user.role },
   };
+  await ensureCreatorOrgIncluded(payload);
 
   const test = await Test.create(payload);
 

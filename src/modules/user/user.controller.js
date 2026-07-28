@@ -90,7 +90,31 @@ const sendWelcomeEmail = async (user, password) => {
 
 // Generic user CRUD
 export const createUserController = async (req, res) => {
-	const payload = req.body;
+	const payload = { ...req.body };
+
+	// The "Create User" page is also how an ORGANIZATION admin adds a
+	// student — without this, the request went straight to createUser()
+	// with whatever role/organizationId the client sent (or none at all),
+	// so the new user was saved with organizationId: null and could never
+	// match the org-scoped filter listUsersController applies, making it
+	// permanently invisible on the User Management page despite the create
+	// succeeding. Force it the same way createStudentController already does.
+	if (req.user?.role === "ORGANIZATION") {
+		let requesterOrganizationId = req.user.organizationId || null;
+		if (!requesterOrganizationId) {
+			const dbUser = await getUserById(req.user._id);
+			requesterOrganizationId = dbUser?.organizationId?._id ?? dbUser?.organizationId ?? null;
+		}
+		if (!requesterOrganizationId) {
+			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
+		}
+
+		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", 1);
+
+		payload.role = "STUDENT";
+		payload.organizationId = requesterOrganizationId;
+	}
+
 	const user = await createUser(payload);
 	try {
 		await sendWelcomeEmail(user, payload.password);

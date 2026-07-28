@@ -22,6 +22,7 @@ const buildAuthUserResponse = (user) => ({
   id: user._id,
   email: user.email,
   role: user.role,
+  organizationId: user.organizationId ?? null,
   firstName: user.firstName,
   lastName: user.lastName,
   firebaseUid: user.firebaseUid,
@@ -210,7 +211,7 @@ export const meController = async (req, res) => {
   try {
     const user = await findUserById(req.user._id);
     if (!user) throw new AuthError("User not found");
-    res.json({ id: user.id, email: user.email, role: user.role });
+    res.json({ id: user.id, email: user.email, role: user.role, organizationId: user.organizationId ?? null });
   } catch (err) {
     res.status(404).json({ message: err.message });
   }

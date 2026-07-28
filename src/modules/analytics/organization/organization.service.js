@@ -2,6 +2,7 @@ import crypto from "crypto";
 import { getOrganizationAnalyticsRepo } from "../repository/organization.repository.js";
 import Organization from "../../../models/organization.model.js";
 import { createUser } from "../../user/user.service.js";
+import { ApiError } from "../../../common/exceptions/ApiError.js";
 
 export const getOrganizationAnalyticsService = async ({ orgId, startDate, endDate }) => {
   try {
@@ -26,7 +27,16 @@ export const createOrganizationService = async (payload) => {
     businessPhone,
     plan,
     createdBy,
+    password,
   } = payload;
+
+  // The "Create Organization" form collects a login password and sends it
+  // here — without this check, a missing password was silently replaced
+  // with an unguessable random string that was never shown or emailed to
+  // anyone, so the org could never log in no matter what they typed.
+  if (!contactEmail || !password) {
+    throw new ApiError(400, "A contact email and password are required to create the organization's login account.");
+  }
 
   const codeBase = (organizationName || "org").trim().replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase() || "ORG";
   const code = `${codeBase}_${crypto.randomBytes(3).toString("hex")}`;
@@ -34,19 +44,20 @@ export const createOrganizationService = async (payload) => {
   const organization = await Organization.create({
     name: organizationName,
     contactEmail,
+    contactPerson,
+    businessPhone,
     code,
     createdBy: createdBy || undefined,
   });
 
   const [firstName, ...rest] = (contactPerson || "").trim().split(" ");
   const lastName = rest.join(" ");
-  const defaultPassword = crypto.randomBytes(8).toString("hex");
 
   const organizationUser = await createUser({
     firstName: firstName || organizationName,
     lastName,
     email: contactEmail,
-    password: defaultPassword,
+    password,
     phone: businessPhone || "",
     role: "ORGANIZATION",
     status: "ACTIVE",

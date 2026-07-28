@@ -3,6 +3,7 @@ import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
+import { ensureCreatorOrgIncluded } from "./utils/visibility.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
@@ -54,6 +55,7 @@ export async function createTest(data, user) {
     createdBy: { userId: user._id || user.id, role: user.role },
   };
 
+  await ensureCreatorOrgIncluded(payload);
   const test = await Test.create(payload);
 
   // Students create tests only for themselves to practice on — there's no
@@ -74,6 +76,7 @@ export async function createTest(data, user) {
 
 export async function updateTest(test, payload, user) {
   Object.assign(test, payload);
+  await ensureCreatorOrgIncluded(test);
 
   const hasFixedSchedule = Boolean(test.startTime && test.endTime);
   if (hasFixedSchedule) {

@@ -41,7 +41,7 @@ export const createUser = async (payload) => {
 export const getUserById = async (id) => {
 	return UserModel.findById(id)
 		.where({ isDeleted: false })
-		.populate("organizationId", "name")
+		.populate("organizationId", "name code address contactEmail contactPerson businessPhone")
 		.lean();
 };
 

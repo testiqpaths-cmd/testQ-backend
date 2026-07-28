@@ -173,12 +173,13 @@ export const createOrganization = async (req, res, next) => {
       contactEmail,
       businessPhone,
       plan,
+      password,
     } = req.body;
 
-    if (!organizationName || !contactPerson || !contactEmail) {
+    if (!organizationName || !contactPerson || !contactEmail || !password) {
       return res.status(400).json({
         success: false,
-        message: "Organization name, contact person, and contact email are required",
+        message: "Organization name, contact person, contact email, and password are required",
       });
     }
 
@@ -188,6 +189,7 @@ export const createOrganization = async (req, res, next) => {
       contactEmail,
       businessPhone,
       plan,
+      password,
       createdBy: req.user ?._id || req.user ?.id,
     });
 
