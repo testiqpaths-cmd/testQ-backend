@@ -63,10 +63,17 @@ export const getStudentDashboardData = async (studentId) => {
 
     totalPercentageSum += percentage;
 
-    // Accuracy Calculation
+    // Accuracy = correct answers / attempted questions (correct + incorrect),
+    // excluding unattempted/skipped questions from the denominator entirely —
+    // not answers.length, which also counted skipped-but-recorded answers.
     const answers = attempt.answers || [];
-    totalQuestionsAttempted += answers.length;
-    totalCorrectAnswers += answers.filter((a) => a.isCorrect).length;
+    const correctQ = answers.filter((a) => a.isCorrect).length;
+    const wrongQ = answers.filter((a) => !a.isCorrect && a.selectedOption).length;
+    const skippedQ = answers.filter((a) => !a.isCorrect && !a.selectedOption).length;
+    const attemptedQ = correctQ + wrongQ;
+
+    totalQuestionsAttempted += attemptedQ;
+    totalCorrectAnswers += correctQ;
 
     // Subject/Topic Wise tests count
     const topics = new Set();
@@ -99,9 +106,6 @@ export const getStudentDashboardData = async (studentId) => {
 
     // Recent Tests format (Dashboard small table)
     const totalQ = attempt.questionSnapshots?.length || answers.length || 0;
-    const correctQ = answers.filter((a) => a.isCorrect).length;
-    const wrongQ = answers.filter((a) => !a.isCorrect && a.selectedOption).length;
-    const skippedQ = answers.filter((a) => !a.isCorrect && !a.selectedOption).length;
 
     recentTests.push({
       id: attempt.testId?._id || attempt.testId,
@@ -150,7 +154,7 @@ export const getStudentDashboardData = async (studentId) => {
       wrong: wrongQ,
       skipped: skippedQ,
       score: attempt.totalScore || 0,
-      accuracy: percentage,
+      accuracy: attemptedQ > 0 ? Math.round((correctQ / attemptedQ) * 100) : 0,
       timeTaken: attempt.duration || 0,
       date: submittedAt
     });
