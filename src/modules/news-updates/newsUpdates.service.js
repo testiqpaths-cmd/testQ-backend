@@ -51,6 +51,7 @@ export const getAllNews = async () => {
   return await NewsUpdate.find()
     .sort({
       pinned: -1,
+      priority: 1,
       createdAt: -1,
     })
     .populate("createdBy.userId", "firstName lastName email");

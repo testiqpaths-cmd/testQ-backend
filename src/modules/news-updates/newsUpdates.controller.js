@@ -1,4 +1,4 @@
-import { createNews, getAllNews, getStudentNews } from "./newsUpdates.service.js";
+import { createNews, deleteNews, getAllNews, getStudentNews } from "./newsUpdates.service.js";
 import { getIO } from "../../sockets/index.js";
 
 const isAdminRole = (role) => role === "IQPATH_ADMIN" || role === "admin";
@@ -22,7 +22,8 @@ export const createNewsController = async (req, res, next) => {
       });
     }
 
-    const startTime = visibleFrom ? new Date(visibleFrom) : new Date();
+    const now = new Date();
+    const startTime = visibleFrom ? new Date(visibleFrom) : now;
     const days = Number(lifelineDays || 1);
     const endTime = visibleTill ? new Date(visibleTill) : new Date(startTime.getTime() + days * 24 * 60 * 60 * 1000);
 
@@ -30,6 +31,20 @@ export const createNewsController = async (req, res, next) => {
       return res.status(400).json({
         success: false,
         message: "Please provide a valid visibility window",
+      });
+    }
+
+    if (startTime < now) {
+      return res.status(400).json({
+        success: false,
+        message: "Visible from date cannot be in the past",
+      });
+    }
+
+    if (endTime < now) {
+      return res.status(400).json({
+        success: false,
+        message: "Visible till date cannot be in the past",
       });
     }
 
@@ -83,6 +98,44 @@ export const getNewsUpdatesController = async (req, res, next) => {
 
     return res.json({ success: true, data: items });
   } catch (error) {
+    next(error);
+  }
+};
+
+export const deleteNewsController = async (req, res, next) => {
+  try {
+    if (!isAdminRole(req.user?.role) && !isOrganizationRole(req.user?.role)) {
+      return res.status(403).json({
+        success: false,
+        message: "Only admins and organizations can delete updates",
+      });
+    }
+
+    const deleted = await deleteNews(req.params.id);
+
+    try {
+      const io = getIO();
+      io.of("/news-updates").emit("news-updates:changed", {
+        newsId: req.params.id,
+        deletedAt: new Date(),
+      });
+    } catch {
+      // Ignore socket broadcast errors; request should still succeed.
+    }
+
+    return res.json({
+      success: true,
+      message: "News update deleted successfully",
+      data: deleted,
+    });
+  } catch (error) {
+    if (error?.message === "News update not found") {
+      return res.status(404).json({
+        success: false,
+        message: "News update not found",
+      });
+    }
+
     next(error);
   }
 };
