@@ -241,5 +241,23 @@ export const createSeriesTest = async (seriesId, data, user) => {
   test.status = computeTestStatus(test);
   await test.save();
 
+  // A student who already accepted this series shouldn't have to separately
+  // accept a test added to it afterward — auto-accept the new test for
+  // everyone who's already accepted the series as a whole.
+  const TestSeriesAssignment = (await import('../../models/testSeriesAssignment.model.js')).default;
+  const acceptedStudentIds = await TestSeriesAssignment.find({ seriesId, status: "ACCEPTED" })
+    .distinct("studentId");
+  if (acceptedStudentIds.length) {
+    await TestAssignment.bulkWrite(
+      acceptedStudentIds.map((studentId) => ({
+        updateOne: {
+          filter: { testId: test._id, studentId },
+          update: { $set: { status: "ACCEPTED", acceptedAt: new Date() } },
+          upsert: true,
+        },
+      }))
+    );
+  }
+
   return test;
 };

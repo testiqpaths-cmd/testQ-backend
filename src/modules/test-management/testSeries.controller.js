@@ -2,6 +2,8 @@ import * as service from "./testSeries.service.js";
 import logger from "../../config/logger.js";
 import mongoose from "mongoose";
 import TestSeries from "../../models/testSeries.model.js";
+import TestSeriesAssignment from "../../models/testSeriesAssignment.model.js";
+import TestAssignment from "../../models/testAssignment.model.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 import UserModel from "../../models/user.model.js";
 
@@ -167,5 +169,96 @@ export const createSeriesTest = async (req, res, next) => {
   } catch (err) {
     logger.error(`createSeriesTest error: ${err.message}`);
     return res.status(500).json({ success: false, message: err.message || 'Internal Server Error' });
+  }
+};
+
+// Accepting a series accepts every test currently in it in one step — bulk
+// upserts a real ACCEPTED TestAssignment for each of the series' tests, so
+// starting any of them satisfies the existing per-test acceptance gate in
+// startTestAttemptController without that controller needing to know
+// anything about series at all. (A test added to the series LATER, after a
+// student already accepted it, is auto-accepted too — see createSeriesTest
+// in testSeries.service.js.)
+export const acceptSeriesAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const series = req.series;
+    const seriesId = series._id;
+
+    const assignment = await TestSeriesAssignment.findOneAndUpdate(
+      { seriesId, studentId },
+      { status: "ACCEPTED", acceptedAt: new Date() },
+      { new: true, upsert: true }
+    );
+
+    if (Array.isArray(series.tests) && series.tests.length) {
+      await TestAssignment.bulkWrite(
+        series.tests.map((testId) => ({
+          updateOne: {
+            filter: { testId, studentId },
+            update: {
+              $set: { status: "ACCEPTED", acceptedAt: new Date() },
+              $setOnInsert: { testId, studentId },
+            },
+            upsert: true,
+          },
+        }))
+      );
+    }
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const declineSeriesAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const seriesId = req.series._id;
+
+    const assignment = await TestSeriesAssignment.findOneAndUpdate(
+      { seriesId, studentId },
+      { status: "DECLINED", declinedAt: new Date() },
+      { new: true, upsert: true }
+    );
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const pendingSeriesAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const seriesId = req.series._id;
+
+    const assignment = await TestSeriesAssignment.findOneAndUpdate(
+      { seriesId, studentId },
+      { status: "PENDING" },
+      { new: true, upsert: true }
+    );
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const hideSeriesAssignment = async (req, res, next) => {
+  try {
+    const studentId = req.user?._id || req.user?.id;
+    const seriesId = req.series._id;
+
+    const assignment = await TestSeriesAssignment.findOneAndUpdate(
+      { seriesId, studentId },
+      { status: "HIDDEN", hiddenAt: new Date() },
+      { new: true, upsert: true }
+    );
+
+    res.json({ success: true, data: assignment });
+  } catch (e) {
+    next(e);
   }
 };

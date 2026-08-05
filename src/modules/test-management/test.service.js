@@ -287,21 +287,51 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
       assignments.map((a) => [String(a.testId), a])
     );
 
+    // A series test's own visibility on this list is gated by whether the
+    // STUDENT accepted the series as a whole, not by its individual
+    // TestAssignment — accepting a series bulk-accepts every test in it
+    // (see testSeries.controller.js's acceptSeriesAssignment), so
+    // assignmentStatus alone would otherwise never reflect "not yet decided".
+    const seriesIds = [
+      ...new Set(
+        tests
+          .map((t) => t.testSeriesId?._id || t.testSeriesId)
+          .filter(Boolean)
+          .map(String)
+      ),
+    ];
+    let seriesAssignmentMap = new Map();
+    if (seriesIds.length) {
+      const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
+      const seriesAssignments = await TestSeriesAssignment.find({
+        studentId,
+        seriesId: { $in: seriesIds },
+      }).lean();
+      seriesAssignmentMap = new Map(
+        seriesAssignments.map((a) => [String(a.seriesId), a])
+      );
+    }
+
     return tests
       .map((test) => {
         const assignment = assignmentMap.get(String(test._id));
+        const seriesId = test.testSeriesId?._id || test.testSeriesId || null;
+        const seriesAssignment = seriesId ? seriesAssignmentMap.get(String(seriesId)) : null;
         return {
           ...test.toObject(),
           id: String(test._id),
           assignmentStatus: assignment ? assignment.status : "PENDING",
+          seriesAssignmentStatus: seriesId ? (seriesAssignment ? seriesAssignment.status : "PENDING") : null,
         };
       })
-      .filter((test) => test.assignmentStatus !== "HIDDEN");
+      .filter((test) => test.assignmentStatus !== "HIDDEN")
+      .filter((test) => test.seriesAssignmentStatus !== "HIDDEN");
   }
 
   return tests.map((test) => ({
     ...test.toObject(),
     id: String(test._id),
     assignmentStatus: "PENDING",
+    seriesAssignmentStatus: (test.testSeriesId?._id || test.testSeriesId) ? "PENDING" : null,
   }));
 };

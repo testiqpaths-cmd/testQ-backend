@@ -723,6 +723,11 @@ export const getAttemptResultController = async (req, res, next) => {
     }
     const attempt = result.attempt || result;
     const analysis = result.analysis || null;
+    // getAttemptResult() computes this correctly (whole test done, or just
+    // this attempt) but it was never being placed in the response below —
+    // the frontend's "?? true" fallback then defaulted to unlocked, showing
+    // every question as "Incorrect" (redacted/null isCorrect != true).
+    const isTestOver = result.isTestOver ?? false;
 
     // ✅ Student can view own results. Admins can view any. Organizations can
     // only view results for students registered under their own org.
@@ -771,6 +776,7 @@ export const getAttemptResultController = async (req, res, next) => {
         cheatingScore: attempt.cheatingScore,
         violations: attempt.violations,
         analysis,
+        isTestOver,
       },
     });
   } catch (err) {

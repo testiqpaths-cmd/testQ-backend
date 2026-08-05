@@ -10,6 +10,10 @@ import {
   getSeriesList,
   updateSeries,
   deleteSeries,
+  acceptSeriesAssignment,
+  declineSeriesAssignment,
+  pendingSeriesAssignment,
+  hideSeriesAssignment,
 } from "./testSeries.controller.js";
 import { createSeriesTest } from "./testSeries.controller.js";
 
@@ -66,5 +70,12 @@ router.post(
   loadSeries,
   createSeriesTest
 );
+
+// Student series-assignment actions — mirrors the per-test accept/decline/
+// pending/hide endpoints in test.routes.js, but at the series level.
+router.post("/:id/accept", authMiddleware, roleMiddleware("STUDENT"), loadSeries, acceptSeriesAssignment);
+router.post("/:id/decline", authMiddleware, roleMiddleware("STUDENT"), loadSeries, declineSeriesAssignment);
+router.post("/:id/pending", authMiddleware, roleMiddleware("STUDENT"), loadSeries, pendingSeriesAssignment);
+router.post("/:id/hide", authMiddleware, roleMiddleware("STUDENT"), loadSeries, hideSeriesAssignment);
 
 export default router;
