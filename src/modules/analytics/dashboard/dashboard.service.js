@@ -2,10 +2,39 @@ import TestAttempt from "../../../models/testAttempt.model.js";
 import User from "../../auth/models/User.model.js";
 import Organization from "../../../models/organization.model.js";
 import Test from "../../../models/test.model.js";
+import TestAssignment from "../../../models/testAssignment.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
 
 export const getStudentDashboardData = async (studentId) => {
+  const activeAssignedTestsCount = await TestAssignment.aggregate([
+    {
+      $match: {
+        studentId,
+        status: { $in: ["ACCEPTED", "STARTED"] },
+      },
+    },
+    {
+      $lookup: {
+        from: "tests",
+        localField: "testId",
+        foreignField: "_id",
+        as: "test",
+      },
+    },
+    { $unwind: "$test" },
+    {
+      $match: {
+        "test.status": "ACTIVE",
+        "test.isPublished": true,
+        "test.isDeleted": { $ne: 1 },
+      },
+    },
+    { $count: "count" },
+  ]);
+
+  const activeAssignedTests = activeAssignedTestsCount[0]?.count || 0;
+
   // Fetch all completed/submitted attempts for the student
   const attempts = await TestAttempt.find({
     studentId,
@@ -31,6 +60,8 @@ export const getStudentDashboardData = async (studentId) => {
       percentageOverTime: [],
       performanceOverTime: { weekly: [], monthly: [] },
       tests: [],
+      allTests: [],
+      activeAssignedTestsCount: activeAssignedTests,
     };
   }
 
@@ -189,6 +220,7 @@ export const getStudentDashboardData = async (studentId) => {
     },
     tests: recentTests.slice(0, 10), // Limit to 10 recent tests for dashboard view
     allTests, // Contains ALL raw attempts for complex frontend filtering
+    activeAssignedTestsCount: activeAssignedTests,
   };
 };
 
