@@ -328,6 +328,22 @@ export const getSeriesLeaderboard = async (seriesId, query, requester) => {
     addResolvedAttemptStatsStage,
     finalizeResolvedAttemptStatsStage,
 
+    // Needed to show each test's title in the per-test breakdown below —
+    // without this a student can see they attempted "3 tests" but not which.
+    {
+      $lookup: {
+        from: "tests",
+        localField: "testId",
+        foreignField: "_id",
+        as: "testInfo",
+      },
+    },
+    { $unwind: { path: "$testInfo", preserveNullAndEmptyArrays: true } },
+
+    // Chronological order so testResults (pushed below) lists tests in the
+    // order the student actually took them, not an arbitrary DB order.
+    { $sort: { submittedAt: 1 } },
+
     {
       $group: {
         _id: "$studentId",
@@ -335,13 +351,52 @@ export const getSeriesLeaderboard = async (seriesId, query, requester) => {
         totalScore: { $sum: "$totalScore" },
         maxScore: { $sum: "$maxScore" },
         totalTime: { $sum: "$timeTakenSeconds" },
-        avgAccuracy: { $avg: "$accuracy" },
         correctAnswersCount: { $sum: "$correctAnswersCount" },
         incorrectAnswersCount: { $sum: "$incorrectAnswersCount" },
         unattemptedCount: { $sum: "$unattemptedCount" },
         attemptedCount: { $sum: "$attemptedCount" },
         totalQuestions: { $sum: "$totalQuestions" },
         attempts: { $sum: 1 },
+        // Per-test breakdown so a student can see how they did on each test
+        // in the series, not just the series-wide total.
+        testResults: {
+          $push: {
+            testId: "$testId",
+            testTitle: { $ifNull: ["$testInfo.title", "Untitled Test"] },
+            status: "$status",
+            totalScore: "$totalScore",
+            maxScore: "$maxScore",
+            accuracy: "$accuracy",
+            correctAnswersCount: "$correctAnswersCount",
+            incorrectAnswersCount: "$incorrectAnswersCount",
+            unattemptedCount: "$unattemptedCount",
+            totalQuestions: "$totalQuestions",
+            timeTakenSeconds: "$timeTakenSeconds",
+            submittedAt: "$submittedAt",
+          },
+        },
+      },
+    },
+
+    // Series-wide accuracy pooled across every question in every test
+    // (total correct / total attempted) — NOT an average of each test's own
+    // accuracy%, which over-weights a low-question-count test relative to a
+    // high-count one and can misrepresent a student's real correctness
+    // ratio across the series.
+    {
+      $addFields: {
+        accuracy: {
+          $cond: [
+            { $gt: ["$attemptedCount", 0] },
+            {
+              $multiply: [
+                { $divide: ["$correctAnswersCount", "$attemptedCount"] },
+                100,
+              ],
+            },
+            0,
+          ],
+        },
       },
     },
 
@@ -368,14 +423,14 @@ export const getSeriesLeaderboard = async (seriesId, query, requester) => {
         maxScore: 1,
         totalTime: 1,
         timeTakenSeconds: "$totalTime",
-        avgAccuracy: 1,
-        accuracy: "$avgAccuracy",
+        accuracy: 1,
         correctAnswersCount: 1,
         incorrectAnswersCount: 1,
         unattemptedCount: 1,
         attemptedCount: 1,
         totalQuestions: 1,
         attempts: 1,
+        testResults: 1,
 
         studentName: buildStudentName,
         email: "$student.email",
