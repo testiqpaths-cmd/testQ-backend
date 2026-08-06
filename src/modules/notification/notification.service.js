@@ -111,6 +111,36 @@ export const dispatchNotificationToStudents = async (creator, notificationPayloa
 };
 
 /**
+ * Notifies every student on the platform, regardless of who posted — used
+ * for news updates, which are currently always visible to ALL students
+ * (see newsUpdates.controller.js: audience is hardcoded to "ALL") whether
+ * posted by an admin or an organization. Unlike dispatchNotificationToStudents,
+ * this does NOT scope to the creator's own org, since that would leave
+ * other orgs' students able to see the news item but never notified of it.
+ *
+ * @param {Object} notificationPayload - { title, message, type, link, metadata }
+ */
+export const dispatchNotificationToAllStudents = async (notificationPayload) => {
+  try {
+    const students = await listStudents({});
+    if (students.length === 0) return;
+
+    const notifications = students.map(student => ({
+      userId: student._id,
+      title: notificationPayload.title,
+      message: notificationPayload.message,
+      type: notificationPayload.type || "SYSTEM",
+      link: notificationPayload.link || null,
+      metadata: notificationPayload.metadata || {},
+    }));
+
+    await Notification.insertMany(notifications, { ordered: false });
+  } catch (error) {
+    console.error("Failed to dispatch news notification:", error);
+  }
+};
+
+/**
  * Generic helper to dispatch notifications to admins and specific organization.
  * 
  * @param {String|null} organizationId - The organization ID related to the event, or null if N/A.

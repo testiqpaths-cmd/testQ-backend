@@ -1,5 +1,6 @@
 import { createNews, deleteNews, getAllNews, getStudentNews } from "./newsUpdates.service.js";
 import { getIO } from "../../sockets/index.js";
+import logger from "../../config/logger.js";
 
 const isAdminRole = (role) => role === "IQPATH_ADMIN" || role === "admin";
 const isOrganizationRole = (role) => role === "ORGANIZATION" || role === "organization";
@@ -71,6 +72,15 @@ export const createNewsController = async (req, res, next) => {
     } catch {
       // Ignore socket broadcast errors; request should still succeed.
     }
+
+    const { dispatchNotificationToAllStudents } = await import("../notification/notification.service.js");
+    dispatchNotificationToAllStudents({
+      title: "New Update Posted",
+      message: news.title,
+      type: "NEWS_UPDATE",
+      link: "/student/dashboard/news-updates",
+      metadata: { newsId: news._id?.toString() },
+    }).catch((err) => logger.error(`News notification dispatch failed: ${err.message}`));
 
     return res.status(201).json({
       success: true,
