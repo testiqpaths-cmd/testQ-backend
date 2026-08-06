@@ -2,8 +2,23 @@ import TestAttempt from "../../../models/testAttempt.model.js";
 import User from "../../auth/models/User.model.js";
 import Organization from "../../../models/organization.model.js";
 import Test from "../../../models/test.model.js";
+import Question from "../../../models/question.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
+
+const DIFFICULTY_LABELS = ["Easy", "Medium", "Hard"];
+
+const toDifficultyLabel = (value) => {
+  const normalized = String(value || "MEDIUM").toLowerCase();
+  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return DIFFICULTY_LABELS.includes(label) ? label : "Medium";
+};
+
+const emptyDifficultyBreakdown = () => ({
+  Easy: { correct: 0, wrong: 0, skipped: 0 },
+  Medium: { correct: 0, wrong: 0, skipped: 0 },
+  Hard: { correct: 0, wrong: 0, skipped: 0 },
+});
 
 export const getStudentDashboardData = async (studentId) => {
   // Fetch all completed/submitted attempts for the student
@@ -33,6 +48,26 @@ export const getStudentDashboardData = async (studentId) => {
       tests: [],
     };
   }
+
+  // "Difficulty Analysis" used to read Test.difficulty — an optional
+  // whole-test tag that's almost never set by test creators, so it silently
+  // defaulted every test to "Medium" and made the chart meaningless (every
+  // student's questions appeared to be Medium regardless of reality). Real
+  // difficulty lives per-QUESTION on the Question doc, so batch-fetch it
+  // once here and look it up per answer below instead.
+  const allQuestionIds = new Set();
+  attempts.forEach((attempt) => {
+    (attempt.answers || []).forEach((a) => {
+      if (a.questionId) allQuestionIds.add(String(a.questionId));
+    });
+  });
+
+  const questions = await Question.find({ _id: { $in: Array.from(allQuestionIds) } })
+    .select("difficulty")
+    .lean();
+  const questionDifficultyMap = new Map(
+    questions.map((q) => [String(q._id), toDifficultyLabel(q.difficulty)])
+  );
 
   let totalQuestionsAttempted = 0;
   let totalCorrectAnswers = 0;
@@ -136,11 +171,17 @@ export const getStudentDashboardData = async (studentId) => {
       subject = attempt.testId.type;
     }
 
-    let difficultyRaw = "Medium";
-    if (attempt.testId && Array.isArray(attempt.testId.difficulty) && attempt.testId.difficulty.length > 0) {
-      difficultyRaw = attempt.testId.difficulty[0];
-    }
-    const difficultyStr = difficultyRaw ? (difficultyRaw.charAt(0).toUpperCase() + difficultyRaw.slice(1).toLowerCase()) : "Medium";
+    // Real per-question difficulty breakdown for this attempt (Easy/Medium/
+    // Hard), built from the actual Question docs rather than the test-level
+    // tag above.
+    const difficultyBreakdown = emptyDifficultyBreakdown();
+    answers.forEach((a) => {
+      const label = questionDifficultyMap.get(String(a.questionId)) || "Medium";
+      const bucket = difficultyBreakdown[label];
+      if (a.isCorrect) bucket.correct += 1;
+      else if (a.selectedOption) bucket.wrong += 1;
+      else bucket.skipped += 1;
+    });
 
     allTests.push({
       id: attempt.testId?._id || attempt.testId,
@@ -148,7 +189,7 @@ export const getStudentDashboardData = async (studentId) => {
       name: testName,
       subject: subject,
       topic: primaryTopic,
-      difficulty: difficultyStr,
+      difficultyBreakdown,
       totalQuestions: totalQ,
       correct: correctQ,
       wrong: wrongQ,
