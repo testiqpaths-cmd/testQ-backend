@@ -354,8 +354,12 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     HelpSupport.countDocuments(supportFilter),
     HelpSupport.countDocuments({ ...supportFilter, status: "pending" }),
     HelpSupport.countDocuments({ ...supportFilter, status: "resolved" }),
-    Test.find(testFilter).select("_id").lean(),
-    User.find(studentFilter).select("_id").lean(),
+    // Only the org branch actually uses these id lists (to scope
+    // assignments/attempts to "this org's tests/students") — for the admin
+    // branch they're discarded below, so skip fetching every test/student
+    // id on the whole platform just to throw it away.
+    isAdmin ? Promise.resolve([]) : Test.find(testFilter).select("_id").lean(),
+    isAdmin ? Promise.resolve([]) : User.find(studentFilter).select("_id").lean(),
     UserSubscription.aggregate([
       { $match: { status: "ACTIVE" } },
       {

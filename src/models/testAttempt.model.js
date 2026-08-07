@@ -217,4 +217,13 @@ testAttemptSchema.index(
   },
 );
 
+// Without these, the student/admin/org dashboards' `{studentId|status, ...}`
+// queries fall back to a full collection scan that gets slower as the
+// TOTAL number of attempts across the platform grows — not just as a given
+// student's own history grows. studentId+status+submittedAt covers the
+// student dashboard's exact filter+sort; status+submittedAt covers the
+// admin dashboard's platform-wide "most recent 100" query.
+testAttemptSchema.index({ studentId: 1, status: 1, submittedAt: 1 });
+testAttemptSchema.index({ status: 1, submittedAt: -1 });
+
 export default mongoose.model("TestAttempt", testAttemptSchema);
