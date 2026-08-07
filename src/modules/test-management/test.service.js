@@ -104,10 +104,12 @@ export async function deleteTest(test) {
 }
 
 export const getAllTests = async () => {
-  // Exclude tests that belong to a series or IQ Room
-  return await Test.find({ isSeriesTest: { $ne: true }, isIQRoomTest: { $ne: true } }).sort({
-    createdAt: -1,
-  });
+  // Exclude tests that belong to a series or IQ Room. Read-only list view —
+  // the controller already handles either a Mongoose doc or a plain object
+  // (`t.toObject ? t.toObject() : {...t}`), so .lean() is a safe, free win.
+  return await Test.find({ isSeriesTest: { $ne: true }, isIQRoomTest: { $ne: true } })
+    .sort({ createdAt: -1 })
+    .lean();
 };
 
 export const getLeaderboardTests = async ({ userId = null, userRole = null, userOrganizationId = null } = {}) => {
@@ -240,9 +242,11 @@ export const getMyTests = async ({ userId, search = "" }) => {
   filters.isSeriesTest = { $ne: true };
   filters.isIQRoomTest = { $ne: true };
 
+  // Read-only list view — same defensive controller handling as getAllTests.
   return Test.find(filters)
     .populate("subjectId", "name")
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 };
 
 export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null } = {}) => {
@@ -269,13 +273,17 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     ];
   }
 
+  // Read-only list view; .lean() below means `test` is already a plain
+  // object, so the two spreads further down use `...test` directly instead
+  // of `...test.toObject()` (which would throw on a lean result).
   const tests = await Test.find(filters)
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
       select: "title description visibility createdAt",
     })
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
   if (studentId) {
     const assignments = await TestAssignment.find({
@@ -318,7 +326,7 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
         const seriesId = test.testSeriesId?._id || test.testSeriesId || null;
         const seriesAssignment = seriesId ? seriesAssignmentMap.get(String(seriesId)) : null;
         return {
-          ...test.toObject(),
+          ...test,
           id: String(test._id),
           assignmentStatus: assignment ? assignment.status : "PENDING",
           seriesAssignmentStatus: seriesId ? (seriesAssignment ? seriesAssignment.status : "PENDING") : null,
@@ -329,7 +337,7 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
   }
 
   return tests.map((test) => ({
-    ...test.toObject(),
+    ...test,
     id: String(test._id),
     assignmentStatus: "PENDING",
     seriesAssignmentStatus: (test.testSeriesId?._id || test.testSeriesId) ? "PENDING" : null,

@@ -41,6 +41,11 @@ const helpSupportSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// Admin/org dashboard counts these by organizationId+status on every load;
+// the admin list view sorts by createdAt.
+helpSupportSchema.index({ organizationId: 1, status: 1 });
+helpSupportSchema.index({ createdAt: -1 });
+
 const HelpSupport = mongoose.model("HelpSupport", helpSupportSchema);
 
 export default HelpSupport;

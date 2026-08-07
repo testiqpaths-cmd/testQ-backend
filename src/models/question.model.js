@@ -60,4 +60,9 @@ const questionSchema = new mongoose.Schema({
   },
 });
 
+// Every test-start selects questions by subjectId/topicId/type/difficulty
+// (questionSelection.service.js), and the question-bank list/pagination
+// endpoints filter the same way — none of it indexed beyond excelBatchId.
+questionSchema.index({ subjectId: 1, topicId: 1, type: 1, difficulty: 1 });
+
 export default mongoose.model("Question", questionSchema);

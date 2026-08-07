@@ -162,9 +162,14 @@ export const getUserUsageDetails = async (userId) => {
   const sub = await getUserSubscription(userId);
   if (!sub) return null;
 
-  const plan = await Plan.findById(sub.planId._id ? sub.planId._id : sub.planId).populate("roleId");
+  // usageRecords only needs userId (already known) — it doesn't depend on
+  // `plan`, so fetch it in parallel instead of after. planFeatures does
+  // depend on plan._id, so it still has to wait for that one.
+  const [plan, usageRecords] = await Promise.all([
+    Plan.findById(sub.planId._id ? sub.planId._id : sub.planId).populate("roleId"),
+    UserFeatureUsage.find({ userId }),
+  ]);
   const planFeatures = await PlanFeature.find({ planId: plan._id }).populate("featureId");
-  const usageRecords = await UserFeatureUsage.find({ userId });
 
   const featureDetails = await Promise.all(
     planFeatures.map(async (pf) => {

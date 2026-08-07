@@ -160,23 +160,27 @@ export const getUserController = async (req, res) => {
 		data.testsGivenCount = (attempts || []).filter(a => a.status !== "missed").length;
 	} else if (user.role === "ORGANIZATION") {
 		const orgId = user.organizationId;
-		// Count students registered in organization
-		const orgStudents = await User.find({
-			role: "STUDENT",
-			organizationId: orgId,
-			isDeleted: false
-		}).select("firstName lastName email status createdAt").lean();
+		// These three don't depend on each other — fetch in parallel instead
+		// of one round-trip at a time.
+		const [orgStudents, testsCreatedCount, seriesCreatedCount] = await Promise.all([
+			// Students registered in organization
+			User.find({
+				role: "STUDENT",
+				organizationId: orgId,
+				isDeleted: false
+			}).select("firstName lastName email status createdAt").lean(),
 
-		// Count tests created by organization user
-		const testsCreatedCount = await Test.countDocuments({
-			"createdBy.userId": user._id,
-			isDeleted: { $ne: 1 }
-		});
+			// Tests created by organization user
+			Test.countDocuments({
+				"createdBy.userId": user._id,
+				isDeleted: { $ne: 1 }
+			}),
 
-		// Count series created by organization user
-		const seriesCreatedCount = await TestSeries.countDocuments({
-			"createdBy.userId": user._id
-		});
+			// Series created by organization user
+			TestSeries.countDocuments({
+				"createdBy.userId": user._id
+			}),
+		]);
 
 		data.students = orgStudents || [];
 		data.testsCreatedCount = testsCreatedCount;

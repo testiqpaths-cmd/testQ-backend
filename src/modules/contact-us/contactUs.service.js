@@ -7,11 +7,12 @@ export const createContactUs = async (data) => {
 export const getContactUs = async (filters = {}) => {
   return await ContactUs.find(filters)
     .populate("organizationId", "name")
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 };
 
 export const getContactUsById = async (id) => {
-  return await ContactUs.findById(id);
+  return await ContactUs.findById(id).lean();
 };
 
 export const deleteContactUsById = async (id) => {

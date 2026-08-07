@@ -12,14 +12,19 @@ export const updateSubjectRepo = (id, data) =>
 
 export const deleteSubjectRepo = (id) => Subject.findByIdAndDelete(id);
 
-export const getSubjectByIdRepo = (id) => Subject.findById(id);
+// All GET helpers below are read-only (view/dropdown data, or duplicate-name
+// checks that are read-then-discarded — actual edits go through
+// updateSubjectRepo/updateTopicRepo's own findByIdAndUpdate, never a
+// fetch-then-save on these results), so .lean() is safe everywhere here.
+export const getSubjectByIdRepo = (id) => Subject.findById(id).lean();
 
-export const getAllSubjectsRepo = () => Subject.find().populate("createdBy", "_id name email");
+export const getAllSubjectsRepo = () => Subject.find().populate("createdBy", "_id name email").lean();
 
 export const getSubjectsByUserRepo = (userId) =>
   Subject.find({ createdBy: userId })
     .populate("createdBy", "_id name email")
-    .sort({ updatedAt: -1, createdAt: -1 });
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .lean();
 
 export const getSubjectByNameRepo = (name, userId = null) => {
   const normalizedName = String(name ?? "").trim();
@@ -36,7 +41,7 @@ export const getSubjectByNameRepo = (name, userId = null) => {
     filters.createdBy = userId;
   }
 
-  return Subject.findOne(filters);
+  return Subject.findOne(filters).lean();
 };
 
 // ========== TOPIC REPOSITORY ==========
@@ -49,18 +54,20 @@ export const updateTopicRepo = (id, data) =>
 export const deleteTopicRepo = (id) => Topic.findByIdAndDelete(id);
 
 export const getTopicByIdRepo = (id) =>
-  Topic.findById(id).populate("subjectId", "_id name").populate("createdBy", "_id name email");
+  Topic.findById(id).populate("subjectId", "_id name").populate("createdBy", "_id name email").lean();
 
 export const getAllTopicsRepo = () =>
   Topic.find()
     .populate("subjectId", "_id name")
-    .populate("createdBy", "_id name email");
+    .populate("createdBy", "_id name email")
+    .lean();
 
 export const getTopicsByUserRepo = (userId) =>
   Topic.find({ createdBy: userId })
     .populate("subjectId", "_id name")
     .populate("createdBy", "_id name email")
-    .sort({ updatedAt: -1, createdAt: -1 });
+    .sort({ updatedAt: -1, createdAt: -1 })
+    .lean();
 
 export const getTopicsBySubjectIdRepo = (subjectId, userId = null) => {
   const filters = { subjectId };
@@ -68,11 +75,11 @@ export const getTopicsBySubjectIdRepo = (subjectId, userId = null) => {
     filters.createdBy = userId;
   }
 
-  return Topic.find(filters).populate("createdBy", "_id name email");
+  return Topic.find(filters).populate("createdBy", "_id name email").lean();
 };
 
 export const getTopicByNameAndSubjectRepo = (name, subjectId) =>
   Topic.findOne({
     name: new RegExp(`^${escapeRegex(String(name ?? "").trim())}$`, "i"),
     subjectId,
-  });
+  }).lean();

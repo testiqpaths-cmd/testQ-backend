@@ -46,4 +46,13 @@ const testSchema = new Schema({
 },
 });
 
+// Test had zero indexes despite being queried constantly by these exact
+// filter+sort shapes (getAssignedTests, getMyTests, dashboard counts, series
+// lookups) — every one of those was a full collection scan that gets slower
+// as the platform's total test count grows.
+testSchema.index({ isDeleted: 1, isPublished: 1, isIQRoomTest: 1, createdAt: -1 });
+testSchema.index({ "createdBy.userId": 1, isDeleted: 1, createdAt: -1 });
+testSchema.index({ status: 1, isDeleted: 1 });
+testSchema.index({ testSeriesId: 1 });
+
 export default model("Test", testSchema);

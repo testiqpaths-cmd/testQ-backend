@@ -46,6 +46,11 @@ const notificationSchema = new mongoose.Schema(
   }
 );
 
+// Every read/update/delete in notification.service.js filters by userId
+// (and the list view sorts by createdAt) with no supporting index — hit on
+// essentially every authenticated page load via the notification bell.
+notificationSchema.index({ userId: 1, createdAt: -1 });
+
 const Notification = mongoose.model("Notification", notificationSchema);
 
 export default Notification;

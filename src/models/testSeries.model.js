@@ -23,4 +23,9 @@ const TestSeriesSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+// "My series" listing filters by createdBy.userId; duplicate-title checks
+// on every series creation query by title. Neither was indexed.
+TestSeriesSchema.index({ "createdBy.userId": 1 });
+TestSeriesSchema.index({ title: 1 });
+
 export default mongoose.model("TestSeries", TestSeriesSchema);
