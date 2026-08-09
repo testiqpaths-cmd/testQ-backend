@@ -2,6 +2,8 @@ import TestAttempt from "../../../models/testAttempt.model.js";
 import User from "../../auth/models/User.model.js";
 import Organization from "../../../models/organization.model.js";
 import Test from "../../../models/test.model.js";
+import TestSeries from "../../../models/testSeries.model.js";
+import TestSeriesAssignment from "../../../models/testSeriesAssignment.model.js";
 import Question from "../../../models/question.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
@@ -313,6 +315,12 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
   const withTestFilter = (extraFilter) => (
     isAdmin ? { ...testFilter, ...extraFilter } : { $and: [testFilter, extraFilter] }
   );
+  const seriesFilter = {
+    $or: [
+      ...(adminUserId ? [{ "createdBy.userId": adminUserId }] : []),
+      ...(orgId ? [{ allowedOrganizations: orgId }] : []),
+    ],
+  };
 
   const [
     totalStudents,
@@ -331,6 +339,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     planDistributionRaw,
     draftTestsCount,
     publishedTestsCount,
+    totalTestSeries,
   ] = await Promise.all([
     User.countDocuments(studentFilter),
     isAdmin ? Organization.countDocuments() : Promise.resolve(0),
@@ -359,7 +368,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     // branch they're discarded below, so skip fetching every test/student
     // id on the whole platform just to throw it away.
     isAdmin ? Promise.resolve([]) : Test.find(testFilter).select("_id").lean(),
-    isAdmin ? Promise.resolve([]) : User.find(studentFilter).select("_id").lean(),
+    isAdmin ? Promise.resolve([]) : User.find(studentFilter).select("_id createdAt").lean(),
     UserSubscription.aggregate([
       { $match: { status: "ACTIVE" } },
       {
@@ -389,10 +398,17 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     ]),
     Test.countDocuments({ ...testFilter, isPublished: false }),
     Test.countDocuments({ ...testFilter, isPublished: true }),
+    TestSeries.countDocuments(isAdmin ? {} : seriesFilter),
   ]);
 
   const testIds = scopedTests.map((test) => test._id);
   const studentIds = scopedStudents.map((student) => student._id);
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const newStudentsThisMonth = scopedStudents.filter(
+    (student) => student.createdAt && new Date(student.createdAt) >= monthStart,
+  ).length;
 
   const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
   const assignmentFilter = isAdmin
@@ -425,6 +441,11 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     .limit(100)
     .lean();
 
+  const todayAttempts = await TestAttempt.countDocuments({
+    ...attemptFilter,
+    submittedAt: { $gte: start, $lt: end },
+  });
+
   const { performanceOverTime, subjectWiseTests } = buildEngagementMetrics(attempts);
   const recentTests = attempts.slice(0, 10).map((attempt) => ({
     id: attempt._id,
@@ -433,6 +454,50 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     score: Math.round(attempt.percentage || 0),
     date: attempt.submittedAt || attempt.updatedAt || attempt.createdAt,
   }));
+
+  const series = await TestSeries.find(isAdmin ? {} : seriesFilter)
+    .select("title tests")
+    .sort({ createdAt: -1 })
+    .lean();
+  const seriesAssignments = await TestSeriesAssignment.aggregate([
+    {
+      $match: {
+        seriesId: { $in: series.map((item) => item._id) },
+        status: "ACCEPTED",
+      },
+    },
+    { $group: { _id: "$seriesId", students: { $sum: 1 } } },
+  ]);
+  const assignmentCountBySeries = new Map(
+    seriesAssignments.map((item) => [String(item._id), item.students]),
+  );
+  const completedTestIds = new Set(
+    attempts
+      .filter((attempt) => ["SUBMITTED", "EVALUATED"].includes(attempt.status))
+      .map((attempt) => String(attempt.testId?._id || attempt.testId)),
+  );
+  const seriesColors = ["#3F5BF6", "#16A34A", "#F59E0B", "#A855F7", "#0891B2"];
+  const testSeriesOverview = series.map((item, index) => {
+    const scopedTests = isAdmin
+      ? item.tests || []
+      : (item.tests || []).filter((testId) =>
+        testIds.some((scopedId) => String(scopedId) === String(testId)),
+      );
+    const completedTestsInSeries = scopedTests.filter((testId) =>
+      completedTestIds.has(String(testId)),
+    ).length;
+
+    return {
+      id: item._id,
+      name: item.title,
+      tests: scopedTests.length,
+      students: assignmentCountBySeries.get(String(item._id)) || 0,
+      progress: scopedTests.length
+        ? Math.round((completedTestsInSeries / scopedTests.length) * 100)
+        : 0,
+      color: seriesColors[index % seriesColors.length],
+    };
+  });
 
   const planDistribution = {
     students: [],
@@ -454,6 +519,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
   return {
     students: {
       total: totalStudents,
+      newThisMonth: newStudentsThisMonth,
       plans: planDistribution.students,
     },
     organizations: {
@@ -461,6 +527,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       plans: planDistribution.organizations,
     },
     tests: {
+      total: activeTests,
       totalActive: activeTests,
       activeAdmin: activeAdminTests,
       activeOrg: activeOrgTests,
@@ -480,6 +547,11 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       pending: supportPending,
       completed: supportCompleted,
     },
+    testSeries: {
+      total: totalTestSeries,
+    },
+    todayAttempts,
+    testSeriesOverview,
     performanceOverTime,
     recentTests,
     subjectWiseTests,
