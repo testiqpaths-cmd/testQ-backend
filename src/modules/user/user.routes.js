@@ -7,6 +7,7 @@ import {
 	updateUserController,
 	deleteUserController,
 	listStudentsController,
+	getStudentEducationFilterOptionsController,
 	createStudentController,
 	getStudentController,
 	updateStudentController,
@@ -29,6 +30,13 @@ const router = express.Router();
 // Specific routes MUST come before generic /:id routes
 // Student CRUD (role = STUDENT)
 router.get("/students", authMiddleware, featureMiddleware("USER_MANAGEMENT"), asyncHandler(listStudentsController));
+// Must come before /students/:id — see comment above.
+router.get(
+	"/students/filter-options",
+	authMiddleware,
+	featureMiddleware("USER_MANAGEMENT"),
+	asyncHandler(getStudentEducationFilterOptionsController)
+);
 router.post(
 	"/students",
 	authMiddleware,

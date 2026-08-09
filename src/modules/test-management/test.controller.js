@@ -78,7 +78,7 @@ export async function updateTest(req, res, next) {
     }
 
     const test = await service.updateTest(req.test, req.body, req.user);
-    broadcastAssignedTestsChanged(req.user).catch((err) =>
+    broadcastAssignedTestsChanged(req.user, test).catch((err) =>
       logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
     );
     res.json({ success: true, data: test });
@@ -94,7 +94,7 @@ export async function deleteTest(req, res, next) {
     }
 
     await service.deleteTest(req.test);
-    broadcastAssignedTestsChanged(req.user).catch((err) =>
+    broadcastAssignedTestsChanged(req.user, req.test).catch((err) =>
       logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
     );
     res.status(204).end();
@@ -217,7 +217,7 @@ export const getAssignedTests = async (req, res) => {
       }
     }
 
-    const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId });
+    const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId, userRole: req.user?.role });
 
     // Attach current user's attempt count so the UI can hide Start when
     // attempts are exhausted, and link to their latest result if any — one
@@ -294,7 +294,7 @@ export const publishTest = async (req, res, next) => {
       type: "TEST_ASSIGNED",
       link: `/student/dashboard/tests/${req.test._id}/instructions`,
       metadata: { testId: req.test._id }
-    }).catch(err => logger.error(`Notification dispatch failed: ${err.message}`));
+    }, req.test).catch(err => logger.error(`Notification dispatch failed: ${err.message}`));
 
     res.json({ success: true, data: req.test });
   } catch (e) {

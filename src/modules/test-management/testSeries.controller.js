@@ -24,7 +24,7 @@ const resolveOrganizationId = async (user) => {
 
 export const createSeries = async (req, res, next) => {
   try {
-    const { title, description, visibility, tests = [] } = req.body;
+    const { title, description, visibility, allowedOrganizations, allowedStudents, tests = [] } = req.body;
 
     if (!title?.trim()) {
       return res
@@ -42,6 +42,8 @@ export const createSeries = async (req, res, next) => {
         title: title.trim(),
         description: description?.trim() || "",
         visibility,
+        allowedOrganizations,
+        allowedStudents,
         tests: cleanedTests,
       },
       req.user
@@ -161,7 +163,7 @@ export const createSeriesTest = async (req, res, next) => {
     const TestSeriesService = await import('./testSeries.service.js');
     const test = await TestSeriesService.createSeriesTest(seriesId, data, req.user);
 
-    broadcastAssignedTestsChanged(req.user).catch((err) =>
+    broadcastAssignedTestsChanged(req.user, test).catch((err) =>
       logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
     );
 

@@ -3,7 +3,7 @@ import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
-import { ensureCreatorOrgIncluded } from "./utils/visibility.js";
+import { ensureCreatorOrgIncluded, resolveAllowedStudents } from "./utils/visibility.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
@@ -52,6 +52,7 @@ export async function createTest(data, user) {
       data.visibility === "LINK_ONLY"
         ? crypto.randomBytes(4).toString("hex")
         : null,
+    allowedStudents: await resolveAllowedStudents(data.visibility, data.allowedStudents, user),
     createdBy: { userId: user._id || user.id, role: user.role },
   };
 
@@ -75,6 +76,15 @@ export async function createTest(data, user) {
 }
 
 export async function updateTest(test, payload, user) {
+  if (payload.visibility !== undefined || payload.allowedStudents !== undefined) {
+    const nextVisibility = payload.visibility ?? test.visibility;
+    payload.allowedStudents = await resolveAllowedStudents(
+      nextVisibility,
+      payload.allowedStudents ?? test.allowedStudents,
+      user
+    );
+  }
+
   Object.assign(test, payload);
   await ensureCreatorOrgIncluded(test);
 
@@ -249,7 +259,7 @@ export const getMyTests = async ({ userId, search = "" }) => {
     .lean();
 };
 
-export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null } = {}) => {
+export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null, userRole = null } = {}) => {
   // `isPublished` is the canonical "is this live" flag (see computeTestStatus,
   // which every publish/update path derives `status` from). Matching on the
   // literal string "PUBLISHED" instead used to exclude every series test
@@ -266,11 +276,35 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     filters.createdAt = { $gte: new Date(userCreatedAt) };
   }
 
+  // Combined into $and (rather than two competing top-level $or keys) since
+  // both the search condition and the SELECT_STUDENT gate below need their
+  // own $or.
+  const andConditions = [];
+
   if (String(search || "").trim()) {
-    filters.$or = [
-      { title: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } },
-    ];
+    andConditions.push({
+      $or: [
+        { title: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ],
+    });
+  }
+
+  // A SELECT_STUDENT test is only visible to the specific students its
+  // creator chose — everyone else must not see it here at all, the same way
+  // it's excluded from a direct single-test fetch (visibility.middleware.js).
+  // IQPATH_ADMIN keeps universal access, matching that same precedent.
+  if (studentId && userRole !== "IQPATH_ADMIN") {
+    andConditions.push({
+      $or: [
+        { visibility: { $ne: "SELECT_STUDENT" } },
+        { allowedStudents: studentId },
+      ],
+    });
+  }
+
+  if (andConditions.length) {
+    filters.$and = andConditions;
   }
 
   // Read-only list view; .lean() below means `test` is already a plain

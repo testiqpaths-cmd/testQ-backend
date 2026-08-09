@@ -4,7 +4,7 @@ import TestSeries from "../../models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
-import { ensureCreatorOrgIncluded } from "./utils/visibility.js";
+import { ensureCreatorOrgIncluded, resolveAllowedStudents } from "./utils/visibility.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
 
@@ -71,6 +71,7 @@ export const createSeries = async (data, user) => {
   const payload = {
     ...data,
     seriesCode,
+    allowedStudents: await resolveAllowedStudents(data.visibility, data.allowedStudents, user),
     createdBy: {
       userId: new mongoose.Types.ObjectId(user._id || user.id),
       role: user.role,
@@ -228,6 +229,7 @@ export const createSeriesTest = async (seriesId, data, user) => {
     isSeriesTest: true,
     maxAttempts: Number(data.maxAttempts) || 1,
     testCode: data.visibility === 'LINK_ONLY' ? crypto.randomBytes(4).toString('hex') : null,
+    allowedStudents: await resolveAllowedStudents(data.visibility, data.allowedStudents, user),
     createdBy: { userId: user._id || user.id, role: user.role },
   };
   await ensureCreatorOrgIncluded(payload);

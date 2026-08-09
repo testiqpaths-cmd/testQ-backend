@@ -12,11 +12,12 @@ const TestSeriesSchema = new mongoose.Schema(
 
     visibility: {
       type: String,
-      enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY"],
+      enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY", "SELECT_STUDENT"],
       required: true
     },
 
     allowedOrganizations: [{ type: mongoose.Schema.Types.ObjectId }],
+    allowedStudents: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     tests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
     seriesCode: String
   },

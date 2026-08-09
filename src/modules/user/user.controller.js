@@ -13,6 +13,7 @@ import {
 	softDeleteUser,
 	listUsers,
 	listStudents,
+	getStudentEducationFilterOptions,
 	createStudent,
 	createUsersFromArray,
 	listOrganizations,
@@ -224,6 +225,21 @@ export const listStudentsController = async (req, res) => {
 
 	const users = await listStudents(query);
 	res.json({ success: true, users });
+};
+
+export const getStudentEducationFilterOptionsController = async (req, res) => {
+	let organizationId = null;
+
+	if (req.user && req.user.role === "ORGANIZATION") {
+		organizationId = req.user.organizationId || null;
+		if (!organizationId) {
+			const dbUser = await getUserById(req.user._id);
+			organizationId = dbUser?.organizationId ?? null;
+		}
+	}
+
+	const options = await getStudentEducationFilterOptions(organizationId);
+	res.json({ success: true, data: options });
 };
 
 export const createStudentController = async (req, res) => {
