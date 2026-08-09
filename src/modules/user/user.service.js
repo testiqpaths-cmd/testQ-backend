@@ -38,6 +38,32 @@ export const createUser = async (payload) => {
 	return UserModel.create(data);
 };
 
+// Organization student caps are a direct per-org number set at creation time
+// (Organization.studentLimit), not the subscription/plan system — plans only
+// govern independent students. A null/unset limit means unlimited, so
+// existing organizations created before this field existed keep working
+// exactly as before.
+export const assertStudentLimitNotExceeded = async (organizationId, additionalCount = 1) => {
+	if (!organizationId) return;
+
+	const org = await Organization.findById(organizationId).select("studentLimit name").lean();
+	if (!org || org.studentLimit === null || org.studentLimit === undefined) return;
+
+	const currentCount = await UserModel.countDocuments({
+		organizationId,
+		role: "STUDENT",
+		status: "ACTIVE",
+	});
+
+	if (currentCount + additionalCount > org.studentLimit) {
+		const remaining = Math.max(0, org.studentLimit - currentCount);
+		throw new ApiError(
+			402,
+			`Student limit reached for ${org.name || "this organization"}. You can add ${remaining} more student${remaining === 1 ? "" : "s"} (limit: ${org.studentLimit}).`
+		);
+	}
+};
+
 export const getUserById = async (id) => {
 	return UserModel.findById(id)
 		.where({ isDeleted: false })

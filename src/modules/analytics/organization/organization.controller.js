@@ -174,6 +174,7 @@ export const createOrganization = async (req, res, next) => {
       businessPhone,
       plan,
       password,
+      studentLimit,
     } = req.body;
 
     if (!organizationName || !contactPerson || !contactEmail || !password) {
@@ -190,6 +191,7 @@ export const createOrganization = async (req, res, next) => {
       businessPhone,
       plan,
       password,
+      studentLimit,
       createdBy: req.user ?._id || req.user ?.id,
     });
 

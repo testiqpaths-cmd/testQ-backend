@@ -10,15 +10,30 @@ import { ApiError } from "../../../common/exceptions/ApiError.js";
 
 /**
  * Gets the user's active subscription or assigns a default one if missing.
+ *
+ * The plan/subscription system only governs independent students — an
+ * ORGANIZATION account and any STUDENT who belongs to one (user.organizationId
+ * set) are unrestricted by it entirely. Organizations get a dedicated,
+ * separate cap instead (Organization.studentLimit, enforced in
+ * user.service.js's assertStudentLimitNotExceeded). Returning null here
+ * (rather than only skipping *future* auto-creation) means any pre-existing
+ * subscription docs for such users are also ignored going forward, and it
+ * cascades cleanly: checkFeatureAccess() and getUserUsageDetails() below
+ * both already fail-open/return null when this returns null.
  */
 export const getUserSubscription = async (userId) => {
+  const user = await User.findById(userId).select("role organizationId");
+  if (!user) throw new ApiError(404, "User not found");
+
+  const isOrganization = user.role === "ORGANIZATION";
+  const isOrgAffiliatedStudent = user.role === "STUDENT" && Boolean(user.organizationId);
+  if (isOrganization || isOrgAffiliatedStudent) {
+    return null;
+  }
+
   let sub = await UserSubscription.findOne({ userId, status: "ACTIVE" }).populate("planId");
 
   if (!sub) {
-    // Attempt to assign default plan
-    const user = await User.findById(userId);
-    if (!user) throw new ApiError(404, "User not found");
-
     // Map user.role string to Role document
     const roleDoc = await Role.findOne({ name: user.role.toUpperCase() });
     if (!roleDoc) {

@@ -5,7 +5,6 @@ import TestSeries from "../../models/testSeries.model.js";
 import TestAttempt from "../../models/testAttempt.model.js";
 import { findAttemptsByStudent } from "../analytics/test-attempt/repository/testAttempt.repository.js";
 import { syncMissedAttemptsForStudent } from "../test-attempts/services/syncMissedAttempts.service.js";
-import { checkFeatureAccess } from "../subscription/services/subscription.service.js";
 import { asyncHandler as _ } from "../../common/utils/asyncHandler.js";
 import {
 	createUser,
@@ -21,6 +20,7 @@ import {
 	getOrganizationById,
 	updateOrganization,
 	deleteOrganization,
+	assertStudentLimitNotExceeded,
 } from "./user.service.js";
 import xlsx from "xlsx";
 import { generateUserTemplate } from "./template/generate-userTemplate.js";
@@ -109,7 +109,7 @@ export const createUserController = async (req, res) => {
 			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
 		}
 
-		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", 1);
+		await assertStudentLimitNotExceeded(requesterOrganizationId, 1);
 
 		payload.role = "STUDENT";
 		payload.organizationId = requesterOrganizationId;
@@ -245,10 +245,7 @@ export const createStudentController = async (req, res) => {
 		if (!requesterOrganizationId) {
 			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
 		}
-		
-		// Enforce Student Limit
-		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", 1);
-		
+
 		payload.organizationId = requesterOrganizationId;
 	}
 
@@ -262,6 +259,14 @@ export const createStudentController = async (req, res) => {
 	if (!payload.organizationId && requesterRole !== "IQPATH_ADMIN") {
 		return res.status(400).json({ success: false, message: "organizationId is required" });
 	}
+
+	// Applies regardless of whether it's the org itself or an admin adding a
+	// student on the org's behalf — the cap is on the organization, not on
+	// who's doing the adding.
+	if (payload.organizationId) {
+		await assertStudentLimitNotExceeded(payload.organizationId, 1);
+	}
+
 	const user = await createStudent(payload);
 	try {
 		await sendWelcomeEmail(user, payload.password);
@@ -379,9 +384,9 @@ export const bulkUploadUsersController = async (req, res) => {
 		return res.status(400).json({ success: false, message: "Invalid file format" });
 	}
 
-	// Enforce MAX_STUDENTS for Organization bulk uploads
+	// Enforce the organization's student limit for bulk uploads
 	if (requesterRole === "ORGANIZATION") {
-		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", rows.length);
+		await assertStudentLimitNotExceeded(requesterOrganizationId, rows.length);
 	}
 
 	// rows expected to be array of objects with headers: firstName,lastName,email,password,phone,role,organizationCode
