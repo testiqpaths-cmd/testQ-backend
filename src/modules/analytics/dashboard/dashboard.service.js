@@ -3,6 +3,8 @@ import User from "../../auth/models/User.model.js";
 import Organization from "../../../models/organization.model.js";
 import Test from "../../../models/test.model.js";
 import TestAssignment from "../../../models/testAssignment.model.js";
+import TestSeries from "../../../models/testSeries.model.js";
+import TestSeriesAssignment from "../../../models/testSeriesAssignment.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
 
@@ -351,12 +353,35 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     ],
   };
 
+  // `status` is only (re)computed at create/publish/update time (see
+  // computeTestStatus) — nothing recomputes it as real time passes, so a
+  // FIXED-schedule test whose window ended can sit with a stale
+  // ACTIVE/UPCOMING status forever. "Completed"/"Scheduled" below are
+  // time-aware (not just a stored-status lookup) so a test's schedule
+  // window ending actually moves it between these buckets immediately,
+  // rather than only when something happens to re-save it.
+  const now = new Date();
+  const liveCompletedCondition = {
+    $or: [
+      { status: "COMPLETED" },
+      { scheduleType: "FIXED", isPublished: true, endTime: { $lt: now } },
+    ],
+  };
+  const liveScheduledCondition = {
+    isPublished: true,
+    $or: [
+      { scheduleType: "DELAYED" },
+      { scheduleType: "FIXED", startTime: { $gt: now } },
+    ],
+  };
+
   const [
     totalStudents,
     totalOrganizations,
     activeTests,
     activeAdminTests,
     activeOrgTests,
+    totalTestsCount,
     completedTests,
     todayTests,
     scheduledTests,
@@ -375,20 +400,16 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     Test.countDocuments({ ...testFilter, status: "ACTIVE" }),
     isAdmin ? Test.countDocuments({ ...testFilter, status: "ACTIVE", "createdBy.role": "IQPATH_ADMIN" }) : Promise.resolve(0),
     isAdmin ? Test.countDocuments({ ...testFilter, status: "ACTIVE", "createdBy.role": "ORGANIZATION" }) : Promise.resolve(0),
-    Test.countDocuments({ ...testFilter, status: "COMPLETED" }),
+    // The real "how many tests exist" count — every status, not just active.
+    Test.countDocuments(testFilter),
+    Test.countDocuments(withTestFilter(liveCompletedCondition)),
     Test.countDocuments(withTestFilter({
       $or: [
         { startTime: { $gte: start, $lt: end } },
         { createdAt: { $gte: start, $lt: end } },
       ],
     })),
-    Test.countDocuments(withTestFilter({
-      isPublished: true,
-      $or: [
-        { status: "UPCOMING" },
-        { scheduleType: { $in: ["DELAYED", "FIXED"] } },
-      ],
-    })),
+    Test.countDocuments(withTestFilter(liveScheduledCondition)),
     HelpSupport.countDocuments(supportFilter),
     HelpSupport.countDocuments({ ...supportFilter, status: "pending" }),
     HelpSupport.countDocuments({ ...supportFilter, status: "resolved" }),
@@ -556,7 +577,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       plans: planDistribution.organizations,
     },
     tests: {
-      total: activeTests,
+      total: totalTestsCount,
       totalActive: activeTests,
       activeAdmin: activeAdminTests,
       activeOrg: activeOrgTests,
