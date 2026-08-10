@@ -16,6 +16,41 @@ const resolveOrganizationId = async (user) => {
   return dbUser?.organizationId ?? null;
 };
 
+// Same ownership rule as test.controller.js's canManageTest: admins can
+// manage any series, an org/creator can only manage their own.
+const canManageSeries = (series, user) => {
+  if (!series || !user) return false;
+  if (user.role === "IQPATH_ADMIN") return true;
+
+  const ownerId =
+    typeof series.createdBy?.userId === "object"
+      ? series.createdBy?.userId?.toString?.()
+      : String(series.createdBy?.userId || "");
+
+  const requesterId = String(user._id || user.id || "");
+  return ownerId && requesterId && ownerId === requesterId;
+};
+
+export const getSeriesStats = async (req, res) => {
+  try {
+    if (!canManageSeries(req.series, req.user)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const stats = await service.getSeriesStats(req.series._id);
+    return res.json({
+      success: true,
+      data: {
+        ...stats,
+        series: { _id: req.series._id, title: req.series.title },
+      },
+    });
+  } catch (err) {
+    logger.error(`getSeriesStats error: ${err.message}`);
+    return res.status(500).json({ success: false, message: err.message || "Internal Server Error" });
+  }
+};
+
 // export const createSeries = async (req, res) => {
 //   const series = await service.createSeries(req.body, req.user);
 //   res.status(201).json({ success: true, data: series });

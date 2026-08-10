@@ -14,6 +14,7 @@ import {
   declineSeriesAssignment,
   pendingSeriesAssignment,
   hideSeriesAssignment,
+  getSeriesStats,
 } from "./testSeries.controller.js";
 import { createSeriesTest } from "./testSeries.controller.js";
 
@@ -69,6 +70,15 @@ router.post(
   roleMiddleware("IQPATH_ADMIN","ORGANIZATION"),
   loadSeries,
   createSeriesTest
+);
+
+// Registration/completion/results stats — creator (or admin) only.
+router.get(
+  "/:id/stats",
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
+  loadSeries,
+  getSeriesStats
 );
 
 // Student series-assignment actions — mirrors the per-test accept/decline/
