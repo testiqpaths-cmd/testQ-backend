@@ -78,7 +78,7 @@ export const createNewsController = async (req, res, next) => {
       title: "New Update Posted",
       message: news.title,
       type: "NEWS_UPDATE",
-      link: "/student/dashboard/news-updates",
+      link: "/student/dashboard/assignedTest",
       metadata: { newsId: news._id?.toString() },
     }).catch((err) => logger.error(`News notification dispatch failed: ${err.message}`));
 
