@@ -17,6 +17,7 @@ import {
   getAllTests,
   getMyTests,
   getAssignedTests,
+  getTestStats,
   publishTest,
   acceptTestAssignment,
   declineTestAssignment,
@@ -91,6 +92,15 @@ router.post(
   authMiddleware,
   roleMiddleware("STUDENT"),
   startTestAssignment
+);
+
+// Per-test registration/completion/result stats — creator (or admin) only.
+router.get(
+  "/tests/:id/stats",
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
+  loadTest,
+  getTestStats
 );
 
 //get one
