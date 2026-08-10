@@ -271,6 +271,33 @@ export const getAssignedTests = async (req, res) => {
   }
 };
 
+export const getTestStats = async (req, res) => {
+  try {
+    if (!canManageTest(req.test, req.user)) {
+      return res.status(403).json({ success: false, message: "Forbidden" });
+    }
+
+    const stats = await service.getTestStats(req.test._id);
+    return res.json({
+      success: true,
+      data: {
+        ...stats,
+        test: {
+          _id: req.test._id,
+          title: req.test.title,
+          totalQuestions: req.test.totalQuestions,
+          totalMarks: req.test.totalMarks,
+          duration: req.test.duration,
+          visibility: req.test.visibility,
+        },
+      },
+    });
+  } catch (err) {
+    logger.error(`getTestStats error: ${err.message}`);
+    return res.status(500).json({ success: false, message: err.message });
+  }
+};
+
 export const publishTest = async (req, res, next) => {
   try {
     if (!canManageTest(req.test, req.user)) {

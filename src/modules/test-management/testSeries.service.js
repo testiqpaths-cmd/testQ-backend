@@ -102,6 +102,143 @@ export const getSeriesById = (id) =>
     select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status",
   });
 
+// Per-series stats for the creator (org/admin): who's registered (accepted
+// the series), who's completed every test in it, who hasn't, and each
+// registered student's per-test results — same shape as test.service.js's
+// getTestStats, one level up.
+export const getSeriesStats = async (seriesId) => {
+  const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
+  const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+  const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+  const User = (await import("../auth/models/User.model.js")).default;
+  const Test = (await import("../../models/test.model.js")).default;
+
+  const series = await TestSeries.findById(seriesId).select("tests").lean();
+  const testIds = series?.tests || [];
+
+  const tests = testIds.length
+    ? await Test.find({ _id: { $in: testIds } }).select("title").lean()
+    : [];
+  const testTitleMap = new Map(tests.map((t) => [String(t._id), t.title]));
+
+  const seriesAssignments = await TestSeriesAssignment.find({ seriesId }).lean();
+
+  const studentIds = seriesAssignments.map((a) => a.studentId);
+  const students = studentIds.length
+    ? await User.find({ _id: { $in: studentIds } }).select("firstName lastName email").lean()
+    : [];
+  const studentMap = new Map(students.map((s) => [String(s._id), s]));
+
+  // Every per-test assignment for every student, across every test in the
+  // series — this is what "completed the series" is actually derived from
+  // (TestSeriesAssignment itself only tracks PENDING/ACCEPTED/DECLINED/
+  // HIDDEN, not per-test progress).
+  const testAssignments = testIds.length
+    ? await TestAssignment.find({ testId: { $in: testIds } }).lean()
+    : [];
+  const assignmentsByStudent = new Map();
+  for (const a of testAssignments) {
+    const key = String(a.studentId);
+    if (!assignmentsByStudent.has(key)) assignmentsByStudent.set(key, new Map());
+    assignmentsByStudent.get(key).set(String(a.testId), a);
+  }
+
+  // Latest submitted/evaluated attempt per (student, test) pair.
+  const attempts = testIds.length
+    ? await TestAttempt.find({ testId: { $in: testIds }, status: { $in: ["SUBMITTED", "EVALUATED"] } })
+        .select("studentId testId totalScore maxScore percentage resultStatus submittedAt")
+        .sort({ submittedAt: -1 })
+        .lean()
+    : [];
+  const attemptKey = (studentId, testId) => `${studentId}:${testId}`;
+  const latestAttemptByPair = new Map();
+  for (const attempt of attempts) {
+    const key = attemptKey(String(attempt.studentId), String(attempt.testId));
+    if (!latestAttemptByPair.has(key)) latestAttemptByPair.set(key, attempt);
+  }
+
+  const byStatus = { PENDING: 0, ACCEPTED: 0, DECLINED: 0, HIDDEN: 0 };
+
+  const studentRows = seriesAssignments.map((assignment) => {
+    const studentId = String(assignment.studentId);
+    const student = studentMap.get(studentId);
+    if (byStatus[assignment.status] !== undefined) byStatus[assignment.status] += 1;
+
+    const perTestAssignments = assignmentsByStudent.get(studentId) || new Map();
+    const testResults = testIds.map((testId) => {
+      const tId = String(testId);
+      const testAssignment = perTestAssignments.get(tId);
+      const attempt = latestAttemptByPair.get(attemptKey(studentId, tId));
+
+      return {
+        testId: tId,
+        testTitle: testTitleMap.get(tId) || "Untitled Test",
+        status: testAssignment ? testAssignment.status : "PENDING",
+        result: attempt
+          ? {
+              attemptId: attempt._id,
+              totalScore: attempt.totalScore,
+              maxScore: attempt.maxScore,
+              percentage: attempt.percentage,
+              resultStatus: attempt.resultStatus,
+            }
+          : null,
+      };
+    });
+
+    const testsTotal = testIds.length;
+    const testsCompleted = testResults.filter((t) => t.status === "SUBMITTED").length;
+
+    const scoreTotals = testResults.reduce(
+      (acc, t) => {
+        if (t.result) {
+          acc.totalScore += t.result.totalScore || 0;
+          acc.maxScore += t.result.maxScore || 0;
+          acc.hasAny = true;
+        }
+        return acc;
+      },
+      { totalScore: 0, maxScore: 0, hasAny: false }
+    );
+
+    return {
+      studentId,
+      name: student ? `${student.firstName || ""} ${student.lastName || ""}`.trim() || "Unknown" : "Unknown",
+      email: student?.email || null,
+      assignmentStatus: assignment.status,
+      testsCompleted,
+      testsTotal,
+      overallScore: scoreTotals.hasAny
+        ? {
+            totalScore: scoreTotals.totalScore,
+            maxScore: scoreTotals.maxScore,
+            percentage: scoreTotals.maxScore > 0 ? (scoreTotals.totalScore / scoreTotals.maxScore) * 100 : 0,
+          }
+        : null,
+      testResults,
+    };
+  });
+
+  const registered = seriesAssignments.filter((a) => a.status === "ACCEPTED").length;
+  // Only counts as "completed" once every test in the series has been
+  // submitted — a series with zero tests never counts anyone as completed.
+  const completed = studentRows.filter(
+    (s) => s.assignmentStatus === "ACCEPTED" && s.testsTotal > 0 && s.testsCompleted === s.testsTotal
+  ).length;
+
+  return {
+    summary: {
+      totalAssigned: seriesAssignments.length,
+      registered,
+      completed,
+      notCompleted: registered - completed,
+      totalTests: testIds.length,
+      byStatus,
+    },
+    students: studentRows,
+  };
+};
+
 export const getSeriesList = async ({ userId, search = "" } = {}) => {
   const filters = userId ? { "createdBy.userId": userId } : {};
 

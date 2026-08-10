@@ -259,6 +259,83 @@ export const getMyTests = async ({ userId, search = "" }) => {
     .lean();
 };
 
+// Per-test stats for the creator (org/admin): who's registered (accepted the
+// assignment or further), who's completed it, who hasn't, and — for anyone
+// who has — their result.
+export const getTestStats = async (testId) => {
+  const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+  const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+  const User = (await import("../auth/models/User.model.js")).default;
+
+  const assignments = await TestAssignment.find({ testId }).lean();
+
+  const studentIds = assignments.map((a) => a.studentId);
+  const students = studentIds.length
+    ? await User.find({ _id: { $in: studentIds } }).select("firstName lastName email").lean()
+    : [];
+  const studentMap = new Map(students.map((s) => [String(s._id), s]));
+
+  // A student can retake a test (maxAttempts > 1) — keep only their most
+  // recent submitted/evaluated attempt, same "sort desc, take first per
+  // student" pattern used in getAssignedTests.
+  const attempts = await TestAttempt.find({
+    testId,
+    status: { $in: ["SUBMITTED", "EVALUATED"] },
+  })
+    .select("studentId totalScore maxScore percentage resultStatus submittedAt")
+    .sort({ submittedAt: -1 })
+    .lean();
+
+  const latestAttemptByStudent = new Map();
+  for (const attempt of attempts) {
+    const key = String(attempt.studentId);
+    if (!latestAttemptByStudent.has(key)) latestAttemptByStudent.set(key, attempt);
+  }
+
+  const registeredStatuses = new Set(["ACCEPTED", "STARTED", "SUBMITTED"]);
+  const byStatus = { PENDING: 0, ACCEPTED: 0, DECLINED: 0, STARTED: 0, SUBMITTED: 0, MISSED: 0, HIDDEN: 0 };
+
+  const studentRows = assignments.map((assignment) => {
+    const studentId = String(assignment.studentId);
+    const student = studentMap.get(studentId);
+    const attempt = latestAttemptByStudent.get(studentId);
+
+    if (byStatus[assignment.status] !== undefined) byStatus[assignment.status] += 1;
+
+    return {
+      studentId,
+      name: student ? `${student.firstName || ""} ${student.lastName || ""}`.trim() || "Unknown" : "Unknown",
+      email: student?.email || null,
+      assignmentStatus: assignment.status,
+      acceptedAt: assignment.acceptedAt || null,
+      submittedAt: assignment.submittedAt || null,
+      result: attempt
+        ? {
+            attemptId: attempt._id,
+            totalScore: attempt.totalScore,
+            maxScore: attempt.maxScore,
+            percentage: attempt.percentage,
+            resultStatus: attempt.resultStatus,
+          }
+        : null,
+    };
+  });
+
+  const registered = assignments.filter((a) => registeredStatuses.has(a.status)).length;
+  const completed = byStatus.SUBMITTED;
+
+  return {
+    summary: {
+      totalAssigned: assignments.length,
+      registered,
+      completed,
+      notCompleted: registered - completed,
+      byStatus,
+    },
+    students: studentRows,
+  };
+};
+
 export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null, userRole = null } = {}) => {
   // `isPublished` is the canonical "is this live" flag (see computeTestStatus,
   // which every publish/update path derives `status` from). Matching on the
