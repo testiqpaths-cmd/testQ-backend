@@ -29,6 +29,9 @@ const isTestOverForEveryone = async (test, attemptId) => {
 export const getAttemptResult = async (attemptId) => {
   // Populate questionId but DO NOT expose correctAnswer from DB
   // We'll use snapshots for correctAnswer (point-in-time capture)
+  // Read-only — never saved. The code below already tolerates either a
+  // Mongoose document or a plain lean object (`.toObject ? ... : ...`), so
+  // .lean() just skips the unnecessary document-hydration cost.
   const attempt = await TestAttempt.findById(attemptId).populate({
     path: "testId",
     select: "title name duration totalQuestions testSeriesId createdBy totalMarks endTime scheduleType status",
@@ -39,7 +42,7 @@ export const getAttemptResult = async (attemptId) => {
   }).populate({
     path: "answers.questionId",
     select: "questionText type options topic subTopic imageUrl", // ✅ no correctAnswer
-  });
+  }).lean();
 
   if (!attempt) return null;
 

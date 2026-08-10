@@ -239,11 +239,13 @@ export const normalizeCorrectAnswer = ({ type, correctAnswer, options }) => {
 export const buildQuestionQuery = (filters = {}, options = {}) => {
   const { page = 1, limit = 10, sort = "-createdAt" } = options;
 
+  // Backs the paginated question-bank list endpoints — read-only.
   return Question.find(filters)
     .populate("subjectId", "name description")
     .populate("topicId", "name description")
     .populate("createdBy", "name email")
     .sort(sort)
     .skip((page - 1) * limit)
-    .limit(limit);
+    .limit(limit)
+    .lean();
 };

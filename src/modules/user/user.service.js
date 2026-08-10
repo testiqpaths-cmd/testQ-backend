@@ -38,6 +38,32 @@ export const createUser = async (payload) => {
 	return UserModel.create(data);
 };
 
+// Organization student caps are a direct per-org number set at creation time
+// (Organization.studentLimit), not the subscription/plan system — plans only
+// govern independent students. A null/unset limit means unlimited, so
+// existing organizations created before this field existed keep working
+// exactly as before.
+export const assertStudentLimitNotExceeded = async (organizationId, additionalCount = 1) => {
+	if (!organizationId) return;
+
+	const org = await Organization.findById(organizationId).select("studentLimit name").lean();
+	if (!org || org.studentLimit === null || org.studentLimit === undefined) return;
+
+	const currentCount = await UserModel.countDocuments({
+		organizationId,
+		role: "STUDENT",
+		status: "ACTIVE",
+	});
+
+	if (currentCount + additionalCount > org.studentLimit) {
+		const remaining = Math.max(0, org.studentLimit - currentCount);
+		throw new ApiError(
+			402,
+			`Student limit reached for ${org.name || "this organization"}. You can add ${remaining} more student${remaining === 1 ? "" : "s"} (limit: ${org.studentLimit}).`
+		);
+	}
+};
+
 export const getUserById = async (id) => {
 	return UserModel.findById(id)
 		.where({ isDeleted: false })
@@ -97,8 +123,19 @@ export const listStudents = async (query = {}) => {
 		const subs = await UserSubscription.find({ planId: query.planId, status: "ACTIVE" }).select("userId").lean();
 		q._id = { $in: subs.map((sub) => sub.userId) };
 	}
+	if (query.status) q.status = query.status;
+	if (query.qualification) q["education.qualification"] = query.qualification;
+	if (query.stream) q["education.stream"] = query.stream;
+	if (query.college) q["education.college"] = query.college;
+	if (query.search) {
+		const search = new RegExp(query.search, "i");
+		q.$or = [{ firstName: search }, { lastName: search }, { email: search }];
+	}
 
-	const users = await UserModel.find(q).lean();
+	// Used unpaginated everywhere today (org/admin rosters, the test-visibility
+	// student picker) — capped defensively so a very large org/admin roster
+	// can't return an unbounded result set.
+	const users = await UserModel.find(q).limit(1000).lean();
 	const activeSubs = await UserSubscription.find({ userId: { $in: users.map((u) => u._id) }, status: "ACTIVE" })
 		.populate("planId", "name")
 		.lean();
@@ -112,6 +149,27 @@ export const listStudents = async (query = {}) => {
 		...u,
 		activePlanName: subMap[u._id]?.planId?.name || "Free/Default",
 	}));
+};
+
+// Distinct education field values, used to populate the student-picker's
+// filter dropdowns (test/series "Select Student" visibility) — scoped to an
+// organization's own students when one is passed, or platform-wide for an
+// admin's unrestricted picker.
+export const getStudentEducationFilterOptions = async (organizationId = null) => {
+	const match = { role: "STUDENT", isDeleted: false };
+	if (organizationId) match.organizationId = organizationId;
+
+	const [qualifications, streams, colleges] = await Promise.all([
+		UserModel.distinct("education.qualification", { ...match, "education.qualification": { $nin: [null, ""] } }),
+		UserModel.distinct("education.stream", { ...match, "education.stream": { $nin: [null, ""] } }),
+		UserModel.distinct("education.college", { ...match, "education.college": { $nin: [null, ""] } }),
+	]);
+
+	return {
+		qualifications: qualifications.sort(),
+		streams: streams.sort(),
+		colleges: colleges.sort(),
+	};
 };
 
 export const createStudent = async (payload) => {

@@ -6,6 +6,20 @@ import TestAssignment from "../../../models/testAssignment.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
 
+const DIFFICULTY_LABELS = ["Easy", "Medium", "Hard"];
+
+const toDifficultyLabel = (value) => {
+  const normalized = String(value || "MEDIUM").toLowerCase();
+  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
+  return DIFFICULTY_LABELS.includes(label) ? label : "Medium";
+};
+
+const emptyDifficultyBreakdown = () => ({
+  Easy: { correct: 0, wrong: 0, skipped: 0 },
+  Medium: { correct: 0, wrong: 0, skipped: 0 },
+  Hard: { correct: 0, wrong: 0, skipped: 0 },
+});
+
 export const getStudentDashboardData = async (studentId) => {
   const activeAssignedTestsCount = await TestAssignment.aggregate([
     {
@@ -64,6 +78,26 @@ export const getStudentDashboardData = async (studentId) => {
       activeAssignedTestsCount: activeAssignedTests,
     };
   }
+
+  // "Difficulty Analysis" used to read Test.difficulty — an optional
+  // whole-test tag that's almost never set by test creators, so it silently
+  // defaulted every test to "Medium" and made the chart meaningless (every
+  // student's questions appeared to be Medium regardless of reality). Real
+  // difficulty lives per-QUESTION on the Question doc, so batch-fetch it
+  // once here and look it up per answer below instead.
+  const allQuestionIds = new Set();
+  attempts.forEach((attempt) => {
+    (attempt.answers || []).forEach((a) => {
+      if (a.questionId) allQuestionIds.add(String(a.questionId));
+    });
+  });
+
+  const questions = await Question.find({ _id: { $in: Array.from(allQuestionIds) } })
+    .select("difficulty")
+    .lean();
+  const questionDifficultyMap = new Map(
+    questions.map((q) => [String(q._id), toDifficultyLabel(q.difficulty)])
+  );
 
   let totalQuestionsAttempted = 0;
   let totalCorrectAnswers = 0;
@@ -167,11 +201,17 @@ export const getStudentDashboardData = async (studentId) => {
       subject = attempt.testId.type;
     }
 
-    let difficultyRaw = "Medium";
-    if (attempt.testId && Array.isArray(attempt.testId.difficulty) && attempt.testId.difficulty.length > 0) {
-      difficultyRaw = attempt.testId.difficulty[0];
-    }
-    const difficultyStr = difficultyRaw ? (difficultyRaw.charAt(0).toUpperCase() + difficultyRaw.slice(1).toLowerCase()) : "Medium";
+    // Real per-question difficulty breakdown for this attempt (Easy/Medium/
+    // Hard), built from the actual Question docs rather than the test-level
+    // tag above.
+    const difficultyBreakdown = emptyDifficultyBreakdown();
+    answers.forEach((a) => {
+      const label = questionDifficultyMap.get(String(a.questionId)) || "Medium";
+      const bucket = difficultyBreakdown[label];
+      if (a.isCorrect) bucket.correct += 1;
+      else if (a.selectedOption) bucket.wrong += 1;
+      else bucket.skipped += 1;
+    });
 
     allTests.push({
       id: attempt.testId?._id || attempt.testId,
@@ -179,7 +219,7 @@ export const getStudentDashboardData = async (studentId) => {
       name: testName,
       subject: subject,
       topic: primaryTopic,
-      difficulty: difficultyStr,
+      difficultyBreakdown,
       totalQuestions: totalQ,
       correct: correctQ,
       wrong: wrongQ,
@@ -304,6 +344,12 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
   const withTestFilter = (extraFilter) => (
     isAdmin ? { ...testFilter, ...extraFilter } : { $and: [testFilter, extraFilter] }
   );
+  const seriesFilter = {
+    $or: [
+      ...(adminUserId ? [{ "createdBy.userId": adminUserId }] : []),
+      ...(orgId ? [{ allowedOrganizations: orgId }] : []),
+    ],
+  };
 
   const [
     totalStudents,
@@ -322,6 +368,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     planDistributionRaw,
     draftTestsCount,
     publishedTestsCount,
+    totalTestSeries,
   ] = await Promise.all([
     User.countDocuments(studentFilter),
     isAdmin ? Organization.countDocuments() : Promise.resolve(0),
@@ -345,8 +392,12 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     HelpSupport.countDocuments(supportFilter),
     HelpSupport.countDocuments({ ...supportFilter, status: "pending" }),
     HelpSupport.countDocuments({ ...supportFilter, status: "resolved" }),
-    Test.find(testFilter).select("_id").lean(),
-    User.find(studentFilter).select("_id").lean(),
+    // Only the org branch actually uses these id lists (to scope
+    // assignments/attempts to "this org's tests/students") — for the admin
+    // branch they're discarded below, so skip fetching every test/student
+    // id on the whole platform just to throw it away.
+    isAdmin ? Promise.resolve([]) : Test.find(testFilter).select("_id").lean(),
+    isAdmin ? Promise.resolve([]) : User.find(studentFilter).select("_id createdAt").lean(),
     UserSubscription.aggregate([
       { $match: { status: "ACTIVE" } },
       {
@@ -376,10 +427,17 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     ]),
     Test.countDocuments({ ...testFilter, isPublished: false }),
     Test.countDocuments({ ...testFilter, isPublished: true }),
+    TestSeries.countDocuments(isAdmin ? {} : seriesFilter),
   ]);
 
   const testIds = scopedTests.map((test) => test._id);
   const studentIds = scopedStudents.map((student) => student._id);
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const newStudentsThisMonth = scopedStudents.filter(
+    (student) => student.createdAt && new Date(student.createdAt) >= monthStart,
+  ).length;
 
   const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
   const assignmentFilter = isAdmin
@@ -412,6 +470,11 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     .limit(100)
     .lean();
 
+  const todayAttempts = await TestAttempt.countDocuments({
+    ...attemptFilter,
+    submittedAt: { $gte: start, $lt: end },
+  });
+
   const { performanceOverTime, subjectWiseTests } = buildEngagementMetrics(attempts);
   const recentTests = attempts.slice(0, 10).map((attempt) => ({
     id: attempt._id,
@@ -420,6 +483,50 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     score: Math.round(attempt.percentage || 0),
     date: attempt.submittedAt || attempt.updatedAt || attempt.createdAt,
   }));
+
+  const series = await TestSeries.find(isAdmin ? {} : seriesFilter)
+    .select("title tests")
+    .sort({ createdAt: -1 })
+    .lean();
+  const seriesAssignments = await TestSeriesAssignment.aggregate([
+    {
+      $match: {
+        seriesId: { $in: series.map((item) => item._id) },
+        status: "ACCEPTED",
+      },
+    },
+    { $group: { _id: "$seriesId", students: { $sum: 1 } } },
+  ]);
+  const assignmentCountBySeries = new Map(
+    seriesAssignments.map((item) => [String(item._id), item.students]),
+  );
+  const completedTestIds = new Set(
+    attempts
+      .filter((attempt) => ["SUBMITTED", "EVALUATED"].includes(attempt.status))
+      .map((attempt) => String(attempt.testId?._id || attempt.testId)),
+  );
+  const seriesColors = ["#3F5BF6", "#16A34A", "#F59E0B", "#A855F7", "#0891B2"];
+  const testSeriesOverview = series.map((item, index) => {
+    const scopedTests = isAdmin
+      ? item.tests || []
+      : (item.tests || []).filter((testId) =>
+        testIds.some((scopedId) => String(scopedId) === String(testId)),
+      );
+    const completedTestsInSeries = scopedTests.filter((testId) =>
+      completedTestIds.has(String(testId)),
+    ).length;
+
+    return {
+      id: item._id,
+      name: item.title,
+      tests: scopedTests.length,
+      students: assignmentCountBySeries.get(String(item._id)) || 0,
+      progress: scopedTests.length
+        ? Math.round((completedTestsInSeries / scopedTests.length) * 100)
+        : 0,
+      color: seriesColors[index % seriesColors.length],
+    };
+  });
 
   const planDistribution = {
     students: [],
@@ -441,6 +548,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
   return {
     students: {
       total: totalStudents,
+      newThisMonth: newStudentsThisMonth,
       plans: planDistribution.students,
     },
     organizations: {
@@ -448,6 +556,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       plans: planDistribution.organizations,
     },
     tests: {
+      total: activeTests,
       totalActive: activeTests,
       activeAdmin: activeAdminTests,
       activeOrg: activeOrgTests,
@@ -467,6 +576,11 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       pending: supportPending,
       completed: supportCompleted,
     },
+    testSeries: {
+      total: totalTestSeries,
+    },
+    todayAttempts,
+    testSeriesOverview,
     performanceOverTime,
     recentTests,
     subjectWiseTests,

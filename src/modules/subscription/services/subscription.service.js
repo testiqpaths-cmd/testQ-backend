@@ -10,15 +10,30 @@ import { ApiError } from "../../../common/exceptions/ApiError.js";
 
 /**
  * Gets the user's active subscription or assigns a default one if missing.
+ *
+ * The plan/subscription system only governs independent students — an
+ * ORGANIZATION account and any STUDENT who belongs to one (user.organizationId
+ * set) are unrestricted by it entirely. Organizations get a dedicated,
+ * separate cap instead (Organization.studentLimit, enforced in
+ * user.service.js's assertStudentLimitNotExceeded). Returning null here
+ * (rather than only skipping *future* auto-creation) means any pre-existing
+ * subscription docs for such users are also ignored going forward, and it
+ * cascades cleanly: checkFeatureAccess() and getUserUsageDetails() below
+ * both already fail-open/return null when this returns null.
  */
 export const getUserSubscription = async (userId) => {
+  const user = await User.findById(userId).select("role organizationId");
+  if (!user) throw new ApiError(404, "User not found");
+
+  const isOrganization = user.role === "ORGANIZATION";
+  const isOrgAffiliatedStudent = user.role === "STUDENT" && Boolean(user.organizationId);
+  if (isOrganization || isOrgAffiliatedStudent) {
+    return null;
+  }
+
   let sub = await UserSubscription.findOne({ userId, status: "ACTIVE" }).populate("planId");
 
   if (!sub) {
-    // Attempt to assign default plan
-    const user = await User.findById(userId);
-    if (!user) throw new ApiError(404, "User not found");
-
     // Map user.role string to Role document
     const roleDoc = await Role.findOne({ name: user.role.toUpperCase() });
     if (!roleDoc) {
@@ -162,9 +177,14 @@ export const getUserUsageDetails = async (userId) => {
   const sub = await getUserSubscription(userId);
   if (!sub) return null;
 
-  const plan = await Plan.findById(sub.planId._id ? sub.planId._id : sub.planId).populate("roleId");
+  // usageRecords only needs userId (already known) — it doesn't depend on
+  // `plan`, so fetch it in parallel instead of after. planFeatures does
+  // depend on plan._id, so it still has to wait for that one.
+  const [plan, usageRecords] = await Promise.all([
+    Plan.findById(sub.planId._id ? sub.planId._id : sub.planId).populate("roleId"),
+    UserFeatureUsage.find({ userId }),
+  ]);
   const planFeatures = await PlanFeature.find({ planId: plan._id }).populate("featureId");
-  const usageRecords = await UserFeatureUsage.find({ userId });
 
   const featureDetails = await Promise.all(
     planFeatures.map(async (pf) => {

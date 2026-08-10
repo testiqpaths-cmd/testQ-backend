@@ -22,7 +22,7 @@ const notificationSchema = new mongoose.Schema(
 
     type: {
       type: String,
-      enum: ["TEST_ASSIGNED", "RESULT", "NEW_TEST", "EVALUATION", "TEST_COMPLETED", "SUBSCRIPTION", "SYSTEM", "LEADERBOARD"],
+      enum: ["TEST_ASSIGNED", "RESULT", "NEW_TEST", "EVALUATION", "TEST_COMPLETED", "SUBSCRIPTION", "SYSTEM", "LEADERBOARD", "NEWS_UPDATE"],
       default: "SYSTEM",
     },
 
@@ -45,6 +45,11 @@ const notificationSchema = new mongoose.Schema(
     timestamps: true,
   }
 );
+
+// Every read/update/delete in notification.service.js filters by userId
+// (and the list view sorts by createdAt) with no supporting index — hit on
+// essentially every authenticated page load via the notification bell.
+notificationSchema.index({ userId: 1, createdAt: -1 });
 
 const Notification = mongoose.model("Notification", notificationSchema);
 

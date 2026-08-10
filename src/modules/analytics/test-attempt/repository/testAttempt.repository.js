@@ -15,7 +15,11 @@ export const findAttemptsByStudent = async (studentId) => {
       .select(
         "testId iqRoomId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
       )
-      .populate({ path: 'testId', select: 'title duration totalQuestions testSeriesId totalMarks createdBy isIQRoomTest' })
+      .populate({
+        path: 'testId',
+        select: 'title duration totalQuestions testSeriesId totalMarks createdBy isIQRoomTest',
+        populate: { path: 'testSeriesId', select: 'title' },
+      })
       .sort({ submittedAt: -1 })
       .lean();
 
@@ -55,7 +59,7 @@ export const findAttemptsByStudent = async (studentId) => {
       const test = a.testId || {};
       const testName = test.title || (test.testCode ? `Test (${test.testCode})` : 'Untitled Test');
       const testType = test.testSeriesId ? 'Test Series' : 'Single Test';
-      const seriesName = test.testSeriesId ? String(test.testSeriesId) : null;
+      const seriesName = test.testSeriesId ? (test.testSeriesId.title || null) : null;
       const resolvedTotalMarks =
         Number.isFinite(a.maxScore) && a.maxScore > 0
           ? a.maxScore

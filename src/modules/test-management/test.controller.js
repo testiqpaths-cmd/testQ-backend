@@ -78,7 +78,7 @@ export async function updateTest(req, res, next) {
     }
 
     const test = await service.updateTest(req.test, req.body, req.user);
-    broadcastAssignedTestsChanged(req.user).catch((err) =>
+    broadcastAssignedTestsChanged(req.user, test).catch((err) =>
       logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
     );
     res.json({ success: true, data: test });
@@ -94,7 +94,7 @@ export async function deleteTest(req, res, next) {
     }
 
     await service.deleteTest(req.test);
-    broadcastAssignedTestsChanged(req.user).catch((err) =>
+    broadcastAssignedTestsChanged(req.user, req.test).catch((err) =>
       logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
     );
     res.status(204).end();
@@ -108,24 +108,35 @@ export const getMyTests = async (req, res) => {
     const userId = req.user._id || req.user.id;
     const tests = await service.getMyTests({ userId, search: req.query.search || "" });
 
-    // Attach attemptsMade and override status for UI when maxAttempts reached
+    // Attach attemptsMade and override status for UI when maxAttempts reached.
+    // One batched query for every test in the list instead of two
+    // countDocuments() calls per test.
     const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+    const testIds = tests.map((t) => t._id);
+    const relevantAttempts = testIds.length
+      ? await TestAttempt.find({ testId: { $in: testIds } }).select("testId studentId status").lean()
+      : [];
 
-    const enriched = await Promise.all(
-      tests.map(async (t) => {
-        const attemptsMade = await TestAttempt.countDocuments({ testId: t._id, studentId: userId });
-        // count evaluated attempts (results) for this test across all students
-        const evaluatedCount = await TestAttempt.countDocuments({ testId: t._id, status: 'EVALUATED' });
-        const obj = t.toObject ? t.toObject() : { ...t };
-        obj.attemptsMade = attemptsMade;
-        obj.hasResults = evaluatedCount > 0;
-        if (Number(obj.maxAttempts || 1) <= attemptsMade) {
-          // For UI purposes mark as completed so no Start button shows
-          obj.status = 'COMPLETED';
-        }
-        return obj;
-      })
-    );
+    const statsByTest = new Map();
+    for (const attempt of relevantAttempts) {
+      const key = String(attempt.testId);
+      const stat = statsByTest.get(key) || { attemptsByUser: 0, evaluatedCount: 0 };
+      if (String(attempt.studentId) === String(userId)) stat.attemptsByUser += 1;
+      if (attempt.status === "EVALUATED") stat.evaluatedCount += 1;
+      statsByTest.set(key, stat);
+    }
+
+    const enriched = tests.map((t) => {
+      const stat = statsByTest.get(String(t._id)) || { attemptsByUser: 0, evaluatedCount: 0 };
+      const obj = t.toObject ? t.toObject() : { ...t };
+      obj.attemptsMade = stat.attemptsByUser;
+      obj.hasResults = stat.evaluatedCount > 0;
+      if (Number(obj.maxAttempts || 1) <= stat.attemptsByUser) {
+        // For UI purposes mark as completed so no Start button shows
+        obj.status = 'COMPLETED';
+      }
+      return obj;
+    });
 
     return res.json({ success: true, data: enriched });
   } catch (err) {
@@ -148,21 +159,31 @@ export const getAllTests = async (req, res) => {
       })
       : await service.getAllTests();
 
-    // Attach attemptsMade for each test (current student's perspective)
+    // Attach attemptsMade for each test (current student's perspective).
+    // One batched query for the whole list instead of one countDocuments()
+    // call per test.
     if (userId) {
       const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
-      const enriched = await Promise.all(
-        tests.map(async (t) => {
-          const attemptsMade = await TestAttempt.countDocuments({ 
-            testId: t._id, 
+      const testIds = tests.map((t) => t._id);
+      const relevantAttempts = testIds.length
+        ? await TestAttempt.find({
+            testId: { $in: testIds },
             studentId: userId,
-            status: { $in: ['SUBMITTED', 'EVALUATED'] }
-          });
-          const obj = t.toObject ? t.toObject() : { ...t };
-          obj.attemptsMade = attemptsMade;
-          return obj;
-        })
-      );
+            status: { $in: ['SUBMITTED', 'EVALUATED'] },
+          }).select("testId").lean()
+        : [];
+
+      const attemptsByTest = new Map();
+      for (const attempt of relevantAttempts) {
+        const key = String(attempt.testId);
+        attemptsByTest.set(key, (attemptsByTest.get(key) || 0) + 1);
+      }
+
+      const enriched = tests.map((t) => {
+        const obj = t.toObject ? t.toObject() : { ...t };
+        obj.attemptsMade = attemptsByTest.get(String(t._id)) || 0;
+        return obj;
+      });
       return res.json({
         success: true,
         data: enriched
@@ -196,44 +217,52 @@ export const getAssignedTests = async (req, res) => {
       }
     }
 
-    const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId });
+    const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId, userRole: req.user?.role });
 
-    // Attach current user's attempt count so the UI can hide Start when attempts are exhausted.
+    // Attach current user's attempt count so the UI can hide Start when
+    // attempts are exhausted, and link to their latest result if any — one
+    // batched query for the whole list instead of two per test.
     const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+    const testIds = tests.map((test) => test.id || test._id);
+    const relevantAttempts = userId && testIds.length
+      ? await TestAttempt.find({ testId: { $in: testIds }, studentId: userId })
+          .select("testId status submittedAt")
+          .sort({ submittedAt: -1 })
+          .lean()
+      : [];
 
-    const enriched = await Promise.all(
-      tests.map(async (test) => {
-        const testId = test.id || test._id;
-        const attemptsMade = userId
-          ? await TestAttempt.countDocuments({ testId, studentId: userId })
-          : 0;
+    const attemptsCountByTest = new Map();
+    const latestAttemptIdByTest = new Map();
+    const latestAttemptStatuses = new Set(['SUBMITTED', 'EVALUATED', 'MISSED']);
+    // relevantAttempts is sorted submittedAt desc, so the first entry seen
+    // per testId that matches the status filter is the most recent one —
+    // same as the original per-test `.findOne().sort({submittedAt:-1})`.
+    for (const attempt of relevantAttempts) {
+      const key = String(attempt.testId);
+      attemptsCountByTest.set(key, (attemptsCountByTest.get(key) || 0) + 1);
+      if (!latestAttemptIdByTest.has(key) && latestAttemptStatuses.has(attempt.status)) {
+        latestAttemptIdByTest.set(key, attempt._id);
+      }
+    }
 
-        // So the UI can link straight to this student's own result (e.g. the
-        // "Results" button, or a stale "New Test Assigned" notification click
-        // after the test's been completed) instead of a generic list/instructions
-        // page that doesn't know which attempt to show.
-        const latestAttempt = userId
-          ? await TestAttempt.findOne({
-              testId,
-              studentId: userId,
-              status: { $in: ['SUBMITTED', 'EVALUATED', 'MISSED'] },
-            })
-              .sort({ submittedAt: -1 })
-              .select('_id')
-              .lean()
-          : null;
+    const enriched = tests.map((test) => {
+      const testId = String(test.id || test._id);
+      const attemptsMade = attemptsCountByTest.get(testId) || 0;
 
-        const obj = { ...test };
-        obj.attemptsMade = attemptsMade;
-        obj.latestAttemptId = latestAttempt?._id || null;
+      // So the UI can link straight to this student's own result (e.g. the
+      // "Results" button, or a stale "New Test Assigned" notification click
+      // after the test's been completed) instead of a generic list/instructions
+      // page that doesn't know which attempt to show.
+      const obj = { ...test };
+      obj.attemptsMade = attemptsMade;
+      obj.latestAttemptId = latestAttemptIdByTest.get(testId) || null;
 
-        if (Number(obj.maxAttempts || 1) <= attemptsMade) {
-          obj.status = "COMPLETED";
-        }
+      if (Number(obj.maxAttempts || 1) <= attemptsMade) {
+        obj.status = "COMPLETED";
+      }
 
-        return obj;
-      })
-    );
+      return obj;
+    });
 
     return res.json({ success: true, data: enriched });
   } catch (err) {
@@ -265,7 +294,7 @@ export const publishTest = async (req, res, next) => {
       type: "TEST_ASSIGNED",
       link: `/student/dashboard/tests/${req.test._id}/instructions`,
       metadata: { testId: req.test._id }
-    }).catch(err => logger.error(`Notification dispatch failed: ${err.message}`));
+    }, req.test).catch(err => logger.error(`Notification dispatch failed: ${err.message}`));
 
     res.json({ success: true, data: req.test });
   } catch (e) {

@@ -3,7 +3,7 @@ import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
-import { ensureCreatorOrgIncluded } from "./utils/visibility.js";
+import { ensureCreatorOrgIncluded, resolveAllowedStudents } from "./utils/visibility.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
@@ -52,6 +52,7 @@ export async function createTest(data, user) {
       data.visibility === "LINK_ONLY"
         ? crypto.randomBytes(4).toString("hex")
         : null,
+    allowedStudents: await resolveAllowedStudents(data.visibility, data.allowedStudents, user),
     createdBy: { userId: user._id || user.id, role: user.role },
   };
 
@@ -75,6 +76,15 @@ export async function createTest(data, user) {
 }
 
 export async function updateTest(test, payload, user) {
+  if (payload.visibility !== undefined || payload.allowedStudents !== undefined) {
+    const nextVisibility = payload.visibility ?? test.visibility;
+    payload.allowedStudents = await resolveAllowedStudents(
+      nextVisibility,
+      payload.allowedStudents ?? test.allowedStudents,
+      user
+    );
+  }
+
   Object.assign(test, payload);
   await ensureCreatorOrgIncluded(test);
 
@@ -104,10 +114,12 @@ export async function deleteTest(test) {
 }
 
 export const getAllTests = async () => {
-  // Exclude tests that belong to a series or IQ Room
-  return await Test.find({ isSeriesTest: { $ne: true }, isIQRoomTest: { $ne: true } }).sort({
-    createdAt: -1,
-  });
+  // Exclude tests that belong to a series or IQ Room. Read-only list view —
+  // the controller already handles either a Mongoose doc or a plain object
+  // (`t.toObject ? t.toObject() : {...t}`), so .lean() is a safe, free win.
+  return await Test.find({ isSeriesTest: { $ne: true }, isIQRoomTest: { $ne: true } })
+    .sort({ createdAt: -1 })
+    .lean();
 };
 
 export const getLeaderboardTests = async ({ userId = null, userRole = null, userOrganizationId = null } = {}) => {
@@ -240,12 +252,14 @@ export const getMyTests = async ({ userId, search = "" }) => {
   filters.isSeriesTest = { $ne: true };
   filters.isIQRoomTest = { $ne: true };
 
+  // Read-only list view — same defensive controller handling as getAllTests.
   return Test.find(filters)
     .populate("subjectId", "name")
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 };
 
-export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null } = {}) => {
+export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null, userRole = null } = {}) => {
   // `isPublished` is the canonical "is this live" flag (see computeTestStatus,
   // which every publish/update path derives `status` from). Matching on the
   // literal string "PUBLISHED" instead used to exclude every series test
@@ -262,20 +276,48 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     filters.createdAt = { $gte: new Date(userCreatedAt) };
   }
 
+  // Combined into $and (rather than two competing top-level $or keys) since
+  // both the search condition and the SELECT_STUDENT gate below need their
+  // own $or.
+  const andConditions = [];
+
   if (String(search || "").trim()) {
-    filters.$or = [
-      { title: { $regex: search, $options: "i" } },
-      { description: { $regex: search, $options: "i" } },
-    ];
+    andConditions.push({
+      $or: [
+        { title: { $regex: search, $options: "i" } },
+        { description: { $regex: search, $options: "i" } },
+      ],
+    });
   }
 
+  // A SELECT_STUDENT test is only visible to the specific students its
+  // creator chose — everyone else must not see it here at all, the same way
+  // it's excluded from a direct single-test fetch (visibility.middleware.js).
+  // IQPATH_ADMIN keeps universal access, matching that same precedent.
+  if (studentId && userRole !== "IQPATH_ADMIN") {
+    andConditions.push({
+      $or: [
+        { visibility: { $ne: "SELECT_STUDENT" } },
+        { allowedStudents: studentId },
+      ],
+    });
+  }
+
+  if (andConditions.length) {
+    filters.$and = andConditions;
+  }
+
+  // Read-only list view; .lean() below means `test` is already a plain
+  // object, so the two spreads further down use `...test` directly instead
+  // of `...test.toObject()` (which would throw on a lean result).
   const tests = await Test.find(filters)
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
       select: "title description visibility createdAt",
     })
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 
   if (studentId) {
     const assignments = await TestAssignment.find({
@@ -287,21 +329,51 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
       assignments.map((a) => [String(a.testId), a])
     );
 
+    // A series test's own visibility on this list is gated by whether the
+    // STUDENT accepted the series as a whole, not by its individual
+    // TestAssignment — accepting a series bulk-accepts every test in it
+    // (see testSeries.controller.js's acceptSeriesAssignment), so
+    // assignmentStatus alone would otherwise never reflect "not yet decided".
+    const seriesIds = [
+      ...new Set(
+        tests
+          .map((t) => t.testSeriesId?._id || t.testSeriesId)
+          .filter(Boolean)
+          .map(String)
+      ),
+    ];
+    let seriesAssignmentMap = new Map();
+    if (seriesIds.length) {
+      const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
+      const seriesAssignments = await TestSeriesAssignment.find({
+        studentId,
+        seriesId: { $in: seriesIds },
+      }).lean();
+      seriesAssignmentMap = new Map(
+        seriesAssignments.map((a) => [String(a.seriesId), a])
+      );
+    }
+
     return tests
       .map((test) => {
         const assignment = assignmentMap.get(String(test._id));
+        const seriesId = test.testSeriesId?._id || test.testSeriesId || null;
+        const seriesAssignment = seriesId ? seriesAssignmentMap.get(String(seriesId)) : null;
         return {
-          ...test.toObject(),
+          ...test,
           id: String(test._id),
           assignmentStatus: assignment ? assignment.status : "PENDING",
+          seriesAssignmentStatus: seriesId ? (seriesAssignment ? seriesAssignment.status : "PENDING") : null,
         };
       })
-      .filter((test) => test.assignmentStatus !== "HIDDEN");
+      .filter((test) => test.assignmentStatus !== "HIDDEN")
+      .filter((test) => test.seriesAssignmentStatus !== "HIDDEN");
   }
 
   return tests.map((test) => ({
-    ...test.toObject(),
+    ...test,
     id: String(test._id),
     assignmentStatus: "PENDING",
+    seriesAssignmentStatus: (test.testSeriesId?._id || test.testSeriesId) ? "PENDING" : null,
   }));
 };

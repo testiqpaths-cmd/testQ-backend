@@ -4,22 +4,25 @@ import TestAttempt from "../../../models/testAttempt.model.js";
 
 export const getPlatformStats = async (startDate, endDate) => {
   try {
-    const totalUsers = await User.countDocuments();
-    const totalOrganizations = await Organization.countDocuments();
-    const totalAttempts = await TestAttempt.countDocuments();
-
-    // ✅ Average score with date filter + projection
-    const avgScoreData = await TestAttempt.aggregate([
-      { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
-      { $project: { percentage: 1 } },
-      { $group: { _id: null, avgScore: { $avg: "$percentage" } } }
-    ]);
-
-    // ✅ Pass/Fail breakdown with date filter
-    const statusBreakdown = await TestAttempt.aggregate([
-      { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
-      { $project: { resultStatus: 1 } },
-      { $group: { _id: "$resultStatus", count: { $sum: 1 } } }
+    // None of these five queries depend on each other's result — running
+    // them sequentially was paying for 5 round-trips back to back instead
+    // of one.
+    const [totalUsers, totalOrganizations, totalAttempts, avgScoreData, statusBreakdown] = await Promise.all([
+      User.countDocuments(),
+      Organization.countDocuments(),
+      TestAttempt.countDocuments(),
+      // ✅ Average score with date filter + projection
+      TestAttempt.aggregate([
+        { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+        { $project: { percentage: 1 } },
+        { $group: { _id: null, avgScore: { $avg: "$percentage" } } }
+      ]),
+      // ✅ Pass/Fail breakdown with date filter
+      TestAttempt.aggregate([
+        { $match: { createdAt: { $gte: startDate, $lte: endDate } } },
+        { $project: { resultStatus: 1 } },
+        { $group: { _id: "$resultStatus", count: { $sum: 1 } } }
+      ]),
     ]);
 
     return {

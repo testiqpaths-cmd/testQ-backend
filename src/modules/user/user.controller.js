@@ -5,7 +5,6 @@ import TestSeries from "../../models/testSeries.model.js";
 import TestAttempt from "../../models/testAttempt.model.js";
 import { findAttemptsByStudent } from "../analytics/test-attempt/repository/testAttempt.repository.js";
 import { syncMissedAttemptsForStudent } from "../test-attempts/services/syncMissedAttempts.service.js";
-import { checkFeatureAccess } from "../subscription/services/subscription.service.js";
 import { asyncHandler as _ } from "../../common/utils/asyncHandler.js";
 import {
 	createUser,
@@ -14,6 +13,7 @@ import {
 	softDeleteUser,
 	listUsers,
 	listStudents,
+	getStudentEducationFilterOptions,
 	createStudent,
 	createUsersFromArray,
 	listOrganizations,
@@ -21,6 +21,7 @@ import {
 	getOrganizationById,
 	updateOrganization,
 	deleteOrganization,
+	assertStudentLimitNotExceeded,
 } from "./user.service.js";
 import xlsx from "xlsx";
 import { generateUserTemplate } from "./template/generate-userTemplate.js";
@@ -109,7 +110,7 @@ export const createUserController = async (req, res) => {
 			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
 		}
 
-		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", 1);
+		await assertStudentLimitNotExceeded(requesterOrganizationId, 1);
 
 		payload.role = "STUDENT";
 		payload.organizationId = requesterOrganizationId;
@@ -160,23 +161,27 @@ export const getUserController = async (req, res) => {
 		data.testsGivenCount = (attempts || []).filter(a => a.status !== "missed").length;
 	} else if (user.role === "ORGANIZATION") {
 		const orgId = user.organizationId;
-		// Count students registered in organization
-		const orgStudents = await User.find({
-			role: "STUDENT",
-			organizationId: orgId,
-			isDeleted: false
-		}).select("firstName lastName email status createdAt").lean();
+		// These three don't depend on each other — fetch in parallel instead
+		// of one round-trip at a time.
+		const [orgStudents, testsCreatedCount, seriesCreatedCount] = await Promise.all([
+			// Students registered in organization
+			User.find({
+				role: "STUDENT",
+				organizationId: orgId,
+				isDeleted: false
+			}).select("firstName lastName email status createdAt").lean(),
 
-		// Count tests created by organization user
-		const testsCreatedCount = await Test.countDocuments({
-			"createdBy.userId": user._id,
-			isDeleted: { $ne: 1 }
-		});
+			// Tests created by organization user
+			Test.countDocuments({
+				"createdBy.userId": user._id,
+				isDeleted: { $ne: 1 }
+			}),
 
-		// Count series created by organization user
-		const seriesCreatedCount = await TestSeries.countDocuments({
-			"createdBy.userId": user._id
-		});
+			// Series created by organization user
+			TestSeries.countDocuments({
+				"createdBy.userId": user._id
+			}),
+		]);
 
 		data.students = orgStudents || [];
 		data.testsCreatedCount = testsCreatedCount;
@@ -222,6 +227,21 @@ export const listStudentsController = async (req, res) => {
 	res.json({ success: true, users });
 };
 
+export const getStudentEducationFilterOptionsController = async (req, res) => {
+	let organizationId = null;
+
+	if (req.user && req.user.role === "ORGANIZATION") {
+		organizationId = req.user.organizationId || null;
+		if (!organizationId) {
+			const dbUser = await getUserById(req.user._id);
+			organizationId = dbUser?.organizationId ?? null;
+		}
+	}
+
+	const options = await getStudentEducationFilterOptions(organizationId);
+	res.json({ success: true, data: options });
+};
+
 export const createStudentController = async (req, res) => {
 	const requesterRole = req.user?.role;
 	let requesterOrganizationId = req.user?.organizationId || null;
@@ -241,10 +261,7 @@ export const createStudentController = async (req, res) => {
 		if (!requesterOrganizationId) {
 			return res.status(400).json({ success: false, message: "Organization user has no organization mapped" });
 		}
-		
-		// Enforce Student Limit
-		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", 1);
-		
+
 		payload.organizationId = requesterOrganizationId;
 	}
 
@@ -258,6 +275,14 @@ export const createStudentController = async (req, res) => {
 	if (!payload.organizationId && requesterRole !== "IQPATH_ADMIN") {
 		return res.status(400).json({ success: false, message: "organizationId is required" });
 	}
+
+	// Applies regardless of whether it's the org itself or an admin adding a
+	// student on the org's behalf — the cap is on the organization, not on
+	// who's doing the adding.
+	if (payload.organizationId) {
+		await assertStudentLimitNotExceeded(payload.organizationId, 1);
+	}
+
 	const user = await createStudent(payload);
 	try {
 		await sendWelcomeEmail(user, payload.password);
@@ -375,9 +400,9 @@ export const bulkUploadUsersController = async (req, res) => {
 		return res.status(400).json({ success: false, message: "Invalid file format" });
 	}
 
-	// Enforce MAX_STUDENTS for Organization bulk uploads
+	// Enforce the organization's student limit for bulk uploads
 	if (requesterRole === "ORGANIZATION") {
-		await checkFeatureAccess(req.user._id, "MAX_STUDENTS", rows.length);
+		await assertStudentLimitNotExceeded(requesterOrganizationId, rows.length);
 	}
 
 	// rows expected to be array of objects with headers: firstName,lastName,email,password,phone,role,organizationCode

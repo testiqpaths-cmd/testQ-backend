@@ -9,8 +9,9 @@ const testSchema = new Schema({
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
   },
-  visibility: { type: String, enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY"], required: true },
+  visibility: { type: String, enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY", "SELECT_STUDENT"], required: true },
   allowedOrganizations: [{ type: Types.ObjectId }],
+  allowedStudents: [{ type: Types.ObjectId, ref: "User" }],
   testCode: { type: String },
   totalQuestions: { type: Number, required: true },
   questionSource: {
@@ -45,5 +46,14 @@ const testSchema = new Schema({
   default: 0,
 },
 });
+
+// Test had zero indexes despite being queried constantly by these exact
+// filter+sort shapes (getAssignedTests, getMyTests, dashboard counts, series
+// lookups) — every one of those was a full collection scan that gets slower
+// as the platform's total test count grows.
+testSchema.index({ isDeleted: 1, isPublished: 1, isIQRoomTest: 1, createdAt: -1 });
+testSchema.index({ "createdBy.userId": 1, isDeleted: 1, createdAt: -1 });
+testSchema.index({ status: 1, isDeleted: 1 });
+testSchema.index({ testSeriesId: 1 });
 
 export default model("Test", testSchema);

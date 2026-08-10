@@ -9,6 +9,10 @@ const organizationSchema = new mongoose.Schema(
     contactEmail: { type: String },
     contactPerson: { type: String },
     businessPhone: { type: String },
+    // Direct per-organization student cap, set at creation time — independent
+    // of the subscription/plan system, which only governs independent
+    // (non-organization) students. null/unset means unlimited.
+    studentLimit: { type: Number, default: null, min: 0 },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     createdAt: { type: Date, default: Date.now },
     // relationships

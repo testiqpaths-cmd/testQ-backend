@@ -20,11 +20,12 @@ export const getHelpSupports = async (filters) => {
   return await HelpSupport.find(filters)
     .populate("studentId", "firstName lastName email")
     .populate("organizationId", "name")
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .lean();
 };
 
 export const getHelpSupportById = async (id) => {
-  return await HelpSupport.findById(id);
+  return await HelpSupport.findById(id).lean();
 };
 
 export const resolveHelpSupport = async (id) => {

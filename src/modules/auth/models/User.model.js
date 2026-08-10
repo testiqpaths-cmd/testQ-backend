@@ -161,6 +161,12 @@ userSchema.index(
   },
 );
 
+// "List this org's students" (role+organizationId) is the standard filter
+// shape used repeatedly across leaderboards, dashboards, and admin user
+// lists — every isDeleted find/findOneAndUpdate implicitly includes that
+// field too via the hook below, so it's part of the index as well.
+userSchema.index({ role: 1, organizationId: 1, isDeleted: 1 });
+
 userSchema.pre(/^find/, function () {
   if (this.getOptions?.().includeDeleted === true) return;
   this.where({ isDeleted: { $ne: true } });

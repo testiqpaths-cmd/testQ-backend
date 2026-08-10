@@ -21,4 +21,9 @@ const testAssignmentSchema = new Schema({
 // Ensure a student has at most one assignment per test
 testAssignmentSchema.index({ testId: 1, studentId: 1 }, { unique: true });
 
+// The admin dashboard counts assignments by status platform-wide
+// (assignmentFilter is `{}` on that branch), which only the status field
+// can serve.
+testAssignmentSchema.index({ status: 1 });
+
 export default model("TestAssignment", testAssignmentSchema);

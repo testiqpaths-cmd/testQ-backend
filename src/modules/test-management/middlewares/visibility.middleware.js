@@ -1,5 +1,5 @@
 export default function visibilityMiddleware(req, res, next) {
-  const { visibility, allowedOrganizations, testCode, createdBy } = req.test;
+  const { visibility, allowedOrganizations, allowedStudents, testCode, createdBy } = req.test;
   const user = req.user;
 
   // 1. Admins have universal access
@@ -26,6 +26,13 @@ export default function visibilityMiddleware(req, res, next) {
   }
 
   if (visibility === "LINK_ONLY" && req.query.code === testCode) return next();
+
+  if (visibility === "SELECT_STUDENT") {
+    const isAllowed = allowedStudents?.some(
+      (studentId) => studentId.toString() === requesterId
+    );
+    if (isAllowed) return next();
+  }
 
   return res.status(403).json({ message: "Access denied" });
 }

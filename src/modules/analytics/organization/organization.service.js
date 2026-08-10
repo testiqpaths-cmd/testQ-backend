@@ -28,6 +28,7 @@ export const createOrganizationService = async (payload) => {
     plan,
     createdBy,
     password,
+    studentLimit,
   } = payload;
 
   // The "Create Organization" form collects a login password and sends it
@@ -41,12 +42,24 @@ export const createOrganizationService = async (payload) => {
   const codeBase = (organizationName || "org").trim().replace(/[^a-zA-Z0-9]+/g, "_").replace(/^_+|_+$/g, "").toUpperCase() || "ORG";
   const code = `${codeBase}_${crypto.randomBytes(3).toString("hex")}`;
 
+  // Empty string / undefined means "no limit set" (unlimited) — only reject
+  // an actual invalid number, don't force every org creator to pick one.
+  let normalizedStudentLimit = null;
+  if (studentLimit !== undefined && studentLimit !== null && studentLimit !== "") {
+    const parsed = Number(studentLimit);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      throw new ApiError(400, "Student limit must be a non-negative number.");
+    }
+    normalizedStudentLimit = Math.floor(parsed);
+  }
+
   const organization = await Organization.create({
     name: organizationName,
     contactEmail,
     contactPerson,
     businessPhone,
     code,
+    studentLimit: normalizedStudentLimit,
     createdBy: createdBy || undefined,
   });
 

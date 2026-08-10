@@ -4,7 +4,7 @@ import TestSeries from "../../models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
-import { ensureCreatorOrgIncluded } from "./utils/visibility.js";
+import { ensureCreatorOrgIncluded, resolveAllowedStudents } from "./utils/visibility.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
 
@@ -71,6 +71,7 @@ export const createSeries = async (data, user) => {
   const payload = {
     ...data,
     seriesCode,
+    allowedStudents: await resolveAllowedStudents(data.visibility, data.allowedStudents, user),
     createdBy: {
       userId: new mongoose.Types.ObjectId(user._id || user.id),
       role: user.role,
@@ -228,6 +229,7 @@ export const createSeriesTest = async (seriesId, data, user) => {
     isSeriesTest: true,
     maxAttempts: Number(data.maxAttempts) || 1,
     testCode: data.visibility === 'LINK_ONLY' ? crypto.randomBytes(4).toString('hex') : null,
+    allowedStudents: await resolveAllowedStudents(data.visibility, data.allowedStudents, user),
     createdBy: { userId: user._id || user.id, role: user.role },
   };
   await ensureCreatorOrgIncluded(payload);
@@ -240,6 +242,24 @@ export const createSeriesTest = async (seriesId, data, user) => {
   // Compute and persist status for the created series test
   test.status = computeTestStatus(test);
   await test.save();
+
+  // A student who already accepted this series shouldn't have to separately
+  // accept a test added to it afterward — auto-accept the new test for
+  // everyone who's already accepted the series as a whole.
+  const TestSeriesAssignment = (await import('../../models/testSeriesAssignment.model.js')).default;
+  const acceptedStudentIds = await TestSeriesAssignment.find({ seriesId, status: "ACCEPTED" })
+    .distinct("studentId");
+  if (acceptedStudentIds.length) {
+    await TestAssignment.bulkWrite(
+      acceptedStudentIds.map((studentId) => ({
+        updateOne: {
+          filter: { testId: test._id, studentId },
+          update: { $set: { status: "ACCEPTED", acceptedAt: new Date() } },
+          upsert: true,
+        },
+      }))
+    );
+  }
 
   return test;
 };

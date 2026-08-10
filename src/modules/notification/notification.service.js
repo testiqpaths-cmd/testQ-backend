@@ -1,5 +1,6 @@
 import Notification from "./notification.model.js";
 import { listStudents, listUsers } from "../user/user.service.js";
+import UserModel from "../../models/user.model.js";
 
 export const createNotification = async (data) => {
   return await Notification.create(data);
@@ -41,8 +42,18 @@ export const deleteAllNotifications = async (userId) => {
 // other orgs' students won't get the notification/live push for it, only
 // the periodic poll. Pre-existing gap, not introduced here; fixing it means
 // teaching this function about the test's visibility/allowedOrganizations.
-const resolveStudentAudience = async (creator) => {
+const resolveStudentAudience = async (creator, context = null) => {
   if (!creator || !creator.role) return [];
+
+  // A SELECT_STUDENT test/series only concerns the specific students its
+  // creator chose — notifying/pushing the whole org or platform (the
+  // default audience below) would tell students about a test they then
+  // can't even find in Assigned Tests.
+  if (context?.visibility === "SELECT_STUDENT") {
+    const ids = Array.isArray(context.allowedStudents) ? context.allowedStudents : [];
+    if (!ids.length) return [];
+    return UserModel.find({ _id: { $in: ids }, role: "STUDENT", isDeleted: false }).lean();
+  }
 
   // If the creator is an organization, notify their students
   if (creator.role === "ORGANIZATION") {
@@ -62,9 +73,9 @@ const resolveStudentAudience = async (creator) => {
 // student's socket room (see sockets/assignedTestsSocket.js), without
 // writing a Notification doc — used for edits (reschedule, series changes)
 // where a full "New Test Assigned" notification would be spam.
-export const broadcastAssignedTestsChanged = async (creator) => {
+export const broadcastAssignedTestsChanged = async (creator, context = null) => {
   try {
-    const students = await resolveStudentAudience(creator);
+    const students = await resolveStudentAudience(creator, context);
     if (!students.length) return;
 
     const { getIO } = await import("../../sockets/index.js");
@@ -84,9 +95,9 @@ export const broadcastAssignedTestsChanged = async (creator) => {
  * @param {Object} creator - The user who triggered the event (must have role and optionally organizationId)
  * @param {Object} notificationPayload - { title, message, type, link, metadata }
  */
-export const dispatchNotificationToStudents = async (creator, notificationPayload) => {
+export const dispatchNotificationToStudents = async (creator, notificationPayload, context = null) => {
   try {
-    const students = await resolveStudentAudience(creator);
+    const students = await resolveStudentAudience(creator, context);
 
     if (students.length === 0) return;
 
@@ -104,9 +115,39 @@ export const dispatchNotificationToStudents = async (creator, notificationPayloa
     await Notification.insertMany(notifications, { ordered: false });
 
     // Live push alongside the persisted notification (same audience).
-    await broadcastAssignedTestsChanged(creator);
+    await broadcastAssignedTestsChanged(creator, context);
   } catch (error) {
     console.error("Failed to dispatch bulk notifications:", error);
+  }
+};
+
+/**
+ * Notifies every student on the platform, regardless of who posted — used
+ * for news updates, which are currently always visible to ALL students
+ * (see newsUpdates.controller.js: audience is hardcoded to "ALL") whether
+ * posted by an admin or an organization. Unlike dispatchNotificationToStudents,
+ * this does NOT scope to the creator's own org, since that would leave
+ * other orgs' students able to see the news item but never notified of it.
+ *
+ * @param {Object} notificationPayload - { title, message, type, link, metadata }
+ */
+export const dispatchNotificationToAllStudents = async (notificationPayload) => {
+  try {
+    const students = await listStudents({});
+    if (students.length === 0) return;
+
+    const notifications = students.map(student => ({
+      userId: student._id,
+      title: notificationPayload.title,
+      message: notificationPayload.message,
+      type: notificationPayload.type || "SYSTEM",
+      link: notificationPayload.link || null,
+      metadata: notificationPayload.metadata || {},
+    }));
+
+    await Notification.insertMany(notifications, { ordered: false });
+  } catch (error) {
+    console.error("Failed to dispatch news notification:", error);
   }
 };
 

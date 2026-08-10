@@ -73,4 +73,9 @@ const iqRoomSchema = new mongoose.Schema(
   },
   { timestamps: true }
 );
+// "My room history" queries by creatorId (or participants.userId, an array
+// field Mongo indexes as multikey automatically), neither indexed before.
+iqRoomSchema.index({ creatorId: 1 });
+iqRoomSchema.index({ "participants.userId": 1 });
+
 export default mongoose.model("IQRoom", iqRoomSchema);

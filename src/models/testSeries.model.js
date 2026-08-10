@@ -12,15 +12,21 @@ const TestSeriesSchema = new mongoose.Schema(
 
     visibility: {
       type: String,
-      enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY"],
+      enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY", "SELECT_STUDENT"],
       required: true
     },
 
     allowedOrganizations: [{ type: mongoose.Schema.Types.ObjectId }],
+    allowedStudents: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     tests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
     seriesCode: String
   },
   { timestamps: true }
 );
+
+// "My series" listing filters by createdBy.userId; duplicate-title checks
+// on every series creation query by title. Neither was indexed.
+TestSeriesSchema.index({ "createdBy.userId": 1 });
+TestSeriesSchema.index({ title: 1 });
 
 export default mongoose.model("TestSeries", TestSeriesSchema);
