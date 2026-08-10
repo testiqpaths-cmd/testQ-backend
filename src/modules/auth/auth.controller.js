@@ -25,6 +25,7 @@ const buildAuthUserResponse = (user) => ({
   organizationId: user.organizationId ?? null,
   firstName: user.firstName,
   lastName: user.lastName,
+  profileImage: user.profileImage ?? "",
   firebaseUid: user.firebaseUid,
   status: user.status,
   plan: user.plan,
