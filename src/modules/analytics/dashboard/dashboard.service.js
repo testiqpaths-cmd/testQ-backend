@@ -5,6 +5,7 @@ import Test from "../../../models/test.model.js";
 import TestAssignment from "../../../models/testAssignment.model.js";
 import TestSeries from "../../../models/testSeries.model.js";
 import TestSeriesAssignment from "../../../models/testSeriesAssignment.model.js";
+import Question from "../../../models/question.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
 
@@ -227,6 +228,11 @@ export const getStudentDashboardData = async (studentId) => {
       wrong: wrongQ,
       skipped: skippedQ,
       score: attempt.totalScore || 0,
+      maxScore: attempt.maxScore || 0,
+      // Score as a percentage of that test's max — what "Average Score" on
+      // the dashboard actually needs; averaging raw `score` across tests
+      // with different max scores produces a meaningless number.
+      percentage,
       accuracy: attemptedQ > 0 ? Math.round((correctQ / attemptedQ) * 100) : 0,
       timeTaken: attempt.duration || 0,
       date: submittedAt
