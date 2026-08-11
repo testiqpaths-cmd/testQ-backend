@@ -104,6 +104,18 @@ const canStartTest = (test, user) => {
     return allowedOrganizations.length === 0 || allowedOrganizations.includes(userOrganizationId);
   }
 
+  // Was missing entirely — every SELECT_STUDENT test fell through to the
+  // `return false` below regardless of who asked, so even a student the
+  // creator explicitly picked got "You are not allowed to start this test"
+  // the moment they tried to actually start it. Same rule as
+  // visibility.middleware.js's SELECT_STUDENT branch.
+  if (test.visibility === "SELECT_STUDENT") {
+    const allowedStudents = Array.isArray(test.allowedStudents)
+      ? test.allowedStudents.map((id) => String(id))
+      : [];
+    return allowedStudents.includes(String(user._id || user.id || ""));
+  }
+
   return false;
 };
 
