@@ -61,8 +61,15 @@ export async function createTest(data, user) {
 
   // Students create tests only for themselves to practice on — there's no
   // review/schedule workflow for them, so their tests go live immediately
-  // instead of sitting in an un-startable DRAFT state.
-  if (user.role === "STUDENT") {
+  // instead of sitting in an un-startable DRAFT state. IQ Room tests get the
+  // same treatment regardless of creator role: they're only ever reachable
+  // via a room code + the room's own WAITING/RUNNING state (never listed
+  // among a student's assigned tests — see the isIQRoomTest filter in
+  // getAssignedTests), so there's no discovery risk in publishing
+  // immediately, and forcing a host to go find the underlying test and
+  // manually publish it before the room they just "started" actually works
+  // defeats the point of a live, spin-up-and-go contest.
+  if (user.role === "STUDENT" || test.isIQRoomTest) {
     test.isPublished = true;
     test.publishedAt = new Date();
     test.status = computeTestStatus(test);
