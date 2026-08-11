@@ -24,6 +24,13 @@ const emptyDifficultyBreakdown = () => ({
 });
 
 export const getStudentDashboardData = async (studentId) => {
+  // `test.status` is only (re)computed at create/publish/update time (see
+  // computeTestStatus) — nothing recomputes it as real time passes, so a
+  // FIXED-schedule test whose window opened/closed since it was last saved
+  // would sit with a stale UPCOMING/ACTIVE status forever, making this KPI
+  // look frozen. Match the same live condition computeTestStatus would
+  // derive right now instead of trusting the stored field.
+  const now = new Date();
   const activeAssignedTestsCount = await TestAssignment.aggregate([
     {
       $match: {
@@ -42,9 +49,16 @@ export const getStudentDashboardData = async (studentId) => {
     { $unwind: "$test" },
     {
       $match: {
-        "test.status": "ACTIVE",
         "test.isPublished": true,
         "test.isDeleted": { $ne: 1 },
+        $or: [
+          { "test.scheduleType": "IMMEDIATE" },
+          {
+            "test.scheduleType": "FIXED",
+            "test.startTime": { $lte: now },
+            "test.endTime": { $gte: now },
+          },
+        ],
       },
     },
     { $count: "count" },
@@ -266,7 +280,10 @@ export const getStudentDashboardData = async (studentId) => {
       weekly,
       monthly,
     },
-    tests: recentTests.slice(0, 10), // Limit to 10 recent tests for dashboard view
+    // Full list, not capped — this feeds the "Test Wise Analysis" tab's
+    // search/filter/date-range UI, which needs the student's complete test
+    // history to filter over, not just the most recent few.
+    tests: recentTests,
     allTests, // Contains ALL raw attempts for complex frontend filtering
     activeAssignedTestsCount: activeAssignedTests,
   };
@@ -288,10 +305,17 @@ const getDisplayName = (user) => {
 };
 
 const buildEngagementMetrics = (attempts) => {
-  const weeklyMap = {};
-  const monthlyMap = {};
+  // Keyed by year-qualified sort key (not just "Week 32" / "Aug") — plain
+  // week-number/month-name labels collide across years (Week 32 of 2025 and
+  // Week 32 of 2026, or two different Augusts), which used to silently
+  // merge unrelated periods' counts into one bucket. A Map also preserves
+  // real chronological order once sorted, unlike Object.entries() on a
+  // plain object, which followed whatever order attempts happened to be
+  // iterated in (the caller fetches attempts newest-first) — so the trend
+  // chart's x-axis was rendering time running backwards.
+  const weeklyBuckets = new Map();
+  const monthlyBuckets = new Map();
   const subjectCountMap = {};
-  const monthNames = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
   const getWeekNumber = (date) => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -303,11 +327,20 @@ const buildEngagementMetrics = (attempts) => {
   attempts.forEach((attempt) => {
     const submittedAt = attempt.submittedAt || attempt.updatedAt || attempt.createdAt || new Date();
     const date = new Date(submittedAt);
-    const weekLabel = `Week ${getWeekNumber(date)}`;
-    const monthLabel = monthNames[date.getMonth()];
 
-    weeklyMap[weekLabel] = (weeklyMap[weekLabel] || 0) + 1;
-    monthlyMap[monthLabel] = (monthlyMap[monthLabel] || 0) + 1;
+    const weekNum = getWeekNumber(date);
+    const weekKey = `${date.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+    const weekEntry = weeklyBuckets.get(weekKey);
+    if (weekEntry) weekEntry.count += 1;
+    else weeklyBuckets.set(weekKey, { label: `Week ${weekNum}`, count: 1 });
+
+    const monthKey = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, "0")}`;
+    const monthEntry = monthlyBuckets.get(monthKey);
+    if (monthEntry) monthEntry.count += 1;
+    else monthlyBuckets.set(monthKey, {
+      label: date.toLocaleString("en-US", { month: "short", year: "numeric" }),
+      count: 1,
+    });
 
     const subjects = attempt.testId?.subjectIds || [];
     if (Array.isArray(subjects) && subjects.length > 0) {
@@ -320,14 +353,34 @@ const buildEngagementMetrics = (attempts) => {
     }
   });
 
+  const sortedBucketValues = (buckets) =>
+    Array.from(buckets.entries())
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([, value]) => value);
+
+  // Percentage Over Time (chronological, oldest first) — `attempts` arrives
+  // sorted newest-first for the recent-tests table, so sort a copy here
+  // rather than relying on caller order.
+  const percentageOverTime = [...attempts]
+    .sort((a, b) => {
+      const dateA = new Date(a.submittedAt || a.updatedAt || a.createdAt || 0);
+      const dateB = new Date(b.submittedAt || b.updatedAt || b.createdAt || 0);
+      return dateA - dateB;
+    })
+    .map((attempt) => ({
+      testName: attempt.testId?.title || "Untitled Test",
+      percentage: Math.round(attempt.percentage || 0),
+    }));
+
   return {
     performanceOverTime: {
-      weekly: Object.entries(weeklyMap).map(([label, count]) => ({ label, count })),
-      monthly: Object.entries(monthlyMap).map(([label, count]) => ({ label, count })),
+      weekly: sortedBucketValues(weeklyBuckets),
+      monthly: sortedBucketValues(monthlyBuckets),
     },
     subjectWiseTests: Object.entries(subjectCountMap)
       .map(([subject, count]) => ({ subject, count }))
       .sort((a, b) => b.count - a.count),
+    percentageOverTime,
   };
 };
 
@@ -380,6 +433,13 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       { scheduleType: "FIXED", startTime: { $gt: now } },
     ],
   };
+  const liveActiveCondition = {
+    isPublished: true,
+    $or: [
+      { scheduleType: "IMMEDIATE" },
+      { scheduleType: "FIXED", startTime: { $lte: now }, endTime: { $gte: now } },
+    ],
+  };
 
   const [
     totalStudents,
@@ -403,9 +463,9 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
   ] = await Promise.all([
     User.countDocuments(studentFilter),
     isAdmin ? Organization.countDocuments() : Promise.resolve(0),
-    Test.countDocuments({ ...testFilter, status: "ACTIVE" }),
-    isAdmin ? Test.countDocuments({ ...testFilter, status: "ACTIVE", "createdBy.role": "IQPATH_ADMIN" }) : Promise.resolve(0),
-    isAdmin ? Test.countDocuments({ ...testFilter, status: "ACTIVE", "createdBy.role": "ORGANIZATION" }) : Promise.resolve(0),
+    Test.countDocuments(withTestFilter(liveActiveCondition)),
+    isAdmin ? Test.countDocuments({ ...testFilter, ...liveActiveCondition, "createdBy.role": "IQPATH_ADMIN" }) : Promise.resolve(0),
+    isAdmin ? Test.countDocuments({ ...testFilter, ...liveActiveCondition, "createdBy.role": "ORGANIZATION" }) : Promise.resolve(0),
     // The real "how many tests exist" count — every status, not just active.
     Test.countDocuments(testFilter),
     Test.countDocuments(withTestFilter(liveCompletedCondition)),
@@ -502,7 +562,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     submittedAt: { $gte: start, $lt: end },
   });
 
-  const { performanceOverTime, subjectWiseTests } = buildEngagementMetrics(attempts);
+  const { performanceOverTime, subjectWiseTests, percentageOverTime } = buildEngagementMetrics(attempts);
   const recentTests = attempts.slice(0, 10).map((attempt) => ({
     id: attempt._id,
     studentName: getDisplayName(attempt.studentId),
@@ -609,6 +669,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     todayAttempts,
     testSeriesOverview,
     performanceOverTime,
+    percentageOverTime,
     recentTests,
     subjectWiseTests,
   };
