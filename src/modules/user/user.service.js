@@ -245,7 +245,16 @@ export const createUsersFromArray = async (rows = [], options = {}) => {
 
 			if (!rowEmail && !firstName) continue;
 
-			const password = row.password || "change_me";
+			// Excel/CSV parsing (xlsx, raw mode) returns numeric-looking cells as
+			// JS numbers, not strings — a password like "0912345" silently loses
+			// its leading zero, and one that parses to exactly 0 (e.g. "000000")
+			// would fail the old `row.password || "change_me"` truthiness check
+			// and silently fall back to the placeholder instead. Stringify
+			// explicitly and only fall back when the cell is genuinely empty.
+			const password =
+				row.password !== undefined && row.password !== null && row.password !== ""
+					? String(row.password).trim()
+					: "change_me";
 			const phone = (row.phone || row.mobile || "").toString().trim();
 			const role = (row.role || "STUDENT").toString().trim().toUpperCase() || "STUDENT";
 			const organizationCode = overrideOrganizationCode || row.organizationCode || row.organization_code || row.orgCode || null;
@@ -322,6 +331,15 @@ export const createUsersFromArray = async (rows = [], options = {}) => {
 				user = await createUser(userPayload);
 			}
 
+			// Previously swallowed entirely (only console.error'd) — a bulk upload
+			// would report every row as "created" with no way for the admin to
+			// know a student's welcome email never went out (e.g. the email
+			// provider rate-limiting mid-batch, which is very plausible sending
+			// many transactional emails in a tight loop). Surface it per-row
+			// instead so a failed send is visible and the admin knows who still
+			// needs their credentials resent.
+			let emailSent = false;
+			let emailError = undefined;
 			try {
 				const loginUrl = (env.CORS_ORIGIN || "http://localhost:5173") + "/login";
 				const emailHtml = loginTemplate({
@@ -338,11 +356,13 @@ export const createUsersFromArray = async (rows = [], options = {}) => {
 					html: emailHtml,
 					textContent,
 				});
+				emailSent = true;
 			} catch (emailErr) {
 				console.error(`Failed to send email to ${user.email}:`, emailErr);
+				emailError = emailErr.message || "Failed to send welcome email";
 			}
 
-			results.push({ email: rowEmail, status, id: user._id });
+			results.push({ email: rowEmail, status, id: user._id, emailSent, emailError });
 		} catch (err) {
 			let friendlyMessage = err.message;
 

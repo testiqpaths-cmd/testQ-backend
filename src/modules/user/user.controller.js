@@ -389,12 +389,20 @@ export const bulkUploadUsersController = async (req, res) => {
 			const csvText = file.buffer.toString('utf-8');
 			const workbook = xlsx.read(csvText, { type: "string" });
 			const sheet = workbook.Sheets[workbook.SheetNames[0]];
-			rows = xlsx.utils.sheet_to_json(sheet, { defval: "" });
+			// raw:false — read each cell's display text rather than letting xlsx
+			// reinterpret numeric-looking values (a password or phone number
+			// typed with a leading zero, e.g. "0912345") as a JS number, which
+			// silently drops the leading zero and changes the actual value.
+			rows = xlsx.utils.sheet_to_json(sheet, { defval: "", raw: false });
 		} else {
 			// Handle Excel
 			const workbook = xlsx.read(file.buffer, { type: "buffer" });
 			const sheet = workbook.Sheets[workbook.SheetNames[0]];
-			rows = xlsx.utils.sheet_to_json(sheet, { defval: "" });
+			// raw:false — read each cell's display text rather than letting xlsx
+			// reinterpret numeric-looking values (a password or phone number
+			// typed with a leading zero, e.g. "0912345") as a JS number, which
+			// silently drops the leading zero and changes the actual value.
+			rows = xlsx.utils.sheet_to_json(sheet, { defval: "", raw: false });
 		}
 	} catch (error) {
 		return res.status(400).json({ success: false, message: "Invalid file format" });
