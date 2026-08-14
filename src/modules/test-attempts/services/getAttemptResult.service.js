@@ -74,10 +74,42 @@ export const getAttemptResult = async (attemptId) => {
   // Build analysis
   const totalQuestions = attemptObj.questionSnapshots?.length || enrichedAnswers.length;
 
-  // Per-question correctness and timing
-  const perQuestion = enrichedAnswers.map((a) => {
-    const qId = a.questionId._id ? a.questionId._id.toString() : String(a.questionId);
+  // Per-question correctness and timing — built from questionSnapshots (the
+  // complete set of every question in the test), not from attempt.answers.
+  // answers is sparse: saveAnswerController only ever pushes an entry once a
+  // student actually selects/types something, so a question they never
+  // clicked at all has no entry there whatsoever. Mapping over answers (as
+  // this used to do) silently dropped those questions from the result
+  // entirely — not shown as "unattempted", just missing — so
+  // correct + wrong + unattempted came out less than totalQuestions.
+  const answerMap = new Map(
+    enrichedAnswers.map((a) => [
+      (a.questionId._id ? a.questionId._id.toString() : String(a.questionId)),
+      a,
+    ])
+  );
+
+  const perQuestion = (attemptObj.questionSnapshots || []).map((snap) => {
+    const qId = snap.questionId.toString();
     const snapshot = snapshotMap.get(qId) || {};
+    const a = answerMap.get(qId) || null;
+
+    // No answer entry at all means the question was never clicked/answered —
+    // explicitly unattempted, not "unknown".
+    if (!a) {
+      return {
+        questionId: qId,
+        questionText: snapshot.questionText || '',
+        imageUrl: snapshot.imageUrl ?? null,
+        selected: null,
+        correctAnswer: snapshot.correctAnswer ?? null,
+        isCorrect: null,
+        marks: Number.isFinite(snapshot.marks) ? snapshot.marks : 0,
+        marksObtained: 0,
+        timeSpentMs: 0,
+      };
+    }
+
     const correct = (() => {
       if (snapshot.correctAnswer === undefined || snapshot.correctAnswer === null) return null;
       // Handle multichoice (array) or single

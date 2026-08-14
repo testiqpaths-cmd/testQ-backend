@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import TestAttempt from "../../../models/testAttempt.model.js";
 import User from "../../auth/models/User.model.js";
 import Organization from "../../../models/organization.model.js";
@@ -31,10 +32,17 @@ export const getStudentDashboardData = async (studentId) => {
   // look frozen. Match the same live condition computeTestStatus would
   // derive right now instead of trusting the stored field.
   const now = new Date();
+  // `req.user._id` comes straight from a decoded JWT, which is always a
+  // plain string (JSON has no ObjectId type) — Mongoose's .find()/.findById
+  // auto-cast that against a schema, but $match inside an aggregation
+  // pipeline does NOT, so matching on the raw string here silently matched
+  // zero documents for every student, every time, regardless of how many
+  // assignments they actually had.
+  const studentObjectId = new mongoose.Types.ObjectId(studentId);
   const activeAssignedTestsCount = await TestAssignment.aggregate([
     {
       $match: {
-        studentId,
+        studentId: studentObjectId,
         status: { $in: ["ACCEPTED", "STARTED"] },
       },
     },
