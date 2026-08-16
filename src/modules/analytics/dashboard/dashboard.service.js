@@ -324,6 +324,10 @@ const buildEngagementMetrics = (attempts) => {
   const weeklyBuckets = new Map();
   const monthlyBuckets = new Map();
   const subjectCountMap = {};
+  
+  // Weekly and monthly subject breakdowns
+  const weeklySubjectBuckets = new Map();
+  const monthlySubjectBuckets = new Map();
 
   const getWeekNumber = (date) => {
     const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
@@ -355,9 +359,25 @@ const buildEngagementMetrics = (attempts) => {
       subjects.forEach((subject) => {
         const name = subject?.name || "General";
         subjectCountMap[name] = (subjectCountMap[name] || 0) + 1;
+        
+        // Weekly subject breakdown
+        const weekSubjectKey = `${weekKey}-${name}`;
+        weeklySubjectBuckets.set(weekSubjectKey, (weeklySubjectBuckets.get(weekSubjectKey) || 0) + 1);
+        
+        // Monthly subject breakdown
+        const monthSubjectKey = `${monthKey}-${name}`;
+        monthlySubjectBuckets.set(monthSubjectKey, (monthlySubjectBuckets.get(monthSubjectKey) || 0) + 1);
       });
     } else {
       subjectCountMap.General = (subjectCountMap.General || 0) + 1;
+      
+      // Weekly General breakdown
+      const weekSubjectKey = `${weekKey}-General`;
+      weeklySubjectBuckets.set(weekSubjectKey, (weeklySubjectBuckets.get(weekSubjectKey) || 0) + 1);
+      
+      // Monthly General breakdown
+      const monthSubjectKey = `${monthKey}-General`;
+      monthlySubjectBuckets.set(monthSubjectKey, (monthlySubjectBuckets.get(monthSubjectKey) || 0) + 1);
     }
   });
 
@@ -365,6 +385,38 @@ const buildEngagementMetrics = (attempts) => {
     Array.from(buckets.entries())
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([, value]) => value);
+
+  // Helper to get current period key
+  const getCurrentWeekKey = () => {
+    const now = new Date();
+    const weekNum = getWeekNumber(now);
+    return `${now.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
+  };
+  
+  const getCurrentMonthKey = () => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}`;
+  };
+
+  // Helper to aggregate subject data for a specific period
+  const aggregateSubjectsForPeriod = (subjectBuckets, periodKey) => {
+    const result = new Map();
+    const prefix = periodKey + "-";
+    
+    subjectBuckets.forEach((count, key) => {
+      if (key.startsWith(prefix)) {
+        const subject = key.substring(prefix.length);
+        if (!result.has(subject)) {
+          result.set(subject, 0);
+        }
+        result.set(subject, result.get(subject) + count);
+      }
+    });
+    
+    return Array.from(result.entries())
+      .map(([subject, count]) => ({ subject, count }))
+      .sort((a, b) => b.count - a.count);
+  };
 
   // Percentage Over Time (chronological, oldest first) — `attempts` arrives
   // sorted newest-first for the recent-tests table, so sort a copy here
@@ -385,9 +437,13 @@ const buildEngagementMetrics = (attempts) => {
       weekly: sortedBucketValues(weeklyBuckets),
       monthly: sortedBucketValues(monthlyBuckets),
     },
-    subjectWiseTests: Object.entries(subjectCountMap)
-      .map(([subject, count]) => ({ subject, count }))
-      .sort((a, b) => b.count - a.count),
+    subjectWiseTests: {
+      overall: Object.entries(subjectCountMap)
+        .map(([subject, count]) => ({ subject, count }))
+        .sort((a, b) => b.count - a.count),
+      weekly: aggregateSubjectsForPeriod(weeklySubjectBuckets, getCurrentWeekKey()),
+      monthly: aggregateSubjectsForPeriod(monthlySubjectBuckets, getCurrentMonthKey()),
+    },
     percentageOverTime,
   };
 };
