@@ -398,7 +398,7 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
-      select: "title description visibility createdAt",
+      select: "title description visibility createdAt plannedTestCount",
     })
     .sort({ createdAt: -1 })
     .lean();
@@ -450,8 +450,12 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
           seriesAssignmentStatus: seriesId ? (seriesAssignment ? seriesAssignment.status : "PENDING") : null,
         };
       })
-      .filter((test) => test.assignmentStatus !== "HIDDEN")
-      .filter((test) => test.seriesAssignmentStatus !== "HIDDEN");
+      // A declined test/series shouldn't keep sitting on the assigned-tests
+      // list looking exactly like a still-undecided one — only PENDING and
+      // ACCEPTED (plus whatever attempt-lifecycle statuses follow ACCEPTED,
+      // e.g. STARTED/SUBMITTED/MISSED) belong here.
+      .filter((test) => test.assignmentStatus !== "HIDDEN" && test.assignmentStatus !== "DECLINED")
+      .filter((test) => test.seriesAssignmentStatus !== "HIDDEN" && test.seriesAssignmentStatus !== "DECLINED");
   }
 
   return tests.map((test) => ({

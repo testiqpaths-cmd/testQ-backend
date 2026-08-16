@@ -339,20 +339,30 @@ const buildEngagementMetrics = (attempts) => {
   attempts.forEach((attempt) => {
     const submittedAt = attempt.submittedAt || attempt.updatedAt || attempt.createdAt || new Date();
     const date = new Date(submittedAt);
+    const percentage = Number.isFinite(attempt.percentage) ? attempt.percentage : 0;
 
     const weekNum = getWeekNumber(date);
     const weekKey = `${date.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
     const weekEntry = weeklyBuckets.get(weekKey);
-    if (weekEntry) weekEntry.count += 1;
-    else weeklyBuckets.set(weekKey, { label: `Week ${weekNum}`, count: 1 });
+    if (weekEntry) {
+      weekEntry.count += 1;
+      weekEntry.scoreSum += percentage;
+    } else {
+      weeklyBuckets.set(weekKey, { label: `Week ${weekNum}`, count: 1, scoreSum: percentage });
+    }
 
     const monthKey = `${date.getFullYear()}-${String(date.getMonth()).padStart(2, "0")}`;
     const monthEntry = monthlyBuckets.get(monthKey);
-    if (monthEntry) monthEntry.count += 1;
-    else monthlyBuckets.set(monthKey, {
-      label: date.toLocaleString("en-US", { month: "short", year: "numeric" }),
-      count: 1,
-    });
+    if (monthEntry) {
+      monthEntry.count += 1;
+      monthEntry.scoreSum += percentage;
+    } else {
+      monthlyBuckets.set(monthKey, {
+        label: date.toLocaleString("en-US", { month: "short", year: "numeric" }),
+        count: 1,
+        scoreSum: percentage,
+      });
+    }
 
     const subjects = attempt.testId?.subjectIds || [];
     if (Array.isArray(subjects) && subjects.length > 0) {
@@ -384,7 +394,7 @@ const buildEngagementMetrics = (attempts) => {
   const sortedBucketValues = (buckets) =>
     Array.from(buckets.entries())
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-      .map(([, value]) => value);
+      .map(([, value]) => ({ label: value.label, count: value.count }));
 
   // Helper to get current period key
   const getCurrentWeekKey = () => {
@@ -392,7 +402,7 @@ const buildEngagementMetrics = (attempts) => {
     const weekNum = getWeekNumber(now);
     return `${now.getFullYear()}-W${String(weekNum).padStart(2, "0")}`;
   };
-  
+
   const getCurrentMonthKey = () => {
     const now = new Date();
     return `${now.getFullYear()}-${String(now.getMonth()).padStart(2, "0")}`;
@@ -402,7 +412,7 @@ const buildEngagementMetrics = (attempts) => {
   const aggregateSubjectsForPeriod = (subjectBuckets, periodKey) => {
     const result = new Map();
     const prefix = periodKey + "-";
-    
+
     subjectBuckets.forEach((count, key) => {
       if (key.startsWith(prefix)) {
         const subject = key.substring(prefix.length);
@@ -412,30 +422,36 @@ const buildEngagementMetrics = (attempts) => {
         result.set(subject, result.get(subject) + count);
       }
     });
-    
+
     return Array.from(result.entries())
       .map(([subject, count]) => ({ subject, count }))
       .sort((a, b) => b.count - a.count);
   };
 
-  // Percentage Over Time (chronological, oldest first) — `attempts` arrives
-  // sorted newest-first for the recent-tests table, so sort a copy here
-  // rather than relying on caller order.
-  const percentageOverTime = [...attempts]
-    .sort((a, b) => {
-      const dateA = new Date(a.submittedAt || a.updatedAt || a.createdAt || 0);
-      const dateB = new Date(b.submittedAt || b.updatedAt || b.createdAt || 0);
-      return dateA - dateB;
-    })
-    .map((attempt) => ({
-      testName: attempt.testId?.title || "Untitled Test",
-      percentage: Math.round(attempt.percentage || 0),
-    }));
+  // Same buckets as the activity chart above (so the two line up period for
+  // period), but averaging each attempt's score instead of just counting
+  // it — "how many tests happened" and "how well did they go" are two
+  // different questions, and used to be conflated into one confusing
+  // per-attempt scatter plot (every single attempt across every student and
+  // test on the platform, plotted as one dot each with no shared axis to
+  // make sense of — not an actual trend a person could read). Supersedes
+  // the old percentageOverTime field, which plotted exactly that scatter.
+  const sortedScoreBucketValues = (buckets) =>
+    Array.from(buckets.entries())
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+      .map(([, value]) => ({
+        label: value.label,
+        avgScore: value.count > 0 ? Math.round(value.scoreSum / value.count) : 0,
+      }));
 
   return {
     performanceOverTime: {
       weekly: sortedBucketValues(weeklyBuckets),
       monthly: sortedBucketValues(monthlyBuckets),
+    },
+    averageScoreOverTime: {
+      weekly: sortedScoreBucketValues(weeklyBuckets),
+      monthly: sortedScoreBucketValues(monthlyBuckets),
     },
     subjectWiseTests: {
       overall: Object.entries(subjectCountMap)
@@ -444,7 +460,6 @@ const buildEngagementMetrics = (attempts) => {
       weekly: aggregateSubjectsForPeriod(weeklySubjectBuckets, getCurrentWeekKey()),
       monthly: aggregateSubjectsForPeriod(monthlySubjectBuckets, getCurrentMonthKey()),
     },
-    percentageOverTime,
   };
 };
 
@@ -626,7 +641,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     submittedAt: { $gte: start, $lt: end },
   });
 
-  const { performanceOverTime, subjectWiseTests, percentageOverTime } = buildEngagementMetrics(attempts);
+  const { performanceOverTime, subjectWiseTests, averageScoreOverTime } = buildEngagementMetrics(attempts);
   const recentTests = attempts.slice(0, 10).map((attempt) => ({
     id: attempt._id,
     studentName: getDisplayName(attempt.studentId),
@@ -733,7 +748,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     todayAttempts,
     testSeriesOverview,
     performanceOverTime,
-    percentageOverTime,
+    averageScoreOverTime,
     recentTests,
     subjectWiseTests,
   };
