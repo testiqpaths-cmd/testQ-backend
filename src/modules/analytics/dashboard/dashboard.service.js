@@ -519,6 +519,9 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       { scheduleType: "FIXED", startTime: { $lte: now }, endTime: { $gte: now } },
     ],
   };
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
 
   const [
     totalStudents,
@@ -539,6 +542,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     draftTestsCount,
     publishedTestsCount,
     totalTestSeries,
+    newStudentsThisMonth,
   ] = await Promise.all([
     User.countDocuments(studentFilter),
     isAdmin ? Organization.countDocuments() : Promise.resolve(0),
@@ -594,16 +598,15 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     Test.countDocuments({ ...testFilter, isPublished: false }),
     Test.countDocuments({ ...testFilter, isPublished: true }),
     TestSeries.countDocuments(isAdmin ? {} : seriesFilter),
+    // A direct count, not derived from scopedStudents — that list is
+    // deliberately left empty for the admin branch above (nothing else
+    // used it there), which silently made this always read 0 on the admin
+    // dashboard regardless of how many students had actually signed up.
+    User.countDocuments({ ...studentFilter, createdAt: { $gte: monthStart } }),
   ]);
 
   const testIds = scopedTests.map((test) => test._id);
   const studentIds = scopedStudents.map((student) => student._id);
-  const monthStart = new Date();
-  monthStart.setDate(1);
-  monthStart.setHours(0, 0, 0, 0);
-  const newStudentsThisMonth = scopedStudents.filter(
-    (student) => student.createdAt && new Date(student.createdAt) >= monthStart,
-  ).length;
 
   const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
   const assignmentFilter = isAdmin

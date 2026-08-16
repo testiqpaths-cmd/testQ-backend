@@ -90,7 +90,7 @@ export const register = async (userData) => {
         title: "Student Registered (Restored)",
         message: `A previously deleted student ${user.firstName} ${user.lastName || ""} has registered again.`,
         type: "SYSTEM",
-        link: `/dashboard/students`,
+        link: `/dashboard/users`,
         metadata: { userId: user._id }
       });
 
@@ -127,7 +127,7 @@ export const register = async (userData) => {
     title: "New Student Registered",
     message: `A new student ${user.firstName} ${user.lastName || ""} has registered.`,
     type: "SYSTEM",
-    link: `/dashboard/students`, // Assuming there is a student list route
+    link: `/dashboard/users`,
     metadata: { userId: user._id }
   });
 
@@ -262,7 +262,7 @@ export const firebaseAuth = async ({
       title: "New Student Registered",
       message: `A new student ${user.firstName} ${user.lastName || ""} has registered via Firebase.`,
       type: "SYSTEM",
-      link: `/dashboard/students`,
+      link: `/dashboard/users`,
       metadata: { userId: user._id }
     });
   } else if (userFoundByFirebaseUid) {
@@ -443,7 +443,7 @@ export const githubAuth = async (code) => {
       title: "New Student Registered",
       message: `A new student ${user.firstName} ${user.lastName || ""} has registered via GitHub.`,
       type: "SYSTEM",
-      link: `/dashboard/students`,
+      link: `/dashboard/users`,
       metadata: { userId: user._id }
     });
   } else {
