@@ -398,7 +398,7 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
-      select: "title description visibility createdAt",
+      select: "title description visibility createdAt plannedTestCount",
     })
     .sort({ createdAt: -1 })
     .lean();

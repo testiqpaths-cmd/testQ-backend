@@ -6,6 +6,7 @@ import {
   startIQRoomController,
   getIQRoomLeaderboardController,
   getUserIQRoomHistoryController,
+  getMyIQRoomResultController,
 } from "./iqRoom.controller.js";
 import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
 import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
@@ -21,5 +22,6 @@ router.get("/history", getUserIQRoomHistoryController);
 router.get("/:roomCode", getIQRoomController);
 router.post("/:roomCode/start", startIQRoomController);
 router.get("/:roomCode/leaderboard", getIQRoomLeaderboardController);
+router.get("/:roomCode/my-result", getMyIQRoomResultController);
 
 export default router;

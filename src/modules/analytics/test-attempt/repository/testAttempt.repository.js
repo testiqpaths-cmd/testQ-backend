@@ -8,9 +8,13 @@ export const findAttemptsByStudent = async (studentId) => {
       throw new Error("Invalid student id");
     }
 
+    // IQ Room attempts are excluded here — they belong only on the IQ Room
+    // History page (its own Result/Leaderboard tabs), not mixed in with
+    // regular test results.
     const attempts = await TestAttempt.find({
       studentId: new mongoose.Types.ObjectId(studentId),
       status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
+      $or: [{ iqRoomId: null }, { iqRoomId: { $exists: false } }],
     })
       .select(
         "testId iqRoomId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
@@ -23,20 +27,18 @@ export const findAttemptsByStudent = async (studentId) => {
       .sort({ submittedAt: -1 })
       .lean();
 
-    // IQ Room attempts have no assignment concept (no accept/decline step), so
-    // only gate normal test attempts on the student having actually accepted
-    // that test — otherwise a result can keep showing forever even after the
-    // assignment was reset to PENDING/DECLINED, since nothing else re-checks
-    // acceptance once an attempt document already exists.
-    const normalTestIds = attempts
-      .filter((a) => !a.iqRoomId)
+    // Gate on the student having actually accepted the test — otherwise a
+    // result can keep showing forever even after the assignment was reset
+    // to PENDING/DECLINED, since nothing else re-checks acceptance once an
+    // attempt document already exists.
+    const testIds = attempts
       .map((a) => a.testId?._id || a.testId)
       .filter(Boolean);
 
-    const assignments = normalTestIds.length
+    const assignments = testIds.length
       ? await TestAssignment.find({
           studentId: new mongoose.Types.ObjectId(studentId),
-          testId: { $in: normalTestIds },
+          testId: { $in: testIds },
         })
           .select("testId acceptedAt status")
           .lean()
@@ -47,8 +49,6 @@ export const findAttemptsByStudent = async (studentId) => {
     );
 
     const acceptedAttempts = attempts.filter((a) => {
-      if (a.iqRoomId) return true;
-
       const testId = String(a.testId?._id || a.testId || "");
       const assignment = assignmentMap.get(testId);
       return Boolean(assignment?.acceptedAt) && assignment.status !== "DECLINED";

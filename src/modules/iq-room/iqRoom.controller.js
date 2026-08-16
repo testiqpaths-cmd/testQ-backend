@@ -5,6 +5,7 @@ import {
   startIQRoomService,
   getIQRoomLeaderboardService,
   getUserIQRoomHistoryService,
+  getMyIQRoomResultService,
 } from "./iqRoom.service.js";
 import { getIO } from "../../sockets/index.js";
 
@@ -104,6 +105,22 @@ export const getIQRoomLeaderboardController = async (req, res, next) => {
     res.status(200).json({
       success: true,
       data: leaderboard,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const getMyIQRoomResultController = async (req, res, next) => {
+  try {
+    const { roomCode } = req.params;
+    const userId = req.user._id;
+
+    const result = await getMyIQRoomResultService({ roomCode, userId });
+
+    res.status(200).json({
+      success: true,
+      data: result,
     });
   } catch (error) {
     next(error);

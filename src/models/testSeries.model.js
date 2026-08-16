@@ -5,6 +5,13 @@ const TestSeriesSchema = new mongoose.Schema(
     title: { type: String, required: true },
     description: String,
 
+    // Creator-declared total the series is planned to eventually contain —
+    // distinct from `tests.length` (how many have actually been added so
+    // far), since a series is often built up incrementally over time.
+    // Optional: an older series (or one whose creator didn't fill it in)
+    // has no planned total, so callers should fall back to tests.length.
+    plannedTestCount: { type: Number, min: 0, default: null },
+
     createdBy: {
       userId: { type: mongoose.Schema.Types.ObjectId, required: true },
       role: { type: String, enum: ["IQPATH_ADMIN", "ORGANIZATION","STUDENT"], required: true }

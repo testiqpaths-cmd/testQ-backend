@@ -59,12 +59,24 @@ export const getSeriesStats = async (req, res) => {
 
 export const createSeries = async (req, res, next) => {
   try {
-    const { title, description, visibility, allowedOrganizations, allowedStudents, tests = [] } = req.body;
+    const { title, description, visibility, allowedOrganizations, allowedStudents, tests = [], plannedTestCount } = req.body;
 
     if (!title?.trim()) {
       return res
         .status(400)
         .json({ success: false, message: "Title is required" });
+    }
+
+    let cleanedPlannedTestCount;
+    if (plannedTestCount !== undefined && plannedTestCount !== null && plannedTestCount !== "") {
+      const parsed = Number(plannedTestCount);
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Total tests planned must be a whole number of 0 or more",
+        });
+      }
+      cleanedPlannedTestCount = parsed;
     }
 
     // ✅ validate test ids (prevents mongoose crash)
@@ -80,6 +92,7 @@ export const createSeries = async (req, res, next) => {
         allowedOrganizations,
         allowedStudents,
         tests: cleanedTests,
+        plannedTestCount: cleanedPlannedTestCount,
       },
       req.user
     );
@@ -102,6 +115,17 @@ export const updateSeries = async (req, res) => {
   try {
     const id = req.params.id;
     const payload = req.body || {};
+
+    if (payload.plannedTestCount !== undefined && payload.plannedTestCount !== null && payload.plannedTestCount !== "") {
+      const parsed = Number(payload.plannedTestCount);
+      if (!Number.isInteger(parsed) || parsed < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Total tests planned must be a whole number of 0 or more",
+        });
+      }
+      payload.plannedTestCount = parsed;
+    }
 
     const series = await service.updateSeries(id, payload);
 

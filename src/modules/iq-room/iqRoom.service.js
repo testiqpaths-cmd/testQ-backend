@@ -117,6 +117,33 @@ export const startIQRoomService = async ({ roomCode, userId }) => {
   return room;
 };
 
+// The caller's own attempt for this room — powers the "Result" tab on the
+// IQ Room history/detail page. Scoped to both testId AND iqRoomId (not just
+// testId) so it can never resolve to an attempt from a different context if
+// the same underlying test somehow got attempted outside this room.
+export const getMyIQRoomResultService = async ({ roomCode, userId }) => {
+  const room = await IQRoom.findOne({ roomCode: roomCode.toUpperCase() }).lean();
+  if (!room) {
+    throw new ApiError(404, "Room not found");
+  }
+
+  const attempt = await TestAttempt.findOne({
+    testId: room.testId,
+    iqRoomId: room._id,
+    studentId: userId,
+    status: { $in: ["SUBMITTED", "EVALUATED"] },
+  })
+    .sort({ submittedAt: -1 })
+    .select("_id status")
+    .lean();
+
+  return {
+    hasResult: Boolean(attempt),
+    attemptId: attempt?._id || null,
+    status: attempt?.status || null,
+  };
+};
+
 export const getIQRoomLeaderboardService = async ({ roomCode }) => {
   const room = await IQRoom.findOne({ roomCode: roomCode.toUpperCase() }).lean();
   if (!room) {
