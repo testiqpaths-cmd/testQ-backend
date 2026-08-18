@@ -5,6 +5,7 @@ import TestSeries from "../../models/testSeries.model.js";
 import TestAttempt from "../../models/testAttempt.model.js";
 import { findAttemptsByStudent } from "../analytics/test-attempt/repository/testAttempt.repository.js";
 import { syncMissedAttemptsForStudent } from "../test-attempts/services/syncMissedAttempts.service.js";
+import { computeTestStatus } from "../test-management/utils/status.js";
 import { asyncHandler as _ } from "../../common/utils/asyncHandler.js";
 import {
 	createUser,
@@ -156,14 +157,14 @@ export const getUserController = async (req, res) => {
 		// Sync missed attempts first
 		await syncMissedAttemptsForStudent(id);
 		// Get all attempts/tests given
-		const attempts = await findAttemptsByStudent(id);
+		const attempts = await findAttemptsByStudent(id, { includeIQRoom: true });
 		data.attempts = attempts || [];
 		data.testsGivenCount = (attempts || []).filter(a => a.status !== "missed").length;
 	} else if (user.role === "ORGANIZATION") {
 		const orgId = user.organizationId;
 		// These three don't depend on each other — fetch in parallel instead
 		// of one round-trip at a time.
-		const [orgStudents, testsCreatedCount, seriesCreatedCount] = await Promise.all([
+		const [orgStudents, orgTests, orgSeries] = await Promise.all([
 			// Students registered in organization
 			User.find({
 				role: "STUDENT",
@@ -171,21 +172,86 @@ export const getUserController = async (req, res) => {
 				isDeleted: false
 			}).select("firstName lastName email status createdAt").lean(),
 
-			// Tests created by organization user
-			Test.countDocuments({
+			// Tests created by organization user — the full docs (not just a
+			// count), so admin can drill into "which tests are active/upcoming"
+			// without a second round-trip.
+			Test.find({
 				"createdBy.userId": user._id,
 				isDeleted: { $ne: 1 }
-			}),
+			}).select("title scheduleType startTime endTime isPublished createdAt").sort({ createdAt: -1 }).lean(),
 
 			// Series created by organization user
-			TestSeries.countDocuments({
+			TestSeries.find({
 				"createdBy.userId": user._id
-			}),
+			}).select("title tests createdAt").sort({ createdAt: -1 }).lean(),
 		]);
 
 		data.students = orgStudents || [];
-		data.testsCreatedCount = testsCreatedCount;
-		data.seriesCreatedCount = seriesCreatedCount;
+
+		// `status` on the Test doc is only (re)computed at create/publish/
+		// update time (see computeTestStatus) — nothing recomputes it as real
+		// time passes, so a FIXED-schedule test whose window opened/closed
+		// since it was last saved would sit with a stale status here. Derive
+		// it fresh instead, same as the dashboard's live counts do.
+		const testsWithLiveStatus = orgTests.map((test) => ({
+			id: test._id,
+			title: test.title,
+			status: computeTestStatus(test),
+			scheduleType: test.scheduleType,
+			startTime: test.startTime,
+			endTime: test.endTime,
+			createdAt: test.createdAt,
+		}));
+
+		const countByStatus = (list, status) => list.filter((item) => item.status === status).length;
+
+		data.testReport = {
+			totals: {
+				total: testsWithLiveStatus.length,
+				active: countByStatus(testsWithLiveStatus, "ACTIVE"),
+				upcoming: countByStatus(testsWithLiveStatus, "UPCOMING"),
+				completed: countByStatus(testsWithLiveStatus, "COMPLETED"),
+				draft: countByStatus(testsWithLiveStatus, "DRAFT"),
+			},
+			tests: testsWithLiveStatus,
+		};
+		data.testsCreatedCount = testsWithLiveStatus.length;
+
+		// A TestSeries has no status of its own — roll one up from its member
+		// tests' live status: ACTIVE if anything in it is happening right now,
+		// else UPCOMING if something hasn't started yet, else COMPLETED once
+		// everything in it has finished, else DRAFT (nothing published yet).
+		const testStatusById = new Map(testsWithLiveStatus.map((test) => [String(test.id), test.status]));
+		const seriesWithLiveStatus = orgSeries.map((s) => {
+			const memberStatuses = (s.tests || [])
+				.map((testId) => testStatusById.get(String(testId)))
+				.filter(Boolean);
+
+			let status = "DRAFT";
+			if (memberStatuses.includes("ACTIVE")) status = "ACTIVE";
+			else if (memberStatuses.includes("UPCOMING")) status = "UPCOMING";
+			else if (memberStatuses.length > 0 && memberStatuses.every((st) => st === "COMPLETED")) status = "COMPLETED";
+
+			return {
+				id: s._id,
+				title: s.title,
+				testCount: (s.tests || []).length,
+				status,
+				createdAt: s.createdAt,
+			};
+		});
+
+		data.seriesReport = {
+			totals: {
+				total: seriesWithLiveStatus.length,
+				active: countByStatus(seriesWithLiveStatus, "ACTIVE"),
+				upcoming: countByStatus(seriesWithLiveStatus, "UPCOMING"),
+				completed: countByStatus(seriesWithLiveStatus, "COMPLETED"),
+				draft: countByStatus(seriesWithLiveStatus, "DRAFT"),
+			},
+			series: seriesWithLiveStatus,
+		};
+		data.seriesCreatedCount = seriesWithLiveStatus.length;
 	}
 
 	res.json({ success: true, user: data });

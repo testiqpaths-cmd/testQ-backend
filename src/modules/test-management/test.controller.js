@@ -2,7 +2,9 @@ import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
+import { isTestMandatoryForStudent } from "./utils/visibility.js";
 import UserModel from "../../models/user.model.js";
+import Test from "../../models/test.model.js";
 
 // Fall back to a DB lookup for tokens issued before organizationId was
 // embedded in the JWT payload.
@@ -352,6 +354,17 @@ export const declineTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
+    if (req.user?.role === "STUDENT") {
+      const test = await Test.findById(testId).select("createdBy").lean();
+      const organizationId = await resolveOrganizationId(req.user);
+      if (await isTestMandatoryForStudent(test, organizationId)) {
+        return res.status(400).json({
+          success: false,
+          message: "This test was assigned by your organization and can't be declined.",
+        });
+      }
+    }
+
     const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
     const assignment = await TestAssignment.findOneAndUpdate(
       { testId, studentId },
@@ -387,6 +400,17 @@ export const hideTestAssignment = async (req, res, next) => {
   try {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
+
+    if (req.user?.role === "STUDENT") {
+      const test = await Test.findById(testId).select("createdBy").lean();
+      const organizationId = await resolveOrganizationId(req.user);
+      if (await isTestMandatoryForStudent(test, organizationId)) {
+        return res.status(400).json({
+          success: false,
+          message: "This test was assigned by your organization and can't be hidden.",
+        });
+      }
+    }
 
     const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
     const assignment = await TestAssignment.findOneAndUpdate(

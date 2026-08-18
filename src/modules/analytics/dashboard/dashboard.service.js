@@ -312,6 +312,82 @@ const getDisplayName = (user) => {
   return [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "Unknown Student";
 };
 
+const HOUR_LABELS = Array.from({ length: 24 }, (_, h) =>
+  new Date(2000, 0, 1, h).toLocaleTimeString("en-US", { hour: "numeric", hour12: true })
+);
+
+const getWeekNumber = (date) => {
+  const d = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  d.setUTCDate(d.getUTCDate() + 4 - (d.getUTCDay() || 7));
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1));
+  return Math.ceil((((d - yearStart) / 86400000) + 1) / 7);
+};
+
+const getTrendBucketKey = (date, period) => {
+  if (period === "today") {
+    const hour = date.getHours();
+    return { key: String(hour).padStart(2, "0"), label: HOUR_LABELS[hour] };
+  }
+  if (period === "weekly") {
+    const weekNum = getWeekNumber(date);
+    return { key: `${date.getFullYear()}-W${String(weekNum).padStart(2, "0")}`, label: `Week ${weekNum}` };
+  }
+  if (period === "monthly") {
+    return {
+      key: `${date.getFullYear()}-${String(date.getMonth()).padStart(2, "0")}`,
+      label: date.toLocaleString("en-US", { month: "short", year: "numeric" }),
+    };
+  }
+  // yearly
+  return { key: String(date.getFullYear()), label: String(date.getFullYear()) };
+};
+
+// How many trailing buckets each granularity keeps — "today" is a single
+// day's worth of hours (never more than 24 anyway); the others cap the chart
+// to a readable trailing window rather than every bucket since the platform
+// launched.
+const TREND_BUCKET_CAPS = { today: 24, weekly: 12, monthly: 12, yearly: 6 };
+
+// events: [{ studentId, date, category }]. Buckets at all four granularities
+// in one pass and counts DISTINCT students per category per bucket (this
+// feeds a "how many students engaged" trend, not "how many attempts
+// happened") — the frontend just switches which array it renders, same
+// convention as performanceOverTime/averageScoreOverTime above.
+const buildEngagementTrend = (events, categories) => {
+  const { start: todayStart, end: todayEnd } = getTodayRange();
+  const result = {};
+
+  Object.keys(TREND_BUCKET_CAPS).forEach((period) => {
+    const relevant =
+      period === "today" ? events.filter((e) => e.date >= todayStart && e.date < todayEnd) : events;
+
+    const buckets = new Map();
+    relevant.forEach(({ studentId, date, category }) => {
+      if (!category || !studentId) return;
+      const { key, label } = getTrendBucketKey(date, period);
+      if (!buckets.has(key)) buckets.set(key, { label, sets: {} });
+      const entry = buckets.get(key);
+      if (!entry.sets[category]) entry.sets[category] = new Set();
+      entry.sets[category].add(String(studentId));
+    });
+
+    const sortedKeys = Array.from(buckets.keys())
+      .sort()
+      .slice(-TREND_BUCKET_CAPS[period]);
+
+    result[period] = sortedKeys.map((key) => {
+      const { label, sets } = buckets.get(key);
+      const row = { label };
+      categories.forEach((cat) => {
+        row[cat] = sets[cat] ? sets[cat].size : 0;
+      });
+      return row;
+    });
+  });
+
+  return result;
+};
+
 const buildEngagementMetrics = (attempts) => {
   // Keyed by year-qualified sort key (not just "Week 32" / "Aug") — plain
   // week-number/month-name labels collide across years (Week 32 of 2025 and
@@ -645,6 +721,93 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
   });
 
   const { performanceOverTime, subjectWiseTests, averageScoreOverTime } = buildEngagementMetrics(attempts);
+
+  // Student Engagement Trend — distinct-student counts over time, but two
+  // different questions depending on the audience:
+  //  - Org: how many of ITS OWN students created a self-practice test, vs
+  //    how many gave (attempted) a test the org itself published. These are
+  //    two different event types (creation vs attempt), not one metric split
+  //    two ways.
+  //  - Admin: how many students gave a test, broken down by who made the
+  //    test they gave (themselves / an organization / IQPATH_ADMIN / an IQ
+  //    Room). All four are the same event type (an attempt), just
+  //    categorized by test origin.
+  let studentEngagementTrend;
+  if (isAdmin) {
+    const allAttempts = await TestAttempt.find({ status: { $in: ["SUBMITTED", "EVALUATED"] } })
+      .select("studentId submittedAt updatedAt createdAt testId")
+      .populate({ path: "testId", select: "createdBy isIQRoomTest" })
+      .lean();
+
+    const categoryForAttempt = (attempt) => {
+      if (attempt.testId?.isIQRoomTest) return "iqRoom";
+      const role = attempt.testId?.createdBy?.role;
+      if (role === "STUDENT") return "selfCreated";
+      if (role === "ORGANIZATION") return "organization";
+      if (role === "IQPATH_ADMIN") return "admin";
+      return null;
+    };
+
+    const engagementEvents = allAttempts.map((attempt) => ({
+      studentId: attempt.studentId,
+      date: new Date(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
+      category: categoryForAttempt(attempt),
+    }));
+
+    studentEngagementTrend = {
+      series: [
+        { key: "selfCreated", label: "Self-Created Tests" },
+        { key: "organization", label: "Organization Tests" },
+        { key: "admin", label: "Admin Tests" },
+        { key: "iqRoom", label: "IQ Room Tests" },
+      ],
+      ...buildEngagementTrend(engagementEvents, ["selfCreated", "organization", "admin", "iqRoom"]),
+    };
+  } else {
+    const [selfCreatedTests, ownOrgTests] = await Promise.all([
+      Test.find({ "createdBy.role": "STUDENT", "createdBy.userId": { $in: studentIds }, isDeleted: { $ne: 1 } })
+        .select("createdBy.userId createdAt")
+        .lean(),
+      adminUserId
+        ? Test.find({ "createdBy.role": "ORGANIZATION", "createdBy.userId": adminUserId, isDeleted: { $ne: 1 } })
+            .select("_id")
+            .lean()
+        : Promise.resolve([]),
+    ]);
+
+    const ownOrgTestIds = ownOrgTests.map((t) => t._id);
+    const orgAttempts = ownOrgTestIds.length
+      ? await TestAttempt.find({
+          testId: { $in: ownOrgTestIds },
+          studentId: { $in: studentIds },
+          status: { $in: ["SUBMITTED", "EVALUATED"] },
+        })
+          .select("studentId submittedAt updatedAt createdAt")
+          .lean()
+      : [];
+
+    const engagementEvents = [
+      ...selfCreatedTests.map((test) => ({
+        studentId: test.createdBy?.userId,
+        date: new Date(test.createdAt),
+        category: "selfCreated",
+      })),
+      ...orgAttempts.map((attempt) => ({
+        studentId: attempt.studentId,
+        date: new Date(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
+        category: "organization",
+      })),
+    ];
+
+    studentEngagementTrend = {
+      series: [
+        { key: "selfCreated", label: "Self-Created Tests" },
+        { key: "organization", label: "Organization Tests Taken" },
+      ],
+      ...buildEngagementTrend(engagementEvents, ["selfCreated", "organization"]),
+    };
+  }
+
   const recentTests = attempts.slice(0, 10).map((attempt) => ({
     id: attempt._id,
     studentName: getDisplayName(attempt.studentId),
@@ -754,6 +917,7 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     averageScoreOverTime,
     recentTests,
     subjectWiseTests,
+    studentEngagementTrend,
   };
 };
 

@@ -62,3 +62,46 @@ export const resolveAllowedStudents = async (visibility, allowedStudents, user) 
   }
   return validIds;
 };
+
+// A student registered under an organization must take every test that
+// organization publishes — there's no opt-out, so the accept/decline choice
+// (meant for tests the student was individually invited to) doesn't apply to
+// these. This resolves, in one batched pass (no per-test lookup, since a
+// student's assigned-tests list can be long), which of a given set of tests
+// were created by the student's OWN organization: creatorUserId -> creator's
+// organizationId (same id space an ORGANIZATION account's own User doc uses,
+// see user.service.js's createOrganization) compared against the student's
+// organizationId. Returns a Set of matching test id strings.
+export const resolveMandatoryOrgTestIds = async (tests, studentOrganizationId) => {
+  if (!studentOrganizationId) return new Set();
+
+  const orgTests = tests.filter((t) => t.createdBy?.role === "ORGANIZATION" && t.createdBy?.userId);
+  if (!orgTests.length) return new Set();
+
+  const creatorUserIds = [...new Set(orgTests.map((t) => String(t.createdBy.userId)))];
+  const creators = await UserModel.find({ _id: { $in: creatorUserIds } })
+    .select("organizationId")
+    .lean();
+  const creatorOrgMap = new Map(
+    creators.map((c) => [String(c._id), c.organizationId ? String(c.organizationId) : null])
+  );
+
+  const studentOrgId = String(studentOrganizationId);
+  return new Set(
+    orgTests
+      .filter((t) => creatorOrgMap.get(String(t.createdBy.userId)) === studentOrgId)
+      .map((t) => String(t._id))
+  );
+};
+
+// Single-test version of resolveMandatoryOrgTestIds, for the decline/hide
+// endpoints — a crafted request could call these directly, bypassing the
+// list view's auto-accept, so the "no opt-out" rule needs to be re-checked
+// server-side rather than relying on the UI hiding the buttons.
+export const isTestMandatoryForStudent = async (test, studentOrganizationId) => {
+  if (!studentOrganizationId || test?.createdBy?.role !== "ORGANIZATION" || !test.createdBy?.userId) {
+    return false;
+  }
+  const creator = await UserModel.findById(test.createdBy.userId).select("organizationId").lean();
+  return Boolean(creator?.organizationId) && String(creator.organizationId) === String(studentOrganizationId);
+};

@@ -2,19 +2,22 @@ import TestAttempt from "../../../../models/testAttempt.model.js";
 import TestAssignment from "../../../../models/testAssignment.model.js";
 import mongoose from "mongoose";
 
-export const findAttemptsByStudent = async (studentId) => {
+export const findAttemptsByStudent = async (studentId, { includeIQRoom = false } = {}) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(studentId)) {
       throw new Error("Invalid student id");
     }
 
-    // IQ Room attempts are excluded here — they belong only on the IQ Room
-    // History page (its own Result/Leaderboard tabs), not mixed in with
-    // regular test results.
+    // IQ Room attempts are excluded by default — they belong only on the IQ
+    // Room History page (its own Result/Leaderboard tabs), not mixed in with
+    // regular test results. Callers that DO want them alongside regular
+    // results (the admin/org "Tests and Performance" report, which has its
+    // own IQ Room tab) opt in via includeIQRoom.
+    const iqRoomFilter = includeIQRoom ? {} : { $or: [{ iqRoomId: null }, { iqRoomId: { $exists: false } }] };
     const attempts = await TestAttempt.find({
       studentId: new mongoose.Types.ObjectId(studentId),
       status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
-      $or: [{ iqRoomId: null }, { iqRoomId: { $exists: false } }],
+      ...iqRoomFilter,
     })
       .select(
         "testId iqRoomId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
@@ -49,6 +52,10 @@ export const findAttemptsByStudent = async (studentId) => {
     );
 
     const acceptedAttempts = attempts.filter((a) => {
+      // IQ Room tests are joined directly via room code, not through the
+      // normal assign/accept flow — they never get a TestAssignment record,
+      // so gating on one here would silently drop every IQ Room attempt.
+      if (a.iqRoomId) return true;
       const testId = String(a.testId?._id || a.testId || "");
       const assignment = assignmentMap.get(testId);
       return Boolean(assignment?.acceptedAt) && assignment.status !== "DECLINED";

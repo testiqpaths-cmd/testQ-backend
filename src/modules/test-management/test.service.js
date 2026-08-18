@@ -3,7 +3,8 @@ import Test from "../../models/test.model.js";
 import TestSeries from "../../models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
-import { ensureCreatorOrgIncluded, resolveAllowedStudents } from "./utils/visibility.js";
+import { ensureCreatorOrgIncluded, resolveAllowedStudents, resolveMandatoryOrgTestIds } from "./utils/visibility.js";
+import UserModel from "../../models/user.model.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
@@ -412,6 +413,39 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     const assignmentMap = new Map(
       assignments.map((a) => [String(a.testId), a])
     );
+
+    // Org students can't opt out of their own organization's tests — auto-
+    // accept them (self-healing: once a test's assignment is ACCEPTED here,
+    // later fetches find that record and skip the write below) rather than
+    // special-casing "mandatory" in every place that reads TestAssignment
+    // (start-attempt gate, decline endpoint, etc). A real ACCEPTED record
+    // means those gates need no changes at all. Also upgrades a PENDING/
+    // DECLINED/HIDDEN assignment recorded before this test became mandatory
+    // (e.g. the org enrolled the student after they'd already declined) —
+    // only STARTED/SUBMITTED/MISSED are left alone, since those reflect an
+    // attempt that already happened.
+    const student = await UserModel.findById(studentId).select("organizationId").lean();
+    const mandatoryTestIds = await resolveMandatoryOrgTestIds(tests, student?.organizationId);
+    const needsAutoAccept = [...mandatoryTestIds].filter((id) => {
+      const existing = assignmentMap.get(id);
+      return !existing || ["PENDING", "DECLINED", "HIDDEN"].includes(existing.status);
+    });
+
+    if (needsAutoAccept.length) {
+      const acceptedAt = new Date();
+      await TestAssignment.bulkWrite(
+        needsAutoAccept.map((testId) => ({
+          updateOne: {
+            filter: { testId, studentId },
+            update: { $set: { status: "ACCEPTED", acceptedAt } },
+            upsert: true,
+          },
+        }))
+      );
+      needsAutoAccept.forEach((testId) => {
+        assignmentMap.set(testId, { status: "ACCEPTED", acceptedAt });
+      });
+    }
 
     // A series test's own visibility on this list is gated by whether the
     // STUDENT accepted the series as a whole, not by its individual
