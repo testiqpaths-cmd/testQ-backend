@@ -45,10 +45,15 @@ export const deleteNews = async (id) => {
 };
 
 /**
- * Admin List
+ * Admin / management List. An IQPATH_ADMIN sees everything; an
+ * ORGANIZATION only sees news it created itself — otherwise every org's
+ * management console would leak every other org's (and admin's) internal
+ * announcements, defeating the point of scoping visibility by org at all.
  */
-export const getAllNews = async () => {
-  return await NewsUpdate.find()
+export const getAllNews = async ({ createdByUserId } = {}) => {
+  const filter = createdByUserId ? { "createdBy.userId": createdByUserId } : {};
+
+  return await NewsUpdate.find(filter)
     .sort({
       pinned: -1,
       priority: 1,

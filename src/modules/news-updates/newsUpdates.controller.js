@@ -1,4 +1,4 @@
-import { createNews, deleteNews, getAllNews, getStudentNews } from "./newsUpdates.service.js";
+import { createNews, deleteNews, getAllNews, getNewsById, getStudentNews } from "./newsUpdates.service.js";
 import { getIO } from "../../sockets/index.js";
 import logger from "../../config/logger.js";
 
@@ -49,6 +49,13 @@ export const createNewsController = async (req, res, next) => {
       });
     }
 
+    // Admin posts are platform-wide; an organization's posts only concern
+    // its own students — tag the audience by WHO is posting rather than
+    // trusting anything the client sends (the composer never sends an
+    // audience field at all; this is entirely role-driven).
+    const isOrgCreator = isOrganizationRole(req.user?.role);
+    const orgId = isOrgCreator ? req.user.organizationId || req.user._id : null;
+
     const payload = {
       title: title.trim(),
       description: description.trim(),
@@ -56,7 +63,8 @@ export const createNewsController = async (req, res, next) => {
       color: color || "blue",
       visibleFrom: startTime,
       visibleTill: endTime,
-      audience: "ALL",
+      audience: isOrgCreator ? "ORGANIZATION" : "ALL",
+      organizations: isOrgCreator ? [orgId] : [],
       pinned: false,
       isActive: true,
     };
@@ -73,8 +81,12 @@ export const createNewsController = async (req, res, next) => {
       // Ignore socket broadcast errors; request should still succeed.
     }
 
-    const { dispatchNotificationToAllStudents } = await import("../notification/notification.service.js");
-    dispatchNotificationToAllStudents({
+    // Scoped to the same audience the news item itself is visible to:
+    // resolves to every student for an admin poster, or just this org's own
+    // students for an organization poster (see notification.service.js's
+    // resolveStudentAudience).
+    const { dispatchNotificationToStudents } = await import("../notification/notification.service.js");
+    dispatchNotificationToStudents(req.user, {
       title: "New Update Posted",
       message: news.title,
       type: "NEWS_UPDATE",
@@ -96,8 +108,16 @@ export const getNewsUpdatesController = async (req, res, next) => {
   try {
     const role = req.user?.role;
 
-    if (isAdminRole(role) || isOrganizationRole(role)) {
+    if (isAdminRole(role)) {
       const items = await getAllNews();
+      return res.json({ success: true, data: items });
+    }
+
+    // An organization's management console only shows what IT published —
+    // not admin's global announcements or another org's, which it has no
+    // business seeing or (per deleteNewsController below) deleting.
+    if (isOrganizationRole(role)) {
+      const items = await getAllNews({ createdByUserId: req.user._id });
       return res.json({ success: true, data: items });
     }
 
@@ -119,6 +139,22 @@ export const deleteNewsController = async (req, res, next) => {
         success: false,
         message: "Only admins and organizations can delete updates",
       });
+    }
+
+    // An organization may only delete news IT created — without this, any
+    // org could delete admin's platform-wide announcements or another
+    // org's, since the role check above alone doesn't establish ownership.
+    if (isOrganizationRole(req.user?.role)) {
+      const existing = await getNewsById(req.params.id);
+      if (!existing) {
+        return res.status(404).json({ success: false, message: "News update not found" });
+      }
+      if (String(existing.createdBy?.userId) !== String(req.user._id)) {
+        return res.status(403).json({
+          success: false,
+          message: "You can only delete updates your organization published",
+        });
+      }
     }
 
     const deleted = await deleteNews(req.params.id);
