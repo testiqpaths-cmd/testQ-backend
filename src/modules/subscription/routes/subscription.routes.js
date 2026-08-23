@@ -6,6 +6,9 @@ import {
   upgradeMyPlan,
   getAvailablePlansForMyRole,
   getAllPlansPublic,
+  createCheckoutOrder,
+  verifyCheckoutPayment,
+  handleRazorpayWebhook,
   assignUserPlanController,
   getRoles,
   createRole,
@@ -30,6 +33,11 @@ router.get("/me", authMiddleware, getMySubscriptionDetails);
 router.post("/upgrade", authMiddleware, upgradeMyPlan);
 router.get("/my-available-plans", authMiddleware, getAvailablePlansForMyRole);
 router.get("/plans", authMiddleware, getAllPlansPublic);
+router.post("/checkout/order", authMiddleware, createCheckoutOrder);
+router.post("/checkout/verify", authMiddleware, verifyCheckoutPayment);
+// No authMiddleware — Razorpay calls this server-to-server and can't send a
+// user JWT; auth is the HMAC signature check inside the handler instead.
+router.post("/webhook/razorpay", handleRazorpayWebhook);
 
 // Admin / Organization Routes
 router.patch("/users/:userId/plan", authMiddleware, roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"), assignUserPlanController);

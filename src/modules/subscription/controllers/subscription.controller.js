@@ -1,4 +1,11 @@
-import { getUserUsageDetails, upgradeUserPlan } from "../services/subscription.service.js";
+import {
+  getUserUsageDetails,
+  upgradeUserPlan,
+  createRazorpayOrder,
+  verifyRazorpayPayment,
+  processRazorpayWebhookEvent,
+} from "../services/subscription.service.js";
+import logger from "../../../config/logger.js";
 import Role from "../models/Role.model.js";
 import Feature from "../models/Feature.model.js";
 import Plan from "../models/Plan.model.js";
@@ -36,6 +43,53 @@ export const upgradeMyPlan = async (req, res, next) => {
     res.json({ success: true, message: "Plan upgraded successfully", data: newSub });
   } catch (error) {
     next(error);
+  }
+};
+
+export const createCheckoutOrder = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const { planId } = req.body;
+
+    if (!planId) {
+      return res.status(400).json({ success: false, message: "planId is required" });
+    }
+
+    const order = await createRazorpayOrder(userId, planId);
+    res.json({ success: true, data: order });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyCheckoutPayment = async (req, res, next) => {
+  try {
+    const userId = req.user._id;
+    const sub = await verifyRazorpayPayment(userId, req.body);
+    res.json({ success: true, message: "Payment verified, plan activated", data: sub });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const handleRazorpayWebhook = async (req, res) => {
+  try {
+    const signature = req.headers["x-razorpay-signature"];
+    const result = await processRazorpayWebhookEvent(req.rawBody, signature);
+    logger.info(`Razorpay webhook processed: ${JSON.stringify(result)}`);
+    res.status(200).json({ success: true });
+  } catch (error) {
+    // Signature failures are the only case worth a non-2xx — Razorpay
+    // retries non-2xx responses with backoff, and retrying a permanently
+    // invalid signature is just noise. Everything else (unknown order,
+    // unhandled event type) is logged and still acknowledged with 200 so
+    // Razorpay doesn't keep hammering this endpoint for it.
+    if (error?.statusCode === 400) {
+      logger.warn(`Razorpay webhook rejected: ${error.message}`);
+      return res.status(400).json({ success: false, message: error.message });
+    }
+    logger.error(`Razorpay webhook error: ${error.message}`);
+    res.status(200).json({ success: false, message: "Acknowledged with an internal error" });
   }
 };
 

@@ -26,8 +26,18 @@ const userSubscriptionSchema = new mongoose.Schema(
       type: Date, // null if lifetime/free
       default: null,
     },
-    paymentId: {
-      type: String, // Stripe/Razorpay reference
+    lastPaymentId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Payment",
+      default: null,
+    },
+    razorpayOrderId: {
+      type: String,
+      default: null,
+    },
+    razorpayPaymentId: {
+      type: String,
+      default: null,
     },
     autoRenew: {
       type: Boolean,

@@ -26,7 +26,11 @@ app.use(morgan(":remote-addr - :remote-user [:date[clf]] \":method :url HTTP/:ht
 ));
 
 // Middleware
-app.use(express.json({ limit: "10mb" }));
+// `verify` stashes the exact raw request bytes on req.rawBody alongside the
+// normal parsed req.body — every existing route is unaffected, but the
+// Razorpay webhook route needs the raw bytes (not the re-serialized JSON
+// object) to verify Razorpay's HMAC signature correctly.
+app.use(express.json({ limit: "10mb", verify: (req, res, buf) => { req.rawBody = buf; } }));
 app.use(
   express.urlencoded({
     extended: true,

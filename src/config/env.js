@@ -40,6 +40,11 @@ const env = {
 
   // CORS
   CORS_ORIGIN: process.env.CORS_ORIGIN,
+
+  // Razorpay
+  RAZORPAY_KEY_ID: process.env.RAZORPAY_ID,
+  RAZORPAY_KEY_SECRET: process.env.RAZORPAY_KEY_SECRET,
+  RAZORPAY_WEBHOOK_SECRET: process.env.RAZORPAY_WEBHOOK_SECRET,
 };
 
 export default env;
