@@ -263,6 +263,14 @@ export const updateUserController = async (req, res) => {
 	if (!(await assertUserAccess(req, res, target))) return;
 
 	const updates = stripPrivilegedFields(req.body, req.user.role);
+
+	// Admin accounts are never blockable — enforced here (not just hidden in
+	// the UI) since this is the actual authority boundary; a crafted request
+	// straight to this endpoint must be rejected the same way.
+	if (target.role === "IQPATH_ADMIN" && updates.status && updates.status !== "ACTIVE") {
+		return res.status(403).json({ success: false, message: "Admin accounts cannot be blocked." });
+	}
+
 	const user = await updateUser(id, updates);
 	res.json({ success: true, user });
 };
