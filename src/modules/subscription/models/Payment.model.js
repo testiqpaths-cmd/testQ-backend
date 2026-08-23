@@ -22,11 +22,15 @@ const paymentSchema = new mongoose.Schema(
       required: true,
       unique: true,
     },
-    // Many docs sit at null while status is still CREATED/FAILED — sparse
-    // keeps the unique index from colliding on those nulls.
+    // Deliberately NO `default: null` here — a sparse index only excludes
+    // documents where the field is truly ABSENT, not documents where it's
+    // explicitly set to null. With a default, every CREATED/FAILED payment
+    // (there can be many, e.g. abandoned checkouts) would carry an explicit
+    // `razorpayPaymentId: null`, and the second one ever created would
+    // collide on the unique index. Leaving the field unset until a real
+    // payment id exists is what makes "sparse" actually work as intended.
     razorpayPaymentId: {
       type: String,
-      default: null,
       unique: true,
       sparse: true,
     },
