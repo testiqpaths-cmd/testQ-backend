@@ -1,6 +1,7 @@
 import {
   register as registerService,
   login as loginService,
+  exchangeLaunchToken as exchangeLaunchTokenService,
   firebaseAuth as firebaseAuthService,
   githubAuth as githubAuthService,
   checkUserExists as checkUserExistsService,
@@ -122,6 +123,35 @@ export const loginController = async (req, res) => {
   });
 }catch (err) {
     logger.error(`Login error: ${err.message}`);
+    res.status(401).json({ success: false, message: err.message });
+  }
+};
+
+/**
+ * Redeems a one-time exam-browser launch token (see exam-browser's
+ * claimSessionController) for a real logged-in session — no authMiddleware
+ * on this route, same reasoning as exam-browser's own sessionId-bearer
+ * routes: the whole point is establishing a session where none exists yet.
+ */
+export const exchangeLaunchTokenController = async (req, res) => {
+  try {
+    const { token } = req.body;
+    const { user, accessToken, refreshToken } = await exchangeLaunchTokenService(token);
+
+    res
+      .set("Authorization", `Bearer ${accessToken}`)
+      .cookie("accessToken", accessToken, accessCookieOptions)
+      .cookie("refreshToken", refreshToken, refreshCookieOptions)
+      .status(200)
+      .json({
+        success: true,
+        message: "Exam session authenticated",
+        accessToken,
+        refreshToken,
+        user: buildAuthUserResponse(user),
+      });
+  } catch (err) {
+    logger.error(`Exchange launch token error: ${err.message}`);
     res.status(401).json({ success: false, message: err.message });
   }
 };

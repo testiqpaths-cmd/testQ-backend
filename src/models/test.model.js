@@ -39,6 +39,10 @@ const testSchema = new Schema({
   testSeriesId: { type: Types.ObjectId, ref: "TestSeries" },
   isSeriesTest: { type: Boolean, default: false },
   isIQRoomTest: { type: Boolean, default: false },
+  // Gates the normal browser-tab attempt-start path (see
+  // test-attempts/testAttempt.controller.js) behind an ACTIVE ExamSession
+  // claimed by the testQ-browser Electron app.
+  secureBrowserRequired: { type: Boolean, default: false },
   createdAt: { type: Date, default: Date.now },
   isDeleted: {
   type: Number,

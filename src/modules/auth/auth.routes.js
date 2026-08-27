@@ -3,6 +3,7 @@ import {
   registerController,
   checkUserController,
   loginController,
+  exchangeLaunchTokenController,
   firebaseAuthController,
   logoutController,
   refreshTokenController,
@@ -19,6 +20,10 @@ const router = express.Router();
 router.post("/register", registerController);
 router.post("/check-user", checkUserController);
 router.post("/login", loginController);
+// No authMiddleware — establishes a session where none exists yet, same
+// reasoning as exam-browser's sessionId-bearer routes (see that module's
+// claim/heartbeat/security-event routes for the closest precedent).
+router.post("/exchange-launch-token", exchangeLaunchTokenController);
 router.post("/firebase", firebaseAuthController);
 router.get("/github", githubLoginController);
 router.get("/github/callback", githubCallbackController);

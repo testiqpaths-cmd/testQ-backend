@@ -194,6 +194,39 @@ export const login = async ({ email, password }) => {
   };
 };
 
+/**
+ * Redeems a one-time launch token (minted by exam-browser's claimSession
+ * when the testQ-browser Electron app claims an ExamSession) for a real
+ * access+refresh token pair — the "silent login" that lets a completely
+ * fresh Electron browser profile authenticate without ever showing a login
+ * form. Mirrors login()'s return shape exactly so the controller can build
+ * an identical response.
+ */
+export const exchangeLaunchToken = async (token) => {
+  if (!token) throw new AuthError("Missing launch token");
+
+  const ExamSession = (await import("../exam-browser/examBrowser.model.js")).default;
+  // Atomic find+clear — must be redeemable exactly once, even under a
+  // concurrent double-fire (e.g. a React effect double-invoke).
+  const session = await ExamSession.findOneAndUpdate(
+    { launchToken: token, launchTokenExpiresAt: { $gt: new Date() } },
+    { $set: { launchToken: null, launchTokenExpiresAt: null } }
+  );
+  if (!session) throw new AuthError("This exam launch link has expired or was already used");
+
+  const user = await findUserById(session.studentId);
+  if (!user) throw new AuthError("User not found");
+  if (user.status === "SUSPENDED") {
+    throw new AuthError("Your account is blocked. Please contact admin.");
+  }
+
+  return {
+    user,
+    accessToken: generateAccessToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
+    refreshToken: generateRefreshToken({ id: user._id, role: user.role, organizationId: user.organizationId }),
+  };
+};
+
 export const firebaseAuth = async ({
   firebaseUid,
   email,

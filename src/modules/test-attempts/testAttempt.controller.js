@@ -17,6 +17,7 @@ import { getIO } from "../../sockets/index.js";
 import IQRoom from "../../models/iqRoom.model.js";
 import UserModel from "../../models/user.model.js";
 import { createNotification } from "../notification/notification.service.js";
+import env from "../../config/env.js";
 
 // Let an organization know when a student completes one of its tests —
 // skipped for IQ Room attempts (a shared live-quiz format where every
@@ -124,6 +125,9 @@ export const startTestAttemptController = async (req, res, next) => {
     const { testId } = req.params;
     const studentId = req.user?._id;
     const { iqRoomId } = req.body;
+    // Set below by the secureBrowserRequired guard, if it fires — read again
+    // after TestAttempt.create() to bind the concrete attemptId back onto it.
+    let secureExamSession = null;
 
     if (!mongoose.Types.ObjectId.isValid(testId)) {
       return res
@@ -163,6 +167,32 @@ export const startTestAttemptController = async (req, res, next) => {
         success: false,
         message: "This test is not published yet",
       });
+    }
+
+    // Secure-browser tests can only be started once the testQ-browser
+    // Electron app has claimed a live ExamSession for this student+test —
+    // otherwise the normal unlocked browser tab would silently bypass the
+    // entire point of marking the test this way. The freshness check
+    // (expiresAt/lastHeartbeatAt) matters because ExamSession's status only
+    // gets re-synced when some exam-browser endpoint is hit (see
+    // examBrowser.service.js's syncSessionStatus) — a stale ACTIVE row
+    // whose heartbeat has actually timed out must not pass here.
+    if (test.secureBrowserRequired && req.user?.role === "STUDENT" && !iqRoomId) {
+      const ExamSession = (await import("../exam-browser/examBrowser.model.js")).default;
+      const heartbeatCutoff = new Date(Date.now() - env.EXAM_SESSION_HEARTBEAT_TIMEOUT_SECONDS * 1000);
+      secureExamSession = await ExamSession.findOne({
+        examId: testId,
+        studentId,
+        status: "ACTIVE",
+        expiresAt: { $gt: new Date() },
+        lastHeartbeatAt: { $gte: heartbeatCutoff },
+      });
+      if (!secureExamSession) {
+        return res.status(403).json({
+          success: false,
+          message: "This test requires the Secure Exam Browser. Launch it from the test list first.",
+        });
+      }
     }
 
     // 3) Validate schedule (adapt to your test fields)
@@ -317,6 +347,11 @@ export const startTestAttemptController = async (req, res, next) => {
         { testId, studentId },
         { $set: { status: "STARTED", startedAt } }
       );
+    }
+
+    if (secureExamSession) {
+      secureExamSession.attemptId = attempt._id;
+      await secureExamSession.save();
     }
 
     const timing = computeAttemptTiming(attempt);
