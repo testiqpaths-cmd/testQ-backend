@@ -217,6 +217,11 @@ export const startTestAttemptController = async (req, res, next) => {
     // once per test — `acceptedAt` is the persistent record of that, unlike
     // `status`, which also tracks per-attempt lifecycle (STARTED/SUBMITTED) and
     // gets overwritten after every attempt, so it can't be used as the gate here.
+    // A self-authored test is auto-accepted (a real ACCEPTED TestAssignment
+    // record) the moment it appears on getAssignedTests's list — see
+    // test.service.js's ownTestIds — so this gate needs no special-casing
+    // for it; the record is simply already there by the time a student
+    // reaches this endpoint.
     if (req.user?.role === "STUDENT" && !iqRoomId) {
       const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
       const assignment = await TestAssignment.findOne({ testId, studentId });
@@ -343,9 +348,20 @@ export const startTestAttemptController = async (req, res, next) => {
 
     if (!iqRoomId && req.user?.role === "STUDENT") {
       const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+      // upsert: true — a self-created test (see isOwnTest above) never got
+      // a TestAssignment doc from the accept step it skipped, so a plain
+      // updateOne would silently match nothing here and leave one never
+      // created at all, which would keep showing as "PENDING" forever on
+      // the Results/Assigned Test pages even after the test is finished.
+      // acceptedAt only via $setOnInsert so a real prior acceptance
+      // timestamp (the normal, non-self-created path) is never overwritten.
       await TestAssignment.updateOne(
         { testId, studentId },
-        { $set: { status: "STARTED", startedAt } }
+        {
+          $set: { status: "STARTED", startedAt },
+          $setOnInsert: { acceptedAt: startedAt },
+        },
+        { upsert: true }
       );
     }
 
