@@ -41,8 +41,11 @@ const testSchema = new Schema({
   isIQRoomTest: { type: Boolean, default: false },
   // Gates the normal browser-tab attempt-start path (see
   // test-attempts/testAttempt.controller.js) behind an ACTIVE ExamSession
-  // claimed by the testQ-browser Electron app.
-  secureBrowserRequired: { type: Boolean, default: false },
+  // claimed by the testQ-browser Electron app. Defaults true — the
+  // frontend create-test form always sends an explicit value, so this is
+  // only a fallback for requests that omit the field, but it should still
+  // fail closed (secure) rather than open.
+  secureBrowserRequired: { type: Boolean, default: true },
   createdAt: { type: Date, default: Date.now },
   isDeleted: {
   type: Number,
