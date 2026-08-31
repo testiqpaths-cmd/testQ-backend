@@ -9,7 +9,7 @@ import UserFeatureUsage from "../models/UserFeatureUsage.model.js";
 import Payment from "../models/Payment.model.js";
 import User from "../../../modules/auth/models/User.model.js"; // Existing user model
 import { ApiError } from "../../../common/exceptions/ApiError.js";
-import { razorpay } from "./razorpay.client.js";
+import { getRazorpayClient } from "./razorpay.client.js";
 import env from "../../../config/env.js";
 
 /**
@@ -320,7 +320,7 @@ export const createRazorpayOrder = async (userId, planId) => {
   // is set to is passed straight through to Razorpay verbatim.
   const amount = Math.round(plan.price * 100);
 
-  const order = await razorpay.orders.create({
+  const order = await getRazorpayClient().orders.create({
     amount,
     currency: plan.currency,
     receipt: `sub_${userId}_${Date.now()}`,
