@@ -47,7 +47,7 @@ export const createTest = async (req, res) => {
     });
   } catch (err) {
     logger.error(`createTest error: ${err.message}`);
-    return res.status(500).json({
+    return res.status(err.statusCode || 500).json({
       success: false,
       message: err.message,
     });

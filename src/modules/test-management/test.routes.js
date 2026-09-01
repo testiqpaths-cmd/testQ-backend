@@ -8,6 +8,7 @@ import loadTest from "./middlewares/loadTest.middleware.js";
 import schedule from "./middlewares/schedule.middleware.js";
 import visibility from "./middlewares/visibility.middleware.js";
 import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
+import { companyWiseFeatureMiddleware } from "../../common/middlewares/companyWiseFeature.middleware.js";
 
 import {
   createTest,
@@ -33,6 +34,10 @@ router.post(
   "/tests",
   authMiddleware,
   roleMiddleware("IQPATH_ADMIN", "ORGANIZATION","STUDENT"),
+  // Company-wise access is checked before CREATE_TEST usage is consumed, so
+  // a FREE student's rejected company-wise request never burns a CREATE_TEST
+  // usage credit.
+  companyWiseFeatureMiddleware(),
   featureMiddleware("CREATE_TEST", true),
   createTest
 );
@@ -111,6 +116,10 @@ router.put(
   authMiddleware,
   roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
   loadTest,
+  // Merge-aware: gates this update whenever the resulting test would still
+  // have companyIds set, even if this particular request doesn't mention
+  // companyIds itself (see companyWiseFeature.middleware.js).
+  companyWiseFeatureMiddleware({ mergeWithExisting: true }),
   updateTest
 );
 

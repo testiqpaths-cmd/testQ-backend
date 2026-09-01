@@ -25,6 +25,7 @@ import iqRoomRoutes from "../modules/iq-room/iqRoom.routes.js";
 import subscriptionRoutes from "../modules/subscription/routes/subscription.routes.js";
 import newsUpdatesRoutes from "../modules/news-updates/newsUpdates.routes.js";
 import examBrowserRoutes from "../modules/exam-browser/examBrowser.routes.js";
+import companyRoutes from "../modules/company/company.routes.js";
 const router = express.Router();
 
 // Health check
@@ -87,6 +88,7 @@ router.use("/iq-room", iqRoomRoutes);
 router.use("/subscriptions", subscriptionRoutes);
 router.use("/news-updates", newsUpdatesRoutes);
 router.use("/exam-browser", examBrowserRoutes);
+router.use("/companies", companyRoutes);
 
 export default router;
 

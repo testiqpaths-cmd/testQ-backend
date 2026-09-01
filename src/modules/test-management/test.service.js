@@ -6,6 +6,7 @@ import { computeTestStatus } from "./utils/status.js";
 import { ensureCreatorOrgIncluded, resolveAllowedStudents, resolveMandatoryOrgTestIds } from "./utils/visibility.js";
 import UserModel from "../../models/user.model.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
 
 const creatorRoleFilter = ["IQPATH_ADMIN", "ORGANIZATION"];
 
@@ -24,21 +25,51 @@ const toIdArray = (...values) =>
     .map((value) => String(value))
     .filter(Boolean);
 
+// ✅ Company-wise: Subject and Company are each individually optional, but
+// at least one is required for SUBJECT_TOPIC tests (EXCEL tests select
+// questions by excelBatchId instead, so neither applies there). Shared by
+// both create (against the incoming payload) and update (against the
+// resulting/merged state) so the rule can't be bypassed via a partial edit.
+const assertHasSubjectOrCompany = (subjectIds, companyIds, questionSource) => {
+  if (questionSource !== "EXCEL" && !subjectIds.length && !companyIds.length) {
+    throw new ApiError(400, "Please select at least one company or subject.");
+  }
+};
+
 const normalizeTestPayload = (data) => {
   const subjectIds = toIdArray(data.subjectIds, data.subjectId);
   const topicIds = toIdArray(data.topicIds, data.topicId);
+  const companyIds = toIdArray(data.companyIds);
 
-  if (data.questionSource !== "EXCEL" && !subjectIds.length) {
-    throw new Error("At least one subject is required");
-  }
+  assertHasSubjectOrCompany(subjectIds, companyIds, data.questionSource);
 
   return {
     ...data,
     subjectId: subjectIds[0] || data.subjectId,
     subjectIds,
     topicIds,
+    companyIds,
   };
 };
+
+// A field an update payload doesn't mention at all must fall back to the
+// test's existing value, not be treated as "cleared" — only an update that
+// explicitly sends the key (including an explicit empty array) overrides
+// what the test already has. Mirrors companyWiseFeature.middleware.js's
+// resolveFinalCompanyIds so both the feature gate and this validation agree
+// on what the update's "final" state actually is.
+const wasFieldProvided = (payload, ...keys) =>
+  keys.some((key) => Object.prototype.hasOwnProperty.call(payload, key));
+
+const resolveFinalSubjectIds = (payload, test) =>
+  wasFieldProvided(payload, "subjectIds", "subjectId")
+    ? toIdArray(payload.subjectIds, payload.subjectId)
+    : toIdArray(test.subjectIds);
+
+const resolveFinalCompanyIds = (payload, test) =>
+  wasFieldProvided(payload, "companyIds")
+    ? toIdArray(payload.companyIds)
+    : toIdArray(test.companyIds);
 
 export async function createTest(data, user) {
   // Prevent creating series tests via the normal test creation flow.
@@ -84,6 +115,16 @@ export async function createTest(data, user) {
 }
 
 export async function updateTest(test, payload, user) {
+  // ✅ Company-wise: validate the FINAL subject/company state (this update
+  // merged onto what the test already has) so a partial edit that doesn't
+  // mention subjectIds/companyIds can't silently leave the test with neither,
+  // while a partial edit that only touches one of them is still allowed.
+  assertHasSubjectOrCompany(
+    resolveFinalSubjectIds(payload, test),
+    resolveFinalCompanyIds(payload, test),
+    payload.questionSource ?? test.questionSource
+  );
+
   if (payload.visibility !== undefined || payload.allowedStudents !== undefined) {
     const nextVisibility = payload.visibility ?? test.visibility;
     payload.allowedStudents = await resolveAllowedStudents(

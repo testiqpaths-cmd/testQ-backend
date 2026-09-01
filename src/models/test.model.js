@@ -5,6 +5,9 @@ const testSchema = new Schema({
   title: { type: String, required: true },
   description: { type: String },
   subjectId: { type: Types.ObjectId, ref: "Subject"},
+
+   // ✅ Added companyIds
+  companyIds: [{ type: Types.ObjectId, ref: "Company" }],
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
@@ -20,7 +23,7 @@ const testSchema = new Schema({
     default: "SUBJECT_TOPIC",
   },
   excelBatchId: { type: String, default: null },
-  subjectIds: [{ type: Types.ObjectId, ref: "Subject", required: true }],
+  subjectIds: [{ type: Types.ObjectId, ref: "Subject"}],
   topicIds: [{ type: Types.ObjectId, ref: "Topic" }],
   difficulty: [{ type: String }],
   type: [{ type: String }],

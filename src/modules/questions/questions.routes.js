@@ -4,6 +4,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
 import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
+import { companyWiseFeatureMiddleware } from "../../common/middlewares/companyWiseFeature.middleware.js";
 import { validate } from "../../common/middlewares/validate.middleware.js";
 import { upload } from "../../common/middlewares/upload.middleware.js";
 import { imageUpload } from "../../common/middlewares/imageUpload.middleware.js";
@@ -53,7 +54,7 @@ router.post(
 router.get("/excel-batches/my", authMiddleware, featureMiddleware("QUESTION_BANK"), getMyExcelBatchesController);
 router.get("/excel-batches/:batchId/questions", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsByExcelBatchController);
 
-router.get("/getAllQuestion", authMiddleware, featureMiddleware("QUESTION_BANK"), getAllQuestionsController);
+router.get("/getAllQuestion", authMiddleware, featureMiddleware("QUESTION_BANK"), companyWiseFeatureMiddleware(), getAllQuestionsController);
 router.get("/getQuestionsByUser/:userId", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsByUserIdController);
 router.get("/getQuestionById/:questionId", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionByIdController);
 router.get("/getQuestionsBySubject/:subjectId", authMiddleware, featureMiddleware("QUESTION_BANK"), getQuestionsBySubjectController);

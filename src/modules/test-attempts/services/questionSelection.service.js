@@ -21,7 +21,7 @@ const shuffle = (items = []) => {
 const buildFilters = (test) => {
   const filters = {};
 
-  // Only apply subject/topic filters for SUBJECT_TOPIC source
+  // Only apply subject/topic/company filters for SUBJECT_TOPIC source
   if (test.questionSource === "SUBJECT_TOPIC") {
     if (Array.isArray(test.subjectIds) && test.subjectIds.length) {
       filters.subjectId = { $in: test.subjectIds };
@@ -29,6 +29,12 @@ const buildFilters = (test) => {
 
     if (Array.isArray(test.topicIds) && test.topicIds.length) {
       filters.topicId = { $in: test.topicIds };
+    }
+
+    // ✅ Company-wise: combined with subject/topic via AND — every filter
+    // here is its own top-level key, so Mongo requires all of them to match.
+    if (Array.isArray(test.companyIds) && test.companyIds.length) {
+      filters.companyIds = { $in: test.companyIds };
     }
   }
 

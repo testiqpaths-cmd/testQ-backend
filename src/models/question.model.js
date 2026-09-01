@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 const questionSchema = new mongoose.Schema({
   subjectId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Subject",
+    ref: "Subject", 
     required: false,
   },
   topicId: {
@@ -12,6 +12,11 @@ const questionSchema = new mongoose.Schema({
     ref: "Topic",
     required: false,
   },
+   // ✅ Added companyIds to tag questions with companies (e.g. Google, TCS, Amazon)
+  companyIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Company",
+  }],
   questionText: {
     type: String,
     required: true,

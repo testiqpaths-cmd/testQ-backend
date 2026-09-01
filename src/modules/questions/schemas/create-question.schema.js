@@ -18,4 +18,7 @@ export const createQuestionSchema = z.object({
   correctAnswer: z.string().optional(),
   difficulty: z.string().optional(),
   imageUrl: z.string().url("Invalid image URL").optional().or(z.literal("")),
+  // ✅ Company-wise: tag a question with the companies it's relevant to.
+  // Optional so existing question creation without companyIds is unaffected.
+  companyIds: z.array(z.string().regex(objectIdRegex, "Invalid company ID")).optional(),
 });

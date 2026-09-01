@@ -3,6 +3,7 @@ import mongoose from "mongoose";
 import path from "path";
 
 import Question from "../../../models/question.model.js";
+import Company from "../../../models/company.model.js";
 import {
   getSubjectByNameRepo,
   getTopicByNameAndSubjectRepo,
@@ -16,6 +17,28 @@ export const normalizeText = (value) => String(value ?? "").trim();
 
 const normalizeQuestionTextForDuplicate = (value) =>
   normalizeText(value).toLowerCase().replace(/\s+/g, " ");
+
+export const resolveCompanyId = async (value) => {
+  const companyValue = normalizeText(value);
+
+  if (!companyValue) {
+    return null;
+  }
+
+  if (mongoose.Types.ObjectId.isValid(companyValue)) {
+    return companyValue;
+  }
+
+  const company = await Company.findOne({
+    name: {
+      $regex: `^${companyValue.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`,
+      $options: "i",
+    },
+  }).lean();
+
+  return company?._id?.toString() ?? null;
+};
+
 
 export const buildQuestionDuplicateKey = ({ subjectId, topicId, type, questionText }) =>
   [

@@ -23,6 +23,9 @@ export const updateQuestionSchema = z
     correctAnswer: z.string().optional(),
     difficulty: z.string().optional(),
     imageUrl: z.string().url("Invalid image URL").optional().or(z.literal("")),
+    // ✅ Company-wise: tag a question with the companies it's relevant to.
+    // Optional so existing question updates without companyIds are unaffected.
+    companyIds: z.array(z.string().regex(objectIdRegex, "Invalid company ID")).optional(),
   })
   .refine(
     (data) => Object.keys(data).length > 0,
