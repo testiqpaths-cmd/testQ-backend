@@ -34,9 +34,32 @@ export const upgradeMyPlan = async (req, res, next) => {
   try {
     const userId = req.user._id;
     const { planId } = req.body;
-    
+
     if (!planId) {
       return res.status(400).json({ success: false, message: "planId is required" });
+    }
+
+    // This is the self-service, unauthenticated-against-payment path — the
+    // frontend only calls it for the $0 plan (createCheckoutOrder is the
+    // paid-plan path, and it already rejects a $0 order the mirror-image
+    // way). Without this check, calling this endpoint with ANY planId
+    // silently downgrades/overwrites an active paid subscription with no
+    // payment, no confirmation, and no trace connecting it to a purchase —
+    // exactly what happened to a real user: a paid checkout correctly
+    // activated Premium, then some later call to this same endpoint with
+    // the Free plan's id silently reverted it, while leaving the original
+    // payment's lastPaymentId/razorpayOrderId/razorpayPaymentId stamped on
+    // the subscription untouched (upgradeUserPlan doesn't clear those),
+    // which is exactly the fingerprint that traced this bug back here.
+    const plan = await Plan.findById(planId);
+    if (!plan) {
+      return res.status(404).json({ success: false, message: "Plan not found" });
+    }
+    if (plan.price > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Paid plans require checkout — use the upgrade-with-payment flow instead.",
+      });
     }
 
     const newSub = await upgradeUserPlan(userId, planId);
