@@ -21,7 +21,7 @@ import {
   normalizeDifficulty,
   normalizeQuestionType,
   parseOptions,
-  resolveCompanyId,
+  resolveOrCreateCompanyId,
   resolveOrCreateSubjectId,
   resolveOrCreateTopicId,
 } from "./utils/questions.utils.js";
@@ -167,11 +167,12 @@ export const uploadQuestionsExcelService = async ({
   "companyName",
   "targetCompany",
 ]);
-    // ✅ Resolve the row's own Company column (lookup-only, same as manual
-    // question creation — an unrecognized company name is just ignored, not
-    // an error) and merge it into this row's companyIds alongside whatever
-    // batch-level companyIds were selected for the whole upload.
-    const rowCompanyId = await resolveCompanyId(companyValue);
+    // ✅ Resolve the row's own Company column — same as
+    // resolveOrCreateSubjectId/resolveOrCreateTopicId below, an unrecognized
+    // name creates a new Company rather than being silently dropped — and
+    // merge it into this row's companyIds alongside whatever batch-level
+    // companyIds were selected for the whole upload.
+    const rowCompanyId = await resolveOrCreateCompanyId(companyValue);
     const rowCompanyIds =
       rowCompanyId && !batchCompanyIds.map(String).includes(String(rowCompanyId))
         ? [...batchCompanyIds, rowCompanyId]

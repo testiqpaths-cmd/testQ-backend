@@ -16,18 +16,6 @@ export const getAllCompanies = asyncHandler(async (req, res) => {
   res.json({ success: true, data: companies });
 });
 
-// Admin/Organization-only management list — unlike getAllCompanies, this
-// includes inactive companies too, since a manager needs to see (and
-// reactivate) the ones they've turned off.
-export const getAllCompaniesForManagement = asyncHandler(async (req, res) => {
-  const companies = await Company.find({})
-    .select("name description logo isActive createdAt")
-    .sort({ name: 1 })
-    .lean();
-
-  res.json({ success: true, data: companies });
-});
-
 export const createCompany = asyncHandler(async (req, res) => {
   const { name, description, logo, isActive } = req.body;
 

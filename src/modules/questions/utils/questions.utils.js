@@ -39,6 +39,35 @@ export const resolveCompanyId = async (value) => {
   return company?._id?.toString() ?? null;
 };
 
+// Same shape as resolveOrCreateSubjectId/resolveOrCreateTopicId below — an
+// unrecognized company name in the Excel "company" column creates a new
+// Company the same way an unrecognized subject/topic name does, rather than
+// silently dropping the tag.
+export const resolveOrCreateCompanyId = async (value) => {
+  const companyValue = normalizeText(value);
+
+  if (!companyValue) {
+    return null;
+  }
+
+  const existingCompanyId = await resolveCompanyId(companyValue);
+  if (existingCompanyId) {
+    return existingCompanyId;
+  }
+
+  try {
+    const company = await Company.create({ name: companyValue });
+    return company?._id?.toString() ?? null;
+  } catch (error) {
+    // Race with another row/request creating the same name concurrently —
+    // the unique index will have rejected us, so just look it up again.
+    if (error?.code === 11000) {
+      return resolveCompanyId(companyValue);
+    }
+    throw error;
+  }
+};
+
 
 export const buildQuestionDuplicateKey = ({ subjectId, topicId, type, questionText }) =>
   [
