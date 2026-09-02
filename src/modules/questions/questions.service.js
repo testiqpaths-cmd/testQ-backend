@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import Question from "../../models/question.model.js";
 import UserModel from "../../models/user.model.js";
+import Subject from "../../models/subject.model.js";
+import Topic from "../../models/topic.model.js";
 import { uploadBufferToCloudinary } from "../../common/utils/cloudinary.js";
 import { validateQuestion } from "./questions.validator.js";
 import {
@@ -460,6 +462,31 @@ export const getAllQuestionsService = async (query = {}, requester = null) => {
 
   if (type) filters.type = type;
   if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
+
+  // ✅ Free-text search — matches everything the question-bank table
+  // actually shows a column for: question text, subject name, topic name,
+  // type, and difficulty. (The frontend was already sending `search`, but
+  // nothing here ever read it — every search request silently fell back to
+  // the unfiltered list.)
+  const search = normalizeText(query.search);
+  if (search) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "i");
+
+    const [matchingSubjects, matchingTopics] = await Promise.all([
+      Subject.find({ name: regex }).select("_id").lean(),
+      Topic.find({ name: regex }).select("_id").lean(),
+    ]);
+
+    const orClauses = [{ questionText: regex }, { type: regex }, { difficulty: regex }];
+    if (matchingSubjects.length) {
+      orClauses.push({ subjectId: { $in: matchingSubjects.map((s) => s._id) } });
+    }
+    if (matchingTopics.length) {
+      orClauses.push({ topicId: { $in: matchingTopics.map((t) => t._id) } });
+    }
+    filters.$or = orClauses;
+  }
 
   // Only the "Questions" management page sends mine=true
   if (String(query.mine) === "true" && requester?.role === "ORGANIZATION") {
