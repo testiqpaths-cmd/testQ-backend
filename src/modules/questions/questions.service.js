@@ -291,11 +291,19 @@ export const uploadQuestionsExcelService = async ({
     uniqueQuestions.push(question);
   }
 
-  const pairKeys = [...new Set(uniqueQuestions.map((q) => `${q.subjectId}|${q.topicId}`))];
-  const pairFilters = pairKeys.map((pair) => {
-    const [subjectId, topicId] = pair.split("|");
-    return { subjectId, topicId };
-  });
+  // Deduplicate on a Map (not a stringified-then-split key) so a missing
+  // subjectId/topicId — legitimate now that a question can be company-only —
+  // stays the real `null` here instead of round-tripping through the string
+  // "null", which Mongoose then rejects as an invalid ObjectId when this
+  // filter hits Question.find() below.
+  const pairFilterByKey = new Map();
+  for (const q of uniqueQuestions) {
+    const key = `${q.subjectId}|${q.topicId}`;
+    if (!pairFilterByKey.has(key)) {
+      pairFilterByKey.set(key, { subjectId: q.subjectId ?? null, topicId: q.topicId ?? null });
+    }
+  }
+  const pairFilters = [...pairFilterByKey.values()];
 
   const existingQuestions = pairFilters.length
     ? await Question.find({ $or: pairFilters })
