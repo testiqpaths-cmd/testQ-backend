@@ -178,6 +178,7 @@ export class AnswerAnalysisService {
         difficulty: turn.difficulty,
         role: session.role,
         experienceLevel: session.experienceLevel,
+        interviewId: session.interviewId,
       });
 
       finalStatus = aiResult.answerStatus || AnswerStatus.PARTIAL;

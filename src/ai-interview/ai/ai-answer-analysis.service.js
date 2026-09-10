@@ -49,6 +49,7 @@ export class AiAnswerAnalysisService {
     difficulty,
     role = "Software Engineer",
     experienceLevel = "1-3 Years",
+    interviewId = null,
   }) {
     const systemPrompt = `You are an expert technical interviewer evaluating a candidate's answer for the role of ${role} (${experienceLevel}).
 
@@ -87,6 +88,7 @@ Candidate Answer: "${candidateAnswer}"`;
       const rawAiResponse = await this.llm.generateStructuredJson({
         systemPrompt,
         userPrompt,
+        meta: { interviewId, purpose: "evaluation" },
       });
 
       if (rawAiResponse) {

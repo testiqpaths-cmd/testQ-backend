@@ -266,6 +266,7 @@ export class InterviewResultsService {
       strengths: rawStrengths,
       weaknesses: rawWeaknesses,
       turnsSummary,
+      interviewId: session.interviewId,
     });
 
     const feedbackByTurn = new Map(feedback.perQuestion.map((f) => [f.turnNumber, f]));

@@ -42,6 +42,7 @@ export class AiQuestionService {
       difficulty = "EASY",
       previousQuestions = [],
       resumeSkills = [],
+      interviewId = null,
     } = context;
 
     const systemPrompt = `You are a professional technical interviewer for TestQ conducting an interview for the role of ${role} (${experienceLevel}).
@@ -69,6 +70,7 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
       const rawAiResponse = await this.llm.generateStructuredJson({
         systemPrompt,
         userPrompt,
+        meta: { interviewId, purpose: "question_gen" },
       });
 
       if (rawAiResponse) {
@@ -137,6 +139,7 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
       previousQuestion = "",
       candidateAnswer = "",
       conceptsMissing = [],
+      interviewId = null,
     } = context;
 
     const missingStr =
@@ -170,6 +173,7 @@ STRICT RULES:
       const rawAiResponse = await this.llm.generateStructuredJson({
         systemPrompt,
         userPrompt,
+        meta: { interviewId, purpose: "followup_gen" },
       });
 
       if (rawAiResponse) {

@@ -86,6 +86,7 @@ export class QuestionService {
       previousQuestions: [],
       resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
       interviewType: session.interviewTypes?.[0] || "technical",
+      interviewId: session.interviewId,
     });
 
     // 3. Backend Verification of AI Output
@@ -206,6 +207,7 @@ export class QuestionService {
       previousQuestions,
       resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
       interviewType: session.interviewTypes?.[0] || "technical",
+      interviewId: session.interviewId,
     });
 
     const finalQuestion = aiOutput.question.trim();
@@ -320,6 +322,7 @@ export class QuestionService {
       previousQuestion: previousTurn.question,
       candidateAnswer: previousTurn.candidateAnswer || "",
       conceptsMissing: previousTurn.conceptsMissing || [],
+      interviewId: session.interviewId,
     });
 
     const finalQuestion = aiOutput.question.trim();

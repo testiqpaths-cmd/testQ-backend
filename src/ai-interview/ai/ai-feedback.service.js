@@ -65,6 +65,7 @@ export class AiFeedbackService {
     strengths,
     weaknesses,
     turnsSummary,
+    interviewId = null,
   }) {
     const systemPrompt = `You are an expert technical interview coach reviewing a completed mock interview.
 
@@ -90,7 +91,11 @@ Turns:
 ${JSON.stringify(turnsSummary)}`;
 
     try {
-      const raw = await this.llm.generateStructuredJson({ systemPrompt, userPrompt });
+      const raw = await this.llm.generateStructuredJson({
+        systemPrompt,
+        userPrompt,
+        meta: { interviewId, purpose: "feedback_gen" },
+      });
       if (raw) {
         const validated = aiFeedbackSchema.safeParse(raw);
         if (validated.success) {
