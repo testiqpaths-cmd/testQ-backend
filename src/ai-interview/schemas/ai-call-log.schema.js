@@ -15,11 +15,20 @@ const aiCallLogSchema = new Schema({
 
   purpose: {
     type: String,
-    enum: ["question_gen", "followup_gen", "evaluation", "feedback_gen", "embedding", "other"],
+    enum: [
+      "question_gen",
+      "followup_gen",
+      "evaluation",
+      "feedback_gen",
+      "embedding",
+      "tts",
+      "stt",
+      "other",
+    ],
     default: "other",
     index: true,
   },
-  provider: { type: String, default: null }, // "gemini" | "openai"
+  provider: { type: String, default: null }, // "gemini" | "openai" | "elevenlabs" | ...
   model: { type: String, default: null },
 
   tokensIn: { type: Number, default: null },

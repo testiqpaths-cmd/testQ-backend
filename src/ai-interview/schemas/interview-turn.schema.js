@@ -65,6 +65,12 @@ const interviewTurnSchema = new Schema(
       ref: "QuestionBank",
       default: null,
     },
+    // Cloudinary URL of the synthesized narration for `question`, filled
+    // lazily by GET /sessions/:id/question-audio. Null when TTS is off.
+    questionAudioUrl: {
+      type: String,
+      default: null,
+    },
     questionTimestamp: {
       type: Date,
       default: Date.now,

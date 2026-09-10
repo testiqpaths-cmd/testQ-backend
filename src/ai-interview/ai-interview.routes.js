@@ -129,6 +129,10 @@ router.post(
 router.get("/sessions/:id/integrity-signals", aiInterviewController.getIntegritySignals);
 router.get("/:id/integrity-signals", aiInterviewController.getIntegritySignals);
 
+// Text-to-speech narration for a question turn (lazy, cached in Cloudinary)
+router.get("/sessions/:id/question-audio", aiInterviewController.getQuestionAudio);
+router.get("/:id/question-audio", aiInterviewController.getQuestionAudio);
+
 // Session state
 router.get("/sessions/:id", aiInterviewController.getSession);
 router.get("/:id", aiInterviewController.getSession);

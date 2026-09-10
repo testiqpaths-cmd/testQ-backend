@@ -5,7 +5,12 @@ import { interviewDashboardService } from "../services/interview-dashboard.servi
 import { interviewOrgService } from "../services/interview-org.service.js";
 import { conceptHistoryService } from "../services/concept-history.service.js";
 import { integrityService } from "../services/integrity.service.js";
+import { questionAudioService } from "../tts/question-audio.service.js";
 import { generateInterviewReport } from "../reports/interview-report.service.js";
+import { InterviewSession } from "../schemas/interview-session.schema.js";
+import { InterviewTurn } from "../schemas/interview-turn.schema.js";
+import { assertCanViewSession } from "../utils/authorize.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
 import logger from "../../config/logger.js";
@@ -236,6 +241,62 @@ export class AiInterviewController {
         req.user
       );
       return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/question-audio?turnId=<id>
+   * Narration URL for a question turn (default: the session's latest
+   * turn), synthesized + cached on first request. Returns
+   * { enabled:false } when TTS is switched off for this deployment.
+   */
+  async getQuestionAudio(req, res, next) {
+    try {
+      if (!questionAudioService.isEnabled()) {
+        return res.status(200).json({ success: true, data: { enabled: false } });
+      }
+
+      const sessionId = req.params.id;
+      const query = String(sessionId).startsWith("int-")
+        ? { interviewId: sessionId }
+        : { _id: sessionId };
+      const session = await InterviewSession.findOne(query);
+      if (!session) throw new ApiError(404, `Interview session not found: ${sessionId}`);
+      await assertCanViewSession(req.user, session);
+
+      const turnQuery = { sessionId: session._id };
+      if (req.query.turnId) turnQuery._id = req.query.turnId;
+      const turn = await InterviewTurn.findOne(turnQuery).sort({ turnNumber: -1 });
+      if (!turn) throw new ApiError(404, "No question turn found for this session.");
+
+      if (turn.questionAudioUrl) {
+        return res.status(200).json({
+          success: true,
+          data: { enabled: true, turnId: turn._id.toString(), url: turn.questionAudioUrl },
+        });
+      }
+
+      const audio = await questionAudioService.getOrCreate(turn.question, {
+        interviewId: session.interviewId,
+      });
+      if (!audio?.url) {
+        return res.status(200).json({ success: true, data: { enabled: true, url: null } });
+      }
+
+      turn.questionAudioUrl = audio.url;
+      await turn.save();
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          enabled: true,
+          turnId: turn._id.toString(),
+          url: audio.url,
+          mimeType: audio.mimeType,
+        },
+      });
     } catch (error) {
       next(error);
     }
