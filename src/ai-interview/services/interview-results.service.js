@@ -2,6 +2,7 @@ import { InterviewSession } from "../schemas/interview-session.schema.js";
 import { InterviewTurn } from "../schemas/interview-turn.schema.js";
 import { InterviewPlan } from "../schemas/interview-plan.schema.js";
 import { aiFeedbackService } from "../ai/ai-feedback.service.js";
+import { assertCanViewSession } from "../utils/authorize.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
@@ -89,11 +90,8 @@ export class InterviewResultsService {
     const session = await InterviewSession.findOne(query);
     if (!session) throw new ApiError(404, `Interview session not found: ${sessionId}`);
 
-    const isOwner = session.userId.toString() === user._id.toString();
-    const isAdmin = user.role === "IQPATH_ADMIN";
-    if (!isOwner && !isAdmin) {
-      throw new ApiError(403, "You are not authorized to view this interview's results.");
-    }
+    // Owner, IQPATH_ADMIN, or an ORGANIZATION user monitoring their own student.
+    await assertCanViewSession(user, session);
 
     return session;
   }

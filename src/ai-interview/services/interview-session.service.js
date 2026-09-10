@@ -11,6 +11,7 @@ import { InterviewAction } from "../enums/interview-action.enum.js";
 import { adaptiveEngineService } from "./adaptive-engine.service.js";
 import { answerAnalysisService } from "./answer-analysis.service.js";
 import { interviewResultsService } from "./interview-results.service.js";
+import { assertCanViewSession } from "../utils/authorize.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
@@ -322,14 +323,8 @@ export class InterviewSessionService {
       throw new ApiError(404, `Interview session not found: ${sessionId}`);
     }
 
-    // Strict Authorization Check: Candidate can only access their own session
-    const isOwner = session.userId.toString() === user._id.toString();
-    const isAdmin = user.role === "IQPATH_ADMIN";
-
-    if (!isOwner && !isAdmin) {
-      logger.warn(`Unauthorized interview session access attempt by user ${user._id} on session ${sessionId}`);
-      throw new ApiError(403, "You are not authorized to view this interview session.");
-    }
+    // Owner, IQPATH_ADMIN, or an ORGANIZATION user monitoring their own student.
+    await assertCanViewSession(user, session);
 
     return session;
   }

@@ -1,5 +1,7 @@
 import express from "express";
 import { authMiddleware } from "../common/middlewares/auth.middleware.js";
+import { roleMiddleware } from "../common/middlewares/role.middleware.js";
+import { featureMiddleware } from "../common/middlewares/feature.middleware.js";
 import { validate } from "../common/middlewares/validate.middleware.js";
 import { createCustomInterviewSchema } from "./dto/create-interview.dto.js";
 import { resumeInterviewSchema } from "./dto/resume-interview.dto.js";
@@ -9,8 +11,17 @@ import { resumeUpload } from "./middlewares/resume-upload.middleware.js";
 
 const router = express.Router();
 
-// All AI Interview routes require authentication
+// All AI Interview routes require authentication and the AI_INTERVIEW
+// plan feature (seeded enabled on every plan for now — see
+// database/migrations/seed-ai-interview-feature.js — so this is the gating
+// hook, not an active restriction yet).
 router.use(authMiddleware);
+router.use(featureMiddleware("AI_INTERVIEW"));
+
+// Org/Admin monitoring — must precede the "/:id" catch-all
+const orgOnly = roleMiddleware("ORGANIZATION", "IQPATH_ADMIN");
+router.get("/org/overview", orgOnly, aiInterviewController.getOrgOverview);
+router.get("/org/students/:studentId", orgOnly, aiInterviewController.getStudentInterviews);
 
 // Path B: Set up custom interview
 router.post(

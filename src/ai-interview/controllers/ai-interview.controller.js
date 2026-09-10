@@ -2,6 +2,7 @@ import { interviewSessionService } from "../services/interview-session.service.j
 import { answerAnalysisService } from "../services/answer-analysis.service.js";
 import { interviewResultsService } from "../services/interview-results.service.js";
 import { interviewDashboardService } from "../services/interview-dashboard.service.js";
+import { interviewOrgService } from "../services/interview-org.service.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
 import logger from "../../config/logger.js";
@@ -171,6 +172,36 @@ export class AiInterviewController {
   async getDashboard(req, res, next) {
     try {
       const data = await interviewDashboardService.getDashboard(req.user._id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/org/overview
+   * Org/Admin: aggregate AI Interview stats + recent-interviews table for
+   * the caller's in-scope students (org = own students, admin = all).
+   */
+  async getOrgOverview(req, res, next) {
+    try {
+      const data = await interviewOrgService.getOrgOverview(req.user, req.query);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/org/students/:studentId
+   * Org/Admin: one student's interview list (org-scoped).
+   */
+  async getStudentInterviews(req, res, next) {
+    try {
+      const data = await interviewOrgService.getStudentInterviews(
+        req.user,
+        req.params.studentId
+      );
       return res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);
