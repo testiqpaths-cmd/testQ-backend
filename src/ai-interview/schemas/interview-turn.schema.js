@@ -1,0 +1,177 @@
+import mongoose from "mongoose";
+import { Difficulty } from "../enums/difficulty.enum.js";
+import { AnswerStatus } from "../enums/answer-status.enum.js";
+
+const { Schema, model, Types } = mongoose;
+
+const interviewTurnSchema = new Schema(
+  {
+    sessionId: {
+      type: Types.ObjectId,
+      ref: "InterviewSession",
+      required: true,
+      index: true,
+    },
+    interviewId: {
+      type: String,
+      required: true,
+      index: true,
+    },
+    turnNumber: {
+      type: Number,
+      required: true,
+    },
+    topic: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    question: {
+      type: String,
+      required: true,
+      trim: true,
+    },
+    questionType: {
+      type: String,
+      enum: ["TECHNICAL", "CONCEPTUAL", "PROBLEM_SOLVING", "BEHAVIORAL", "PROJECT", "HR"],
+      default: "TECHNICAL",
+    },
+    difficulty: {
+      type: String,
+      enum: Object.values(Difficulty),
+      default: Difficulty.EASY,
+    },
+    competency: {
+      type: String,
+      default: "Technical Knowledge",
+    },
+    questionTimestamp: {
+      type: Date,
+      default: Date.now,
+      required: true,
+    },
+    candidateAnswer: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    answerTimestamp: {
+      type: Date,
+      default: null,
+    },
+    timeTakenSeconds: {
+      type: Number,
+      default: null,
+    },
+    audioReference: {
+      type: String,
+      default: null,
+      trim: true,
+    },
+    processingState: {
+      type: String,
+      enum: ["QUESTION_GENERATED", "SUBMITTED", "ANALYZED", "EVALUATED"],
+      default: "QUESTION_GENERATED",
+    },
+    answerStatus: {
+      type: String,
+      enum: [...Object.values(AnswerStatus), null],
+      default: null,
+    },
+    relevanceScore: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 100,
+    },
+    correctnessScore: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 100,
+    },
+    completenessScore: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 100,
+    },
+    confidence: {
+      type: Number,
+      default: null,
+      min: 0,
+      max: 100,
+    },
+    conceptsDemonstrated: {
+      type: [String],
+      default: [],
+    },
+    conceptsMissing: {
+      type: [String],
+      default: [],
+    },
+    feedbackSummary: {
+      type: String,
+      default: null,
+    },
+    followUpRecommended: {
+      type: Boolean,
+      default: false,
+    },
+    difficultyRecommendation: {
+      type: String,
+      enum: ["EASY", "MEDIUM", "HARD", null],
+      default: null,
+    },
+    topicContinuationRecommended: {
+      type: Boolean,
+      default: true,
+    },
+    analysisTimestamp: {
+      type: Date,
+      default: null,
+    },
+    knowledgeLevel: {
+      type: String,
+      enum: ["NONE", "BASIC", "MEDIUM", "ADVANCED", null],
+      default: null,
+    },
+    topicCoverage: {
+      type: Number,
+      default: null,
+    },
+    evaluation: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    followUp: {
+      type: Boolean,
+      default: false,
+    },
+    isFollowUp: {
+      type: Boolean,
+      default: false,
+    },
+    followUpAllowed: {
+      type: Boolean,
+      default: false,
+    },
+    parentTurnId: {
+      type: Types.ObjectId,
+      ref: "InterviewTurn",
+      default: null,
+    },
+  },
+  {
+    timestamps: true,
+  }
+);
+
+// Compound index to quickly fetch chronological transcript for a session
+interviewTurnSchema.index({ sessionId: 1, turnNumber: 1 });
+interviewTurnSchema.index({ interviewId: 1, turnNumber: 1 });
+
+export const InterviewTurn =
+  mongoose.models.InterviewTurn || model("InterviewTurn", interviewTurnSchema);
+
+export default InterviewTurn;
