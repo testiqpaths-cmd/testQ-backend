@@ -346,7 +346,29 @@ export class InterviewResultsService {
 
     logger.info(`Computed and cached interview results for ${session.interviewId}`);
 
+    // First (and only) time results are computed for this session — tell
+    // the candidate their report is ready. Non-fatal.
+    this.notifyReportReady(session, results);
+
     return results;
+  }
+
+  async notifyReportReady(session, results) {
+    try {
+      const { createNotification } = await import(
+        "../../modules/notification/notification.service.js"
+      );
+      await createNotification({
+        userId: session.userId,
+        title: "Your AI interview report is ready",
+        message: `${session.role} interview — scored ${results.score}/100 (readiness ${results.readinessScore}/100).`,
+        type: "RESULT",
+        link: `/dashboard/ai-interview/details/${session.interviewId}`,
+        metadata: { interviewId: session.interviewId, score: results.score },
+      });
+    } catch (err) {
+      logger.warn(`Interview completion notification failed (non-fatal): ${err.message}`);
+    }
   }
 }
 
