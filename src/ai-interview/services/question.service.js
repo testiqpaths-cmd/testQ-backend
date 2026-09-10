@@ -4,6 +4,7 @@ import { InterviewState } from "../enums/interview-state.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { aiQuestionService } from "../ai/ai-question.service.js";
 import { conceptHistoryService } from "./concept-history.service.js";
+import { questionDedupService } from "./question-dedup.service.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
@@ -19,6 +20,40 @@ export class QuestionService {
     if (i < 0) return current;
     const next = Math.min(DIFFICULTY_LADDER.length - 1, Math.max(0, i + delta));
     return DIFFICULTY_LADDER[next];
+  }
+
+  /**
+   * Runs an AI question generator, then guards against a candidate being
+   * asked a question they've already had (in this or any earlier
+   * interview) reworded — using embedding cosine similarity. On a hit it
+   * regenerates ONCE with the duplicate added to the exclusion list.
+   *
+   * Fully non-fatal / no-op without an AI key: `embedQuestion` returns null
+   * (no embedding to compare), so the first result is used as-is.
+   *
+   * @param {(excludeQuestions: string[]) => Promise<Object>} generate
+   * @param {{ userId: any, interviewId: string, topic: string }} ctx
+   * @returns {Promise<{ aiOutput: Object, questionEmbedding: number[]|null }>}
+   */
+  async generateWithDedup(generate, { userId, interviewId, topic }) {
+    let aiOutput = await generate([]);
+    let embedding = await questionDedupService.embedQuestion(aiOutput.question, interviewId);
+
+    if (embedding) {
+      const dup = await questionDedupService.findDuplicate(embedding, userId, { topic });
+      if (dup.isDuplicate) {
+        logger.info(
+          `Dedup: regenerating near-duplicate question (cosine ${dup.similarity.toFixed(3)} vs "${(dup.closestMatch?.question || "").slice(0, 70)}")`
+        );
+        const exclude = [aiOutput.question, dup.closestMatch?.question].filter(Boolean);
+        const retry = await generate(exclude);
+        const retryEmbedding = await questionDedupService.embedQuestion(retry.question, interviewId);
+        aiOutput = retry;
+        embedding = retryEmbedding || embedding;
+      }
+    }
+
+    return { aiOutput, questionEmbedding: embedding };
   }
 
   /**
@@ -87,17 +122,22 @@ export class QuestionService {
       1
     );
 
-    // 2. Delegate to AI Intelligence Layer (with built-in fallback)
-    const aiOutput = await this.ai.generateQuestion({
-      role: session.role,
-      experienceLevel: session.experienceLevel,
-      topic: activeTopic,
-      difficulty: targetDifficulty,
-      previousQuestions: [],
-      resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
-      interviewType: session.interviewTypes?.[0] || "technical",
-      interviewId: session.interviewId,
-    });
+    // 2. Delegate to AI Intelligence Layer (with built-in fallback +
+    //    cross-interview semantic dedup)
+    const { aiOutput, questionEmbedding } = await this.generateWithDedup(
+      (exclude) =>
+        this.ai.generateQuestion({
+          role: session.role,
+          experienceLevel: session.experienceLevel,
+          topic: activeTopic,
+          difficulty: targetDifficulty,
+          previousQuestions: exclude,
+          resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
+          interviewType: session.interviewTypes?.[0] || "technical",
+          interviewId: session.interviewId,
+        }),
+      { userId: session.userId, interviewId: session.interviewId, topic: activeTopic }
+    );
 
     // 3. Backend Verification of AI Output
     if (!aiOutput || !aiOutput.question || !aiOutput.question.trim()) {
@@ -115,6 +155,7 @@ export class QuestionService {
       turnNumber: 1,
       topic: finalTopic,
       question: aiOutput.question.trim(),
+      questionEmbedding: questionEmbedding || undefined,
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: finalDifficulty,
       competency: aiOutput.competency || "Technical Knowledge",
@@ -221,17 +262,22 @@ export class QuestionService {
       // Non-fatal if query fails
     }
 
-    // Generate question via AI layer (with automatic fallback)
-    const aiOutput = await this.ai.generateQuestion({
-      role: session.role,
-      experienceLevel: session.experienceLevel,
-      topic: activeTopic,
-      difficulty: targetDifficulty,
-      previousQuestions,
-      resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
-      interviewType: session.interviewTypes?.[0] || "technical",
-      interviewId: session.interviewId,
-    });
+    // Generate question via AI layer (with automatic fallback +
+    // cross-interview semantic dedup)
+    const { aiOutput, questionEmbedding } = await this.generateWithDedup(
+      (exclude) =>
+        this.ai.generateQuestion({
+          role: session.role,
+          experienceLevel: session.experienceLevel,
+          topic: activeTopic,
+          difficulty: targetDifficulty,
+          previousQuestions: [...previousQuestions, ...exclude],
+          resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
+          interviewType: session.interviewTypes?.[0] || "technical",
+          interviewId: session.interviewId,
+        }),
+      { userId: session.userId, interviewId: session.interviewId, topic: activeTopic }
+    );
 
     const finalQuestion = aiOutput.question.trim();
     const finalTopic = String(aiOutput.topic || activeTopic).toUpperCase();
@@ -250,6 +296,7 @@ export class QuestionService {
       turnNumber: nextTurnNumber,
       topic: finalTopic,
       question: finalQuestion,
+      questionEmbedding: questionEmbedding || undefined,
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: finalDifficulty,
       competency: aiOutput.competency || "Technical Knowledge",
@@ -350,6 +397,13 @@ export class QuestionService {
 
     const finalQuestion = aiOutput.question.trim();
 
+    // Embed for future dedup comparisons; follow-ups are inherently tied to
+    // the parent answer so we don't regenerate them, just record the vector.
+    const questionEmbedding = await questionDedupService.embedQuestion(
+      finalQuestion,
+      session.interviewId
+    );
+
     // Determine sequential turnNumber across all session turns
     const lastTurnDoc = await InterviewTurn.findOne({ sessionId: session._id })
       .sort({ turnNumber: -1 })
@@ -363,6 +417,7 @@ export class QuestionService {
       turnNumber: nextTurnNumber,
       topic: previousTurn.topic,
       question: finalQuestion,
+      questionEmbedding: questionEmbedding || undefined,
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: previousTurn.difficulty,
       competency: aiOutput.competency || "Technical Knowledge",

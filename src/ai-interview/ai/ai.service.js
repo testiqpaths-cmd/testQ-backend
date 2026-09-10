@@ -185,13 +185,22 @@ export class AiService {
    */
   async embed(text, { interviewId = null } = {}) {
     if (!this.geminiApiKey || !text) return null;
-    const model = process.env.GEMINI_EMBED_MODEL || "text-embedding-004";
+    // "text-embedding-004" was retired the same way the 1.5 chat models
+    // were; "gemini-embedding-001" is the current stable embedder. It
+    // defaults to 3072 dims — truncate to 768 (Matryoshka) to keep stored
+    // vectors small; cosine similarity is scale-invariant so no re-norm.
+    const model = process.env.GEMINI_EMBED_MODEL || "gemini-embedding-001";
+    const dim = Number(process.env.GEMINI_EMBED_DIM) || 768;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:embedContent?key=${this.geminiApiKey}`;
     const start = Date.now();
     try {
       const response = await axios.post(
         url,
-        { model: `models/${model}`, content: { parts: [{ text: String(text).slice(0, 8000) }] } },
+        {
+          model: `models/${model}`,
+          content: { parts: [{ text: String(text).slice(0, 8000) }] },
+          outputDimensionality: dim,
+        },
         { timeout: this.timeoutMs, headers: { "Content-Type": "application/json" } }
       );
       const vector = response.data?.embedding?.values || null;

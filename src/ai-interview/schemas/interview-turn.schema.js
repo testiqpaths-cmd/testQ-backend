@@ -31,6 +31,14 @@ const interviewTurnSchema = new Schema(
       required: true,
       trim: true,
     },
+    // Embedding of `question` (Gemini text-embedding-004). Used for
+    // cross-interview semantic dedup so a candidate isn't asked the same
+    // question twice in different words. Absent when no AI key is set.
+    questionEmbedding: {
+      type: [Number],
+      default: undefined,
+      select: false,
+    },
     questionType: {
       type: String,
       enum: ["TECHNICAL", "CONCEPTUAL", "PROBLEM_SOLVING", "BEHAVIORAL", "PROJECT", "HR"],
