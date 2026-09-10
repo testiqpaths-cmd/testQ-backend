@@ -5,7 +5,30 @@ export class AiService {
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || null;
     this.openaiApiKey = process.env.OPENAI_API_KEY || null;
-    this.timeoutMs = 6000; // 6-second strict timeout for interview responsiveness
+    // "gemini-flash-latest" tracks Google's current stable flash model, so
+    // this doesn't break again when a specific version is retired (as
+    // gemini-1.5-flash was). Pin a version via GEMINI_MODEL if needed.
+    this.geminiModel = process.env.GEMINI_MODEL || "gemini-flash-latest";
+    this.openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
+    // Current-gen flash models routinely need >6s for a full structured-JSON
+    // response; 6s timed out almost every call. Override with AI_TIMEOUT_MS.
+    this.timeoutMs = Number(process.env.AI_TIMEOUT_MS) || 15000;
+  }
+
+  /**
+   * One extra attempt on transient provider errors (503 overloaded, 429
+   * rate limit, network timeout) before the caller falls back.
+   */
+  async withRetry(fn) {
+    try {
+      return await fn();
+    } catch (err) {
+      const status = err.response?.status;
+      const retryable = status === 503 || status === 429 || err.code === "ECONNABORTED" || /timeout/i.test(err.message || "");
+      if (!retryable) throw err;
+      await new Promise((r) => setTimeout(r, 800));
+      return fn();
+    }
   }
 
   /**
@@ -21,7 +44,7 @@ export class AiService {
     // 1. Try Gemini if configured
     if (this.geminiApiKey) {
       try {
-        return await this.callGemini({ systemPrompt, userPrompt });
+        return await this.withRetry(() => this.callGemini({ systemPrompt, userPrompt }));
       } catch (err) {
         logger.warn(`Gemini AI call failed: ${err.message}. Triggering fallback.`);
       }
@@ -30,7 +53,7 @@ export class AiService {
     // 2. Try OpenAI if configured
     if (this.openaiApiKey) {
       try {
-        return await this.callOpenAI({ systemPrompt, userPrompt });
+        return await this.withRetry(() => this.callOpenAI({ systemPrompt, userPrompt }));
       } catch (err) {
         logger.warn(`OpenAI call failed: ${err.message}. Triggering fallback.`);
       }
@@ -44,7 +67,7 @@ export class AiService {
    * Gemini API call with strict timeout and JSON response mode
    */
   async callGemini({ systemPrompt, userPrompt }) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${this.geminiApiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.geminiApiKey}`;
 
     const payload = {
       system_instruction: {
@@ -78,7 +101,7 @@ export class AiService {
     const url = "https://api.openai.com/v1/chat/completions";
 
     const payload = {
-      model: "gpt-4o-mini",
+      model: this.openaiModel,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
