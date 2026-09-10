@@ -4,6 +4,7 @@ import { interviewResultsService } from "../services/interview-results.service.j
 import { interviewDashboardService } from "../services/interview-dashboard.service.js";
 import { interviewOrgService } from "../services/interview-org.service.js";
 import { conceptHistoryService } from "../services/concept-history.service.js";
+import { integrityService } from "../services/integrity.service.js";
 import { generateInterviewReport } from "../reports/interview-report.service.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
@@ -234,6 +235,36 @@ export class AiInterviewController {
         req.params.id,
         req.user
       );
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/integrity-signals
+   * Candidate-only: append a batch of observed proctoring signals.
+   */
+  async recordIntegritySignals(req, res, next) {
+    try {
+      const data = await integrityService.recordSignals(
+        req.params.id,
+        req.user,
+        req.body?.signals
+      );
+      return res.status(201).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/integrity-signals
+   * Owner / org / admin: raw signals + descriptive per-type summary.
+   */
+  async getIntegritySignals(req, res, next) {
+    try {
+      const data = await integrityService.getSignalsForSession(req.params.id, req.user);
       return res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);

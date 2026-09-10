@@ -6,6 +6,7 @@ import { validate } from "../common/middlewares/validate.middleware.js";
 import { createCustomInterviewSchema } from "./dto/create-interview.dto.js";
 import { resumeInterviewSchema } from "./dto/resume-interview.dto.js";
 import { submitAnswerSchema } from "./dto/submit-answer.dto.js";
+import { integritySignalsSchema } from "./dto/integrity-signal.dto.js";
 import { aiInterviewController } from "./controllers/ai-interview.controller.js";
 import { resumeUpload } from "./middlewares/resume-upload.middleware.js";
 
@@ -113,6 +114,20 @@ router.get("/:id/details", aiInterviewController.getInterviewResults);
 // Downloadable PDF / Excel of the same results (?format=pdf|excel)
 router.get("/sessions/:id/report", aiInterviewController.downloadInterviewReport);
 router.get("/:id/report", aiInterviewController.downloadInterviewReport);
+
+// Proctoring / integrity signals — candidate posts a batch, owner/org/admin reads
+router.post(
+  "/sessions/:id/integrity-signals",
+  validate(integritySignalsSchema),
+  aiInterviewController.recordIntegritySignals
+);
+router.post(
+  "/:id/integrity-signals",
+  validate(integritySignalsSchema),
+  aiInterviewController.recordIntegritySignals
+);
+router.get("/sessions/:id/integrity-signals", aiInterviewController.getIntegritySignals);
+router.get("/:id/integrity-signals", aiInterviewController.getIntegritySignals);
 
 // Session state
 router.get("/sessions/:id", aiInterviewController.getSession);

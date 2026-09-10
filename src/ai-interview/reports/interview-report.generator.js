@@ -114,6 +114,21 @@ export const generateInterviewPDF = (results) =>
         doc.moveDown(0.3);
         doc.fontSize(11).fillColor("#111827");
         practice.forEach((p) => doc.text(`• ${p}`));
+        doc.moveDown(0.8);
+      }
+
+      const integrity = asList(r.integritySignals);
+      if (integrity.length) {
+        if (doc.y > 700) doc.addPage();
+        doc.fontSize(14).fillColor("#0B3B78").text("Session notes");
+        doc.moveDown(0.3);
+        doc
+          .fontSize(9)
+          .fillColor("#6B7280")
+          .text("Observed during the session. Informational only — not part of the score.");
+        doc.moveDown(0.2);
+        doc.fontSize(11).fillColor("#111827");
+        integrity.forEach((s) => doc.text(`• ${s.label || s.signalType}: ${s.count}`));
       }
 
       doc.end();
@@ -150,6 +165,12 @@ export const generateInterviewExcel = async (results) => {
     ["Focus areas", asList(r.weaknesses).join(", ") || "N/A"],
     ["Recommended practice", asList(r.recommendedPractice).join(", ") || "N/A"],
     ["Overall feedback", r.overallFeedback || "N/A"],
+    [
+      "Session notes (informational only)",
+      asList(r.integritySignals)
+        .map((s) => `${s.label || s.signalType}: ${s.count}`)
+        .join("; ") || "None",
+    ],
   ];
   Object.keys(COMPETENCY_LABELS).forEach((k) => {
     if (comp[k] != null) summaryRows.push([COMPETENCY_LABELS[k], comp[k]]);

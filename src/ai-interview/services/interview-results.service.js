@@ -2,6 +2,7 @@ import { InterviewSession } from "../schemas/interview-session.schema.js";
 import { InterviewTurn } from "../schemas/interview-turn.schema.js";
 import { InterviewPlan } from "../schemas/interview-plan.schema.js";
 import { aiFeedbackService } from "../ai/ai-feedback.service.js";
+import { integrityService } from "./integrity.service.js";
 import { assertCanViewSession } from "../utils/authorize.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
@@ -297,6 +298,9 @@ export class InterviewResultsService {
       if (!recommendedPractice.includes(w)) recommendedPractice.push(w);
     }
 
+    // Descriptive proctoring counts only — never scored or turned into a verdict.
+    const integritySignals = await integrityService.summaryForSession(session._id);
+
     return {
       id: session.interviewId,
       role: session.role,
@@ -318,6 +322,7 @@ export class InterviewResultsService {
       overallFeedback: feedback.overallFeedback,
       questions,
       recommendedPractice: recommendedPractice.slice(0, 5),
+      integritySignals,
     };
   }
 
