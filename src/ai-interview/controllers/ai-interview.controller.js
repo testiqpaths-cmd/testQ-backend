@@ -6,6 +6,7 @@ import { interviewOrgService } from "../services/interview-org.service.js";
 import { conceptHistoryService } from "../services/concept-history.service.js";
 import { integrityService } from "../services/integrity.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
+import { sttProviderService } from "../stt/stt-provider.service.js";
 import { generateInterviewReport } from "../reports/interview-report.service.js";
 import { InterviewSession } from "../schemas/interview-session.schema.js";
 import { InterviewTurn } from "../schemas/interview-turn.schema.js";
@@ -241,6 +242,44 @@ export class AiInterviewController {
         req.user
       );
       return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/transcribe  (multipart: audio)
+   * Server-side speech-to-text for one recorded answer. A fallback for
+   * browsers without SpeechRecognition — the client still submits the
+   * returned text through the normal answer flow. Owner-only.
+   */
+  async transcribeAudio(req, res, next) {
+    try {
+      if (!sttProviderService.isEnabled()) {
+        return res.status(200).json({ success: true, data: { enabled: false, text: "" } });
+      }
+      if (!req.file?.buffer?.length) {
+        throw new ApiError(400, "An audio file is required (field name: audio).");
+      }
+
+      const sessionId = req.params.id;
+      const query = String(sessionId).startsWith("int-")
+        ? { interviewId: sessionId }
+        : { _id: sessionId };
+      const session = await InterviewSession.findOne(query).select("_id userId interviewId");
+      if (!session) throw new ApiError(404, `Interview session not found: ${sessionId}`);
+      if (session.userId.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "Only the candidate can transcribe their own answer.");
+      }
+
+      const result = await sttProviderService.transcribe(req.file.buffer, req.file.mimetype, {
+        interviewId: session.interviewId,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: { enabled: true, text: result?.text || "", provider: result?.provider || null },
+      });
     } catch (error) {
       next(error);
     }

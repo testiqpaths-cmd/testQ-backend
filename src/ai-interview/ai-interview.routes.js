@@ -9,6 +9,7 @@ import { submitAnswerSchema } from "./dto/submit-answer.dto.js";
 import { integritySignalsSchema } from "./dto/integrity-signal.dto.js";
 import { aiInterviewController } from "./controllers/ai-interview.controller.js";
 import { resumeUpload } from "./middlewares/resume-upload.middleware.js";
+import { audioUpload } from "./middlewares/audio-upload.middleware.js";
 
 const router = express.Router();
 
@@ -132,6 +133,14 @@ router.get("/:id/integrity-signals", aiInterviewController.getIntegritySignals);
 // Text-to-speech narration for a question turn (lazy, cached in Cloudinary)
 router.get("/sessions/:id/question-audio", aiInterviewController.getQuestionAudio);
 router.get("/:id/question-audio", aiInterviewController.getQuestionAudio);
+
+// Server-side speech-to-text for one recorded answer (multipart: audio)
+router.post(
+  "/sessions/:id/transcribe",
+  audioUpload.single("audio"),
+  aiInterviewController.transcribeAudio
+);
+router.post("/:id/transcribe", audioUpload.single("audio"), aiInterviewController.transcribeAudio);
 
 // Session state
 router.get("/sessions/:id", aiInterviewController.getSession);
