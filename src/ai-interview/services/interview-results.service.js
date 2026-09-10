@@ -280,6 +280,8 @@ export class InterviewResultsService {
         questionText: t.question,
         score: this.turnScore(t),
         yourAnswer: t.candidateAnswer || "No response recorded.",
+        answerStatus: t.answerStatus,
+        endedReason: t.endedReason || "answered",
         aiFeedback: t.feedbackSummary,
         whatWasGood: f.whatWasGood || "",
         whatToImprove: f.whatToImprove || "",

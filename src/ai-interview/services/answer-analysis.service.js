@@ -112,7 +112,10 @@ export class AnswerAnalysisService {
       throw new ApiError(404, "No active interview turn found to analyze.");
     }
 
-    if (!turn.candidateAnswer || !turn.candidateAnswer.trim()) {
+    // A "no response" turn (the response timer expired with nothing said)
+    // legitimately has an empty answer — it's judged as SKIPPED below.
+    const isNoResponse = turn.endedReason === "timeout_no_response";
+    if ((!turn.candidateAnswer || !turn.candidateAnswer.trim()) && !isNoResponse) {
       throw new ApiError(400, "No candidate answer recorded for this turn yet.");
     }
 
@@ -140,7 +143,7 @@ export class AnswerAnalysisService {
     const plan = await InterviewPlan.findById(session.planId);
 
     // 4. STRICT DETERMINISTIC "I DON'T KNOW" CHECK
-    const isExplicitGap = this.isExplicitKnowledgeGap(turn.candidateAnswer);
+    const isExplicitGap = !isNoResponse && this.isExplicitKnowledgeGap(turn.candidateAnswer);
 
     let finalStatus = AnswerStatus.PARTIAL;
     let relevance = 50;
@@ -154,7 +157,25 @@ export class AnswerAnalysisService {
     let difficultyRec = turn.difficulty;
     let topicContinuation = true;
 
-    if (isExplicitGap) {
+    if (isNoResponse) {
+      // The candidate said/typed nothing before the response timer ran
+      // out. Score it as a non-answer — no follow-up, drop difficulty a
+      // notch, keep covering the topic with the next question.
+      logger.info(
+        `No response recorded for session ${session.interviewId} (turn ${turn.turnNumber}). Scoring as SKIPPED.`
+      );
+      finalStatus = AnswerStatus.SKIPPED;
+      relevance = 0;
+      correctness = 0;
+      completeness = 0;
+      confidence = 0;
+      conceptsDemonstrated = [];
+      conceptsMissing = [turn.topic];
+      feedbackSummary = "No answer was given before the response time limit.";
+      aiFollowUpRecommended = false;
+      difficultyRec = Difficulty.EASY;
+      topicContinuation = true;
+    } else if (isExplicitGap) {
       // Deterministic Knowledge Gap Enforcement
       logger.info(
         `Explicit knowledge gap detected for session ${session.interviewId} (turn ${turn.turnNumber}). Strict no-followup enforced.`
@@ -251,7 +272,10 @@ export class AnswerAnalysisService {
 
       if (topicIndex >= 0) {
         const item = session.coverageState[topicIndex];
-        if (finalStatus === AnswerStatus.KNOWLEDGE_GAP) {
+        if (
+          finalStatus === AnswerStatus.KNOWLEDGE_GAP ||
+          finalStatus === AnswerStatus.SKIPPED
+        ) {
           item.knowledgeGaps = (item.knowledgeGaps || 0) + 1;
         }
 
@@ -289,7 +313,12 @@ export class AnswerAnalysisService {
       perf.streakCorrect = (perf.streakCorrect || 0) + 1;
       perf.streakGaps = 0;
       perf.consecutiveKnowledgeGapsInTopic = 0;
-    } else if (finalStatus === AnswerStatus.KNOWLEDGE_GAP) {
+    } else if (
+      finalStatus === AnswerStatus.KNOWLEDGE_GAP ||
+      finalStatus === AnswerStatus.SKIPPED
+    ) {
+      // A no-response counts toward the topic's gap streak so repeated
+      // silence eventually moves the interview on to another topic.
       perf.streakGaps = (perf.streakGaps || 0) + 1;
       perf.consecutiveKnowledgeGapsInTopic =
         (perf.consecutiveKnowledgeGapsInTopic || 0) + 1;

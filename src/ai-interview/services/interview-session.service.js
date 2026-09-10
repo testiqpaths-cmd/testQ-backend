@@ -506,9 +506,18 @@ export class InterviewSessionService {
 
     // 3. Extract & Validate Answer text
     const answerText = (payload.answer || payload.transcript || "").trim();
-    if (!answerText) {
+    const timedOut = payload.timedOut === true;
+    if (!answerText && !timedOut) {
       throw new ApiError(400, "Candidate answer or transcript cannot be empty.");
     }
+    // The response timer fired: an empty answer means the candidate said
+    // nothing (scored as SKIPPED); a non-empty one is a partial answer
+    // cut short by a long pause, judged normally.
+    const endedReason = timedOut
+      ? answerText
+        ? "timeout_pause"
+        : "timeout_no_response"
+      : "answered";
 
     // 4. Find the existing InterviewTurn created in Phase 2
     let turn = null;
@@ -529,8 +538,14 @@ export class InterviewSessionService {
     }
 
     // 5. Idempotency & Duplicate Submission Protection
-    if (turn.candidateAnswer) {
-      if (turn.candidateAnswer.trim() === answerText) {
+    const alreadyRecorded =
+      Boolean(turn.candidateAnswer && turn.candidateAnswer.trim()) ||
+      turn.endedReason === "timeout_no_response" ||
+      ["SUBMITTED", "ANALYZED", "EVALUATED"].includes(turn.processingState);
+
+    if (alreadyRecorded) {
+      const sameText = (turn.candidateAnswer || "").trim() === answerText;
+      if (sameText || (timedOut && turn.endedReason?.startsWith("timeout"))) {
         // Idempotent retry: return existing confirmation
         return {
           sessionId: session.interviewId,
@@ -565,6 +580,7 @@ export class InterviewSessionService {
     turn.answerTimestamp = now;
     turn.timeTakenSeconds = timeTaken || null;
     turn.audioReference = payload.audioReference || null;
+    turn.endedReason = endedReason;
     turn.processingState = "SUBMITTED";
 
     await turn.save();
@@ -646,7 +662,8 @@ export class InterviewSessionService {
       session.interviewState === InterviewState.IN_PROGRESS &&
       session.currentQuestion &&
       lastTurn &&
-      !lastTurn.candidateAnswer
+      !lastTurn.candidateAnswer &&
+      lastTurn.endedReason !== "timeout_no_response"
     ) {
       logger.info(
         `Session ${session.interviewId}: Active question (turn ${lastTurn.turnNumber}) awaiting answer. Returning existing question idempotently.`
@@ -662,8 +679,15 @@ export class InterviewSessionService {
       };
     }
 
-    // 4. Ensure last turn is analyzed before deciding next action
-    if (lastTurn.candidateAnswer && lastTurn.processingState !== "ANALYZED") {
+    // 4. Ensure last turn is analyzed before deciding next action. A
+    // timed-out no-response turn is also routed through analysis so it
+    // gets a SKIPPED status + zeroed scores + coverage/perf bookkeeping.
+    const needsAnalysis =
+      (Boolean(lastTurn.candidateAnswer && lastTurn.candidateAnswer.trim()) ||
+        lastTurn.endedReason === "timeout_no_response") &&
+      lastTurn.processingState !== "ANALYZED";
+
+    if (needsAnalysis) {
       logger.info(
         `Auto-analyzing turn ${lastTurn.turnNumber} for session ${session.interviewId} before next action.`
       );

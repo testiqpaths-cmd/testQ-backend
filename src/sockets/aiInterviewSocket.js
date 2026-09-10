@@ -84,6 +84,8 @@ export const setupAiInterviewSocket = (io) => {
           answer: payload.answer,
           transcript: payload.transcript,
           timeTakenSeconds: payload.timeTakenSeconds,
+          timedOut: payload.timedOut,
+          reason: payload.reason,
         });
         socket.emit("interview:evaluating", { sessionId: id });
 

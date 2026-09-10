@@ -94,6 +94,18 @@ const interviewTurnSchema = new Schema(
       default: null,
       trim: true,
     },
+    // How the answer turn ended:
+    //  answered            - candidate submitted normally
+    //  timeout_pause       - auto-submitted a partial answer after a long
+    //                        silence mid-answer (still judged on its merits)
+    //  timeout_no_response - the candidate said/typed nothing before the
+    //                        response timer ran out (scored as SKIPPED, 0)
+    //  manual_skip         - candidate chose to skip
+    endedReason: {
+      type: String,
+      enum: ["answered", "timeout_pause", "timeout_no_response", "manual_skip"],
+      default: "answered",
+    },
     processingState: {
       type: String,
       enum: ["QUESTION_GENERATED", "SUBMITTED", "ANALYZED", "EVALUATED"],

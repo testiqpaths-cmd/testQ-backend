@@ -7,9 +7,18 @@ export const submitAnswerSchema = z
     questionId: z.string().trim().optional(),
     timeTakenSeconds: z.coerce.number().min(0).max(7200).optional(),
     audioReference: z.string().trim().optional(),
+    // Set by the client when the response timer expired. Lets an empty
+    // answer through — it's recorded as a non-answer (SKIPPED, 0).
+    timedOut: z.coerce.boolean().optional(),
+    reason: z.enum(["timeout_pause", "timeout_no_response", "manual_skip"]).optional(),
   })
   .refine(
-    (data) => Boolean((data.answer && data.answer.trim().length > 0) || (data.transcript && data.transcript.trim().length > 0)),
+    (data) =>
+      data.timedOut === true ||
+      Boolean(
+        (data.answer && data.answer.trim().length > 0) ||
+          (data.transcript && data.transcript.trim().length > 0)
+      ),
     {
       message: "Candidate answer or transcript cannot be empty.",
       path: ["answer"],
