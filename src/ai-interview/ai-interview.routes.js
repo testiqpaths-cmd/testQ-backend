@@ -110,6 +110,10 @@ router.post("/:id/complete", aiInterviewController.completeInterview);
 router.get("/sessions/:id/details", aiInterviewController.getInterviewResults);
 router.get("/:id/details", aiInterviewController.getInterviewResults);
 
+// Downloadable PDF / Excel of the same results (?format=pdf|excel)
+router.get("/sessions/:id/report", aiInterviewController.downloadInterviewReport);
+router.get("/:id/report", aiInterviewController.downloadInterviewReport);
+
 // Session state
 router.get("/sessions/:id", aiInterviewController.getSession);
 router.get("/:id", aiInterviewController.getSession);

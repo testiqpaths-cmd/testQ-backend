@@ -4,6 +4,7 @@ import { interviewResultsService } from "../services/interview-results.service.j
 import { interviewDashboardService } from "../services/interview-dashboard.service.js";
 import { interviewOrgService } from "../services/interview-org.service.js";
 import { conceptHistoryService } from "../services/concept-history.service.js";
+import { generateInterviewReport } from "../reports/interview-report.service.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
 import logger from "../../config/logger.js";
@@ -234,6 +235,25 @@ export class AiInterviewController {
         req.user
       );
       return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/report?format=pdf|excel
+   * Streams a downloadable PDF/Excel of the completed interview's results.
+   */
+  async downloadInterviewReport(req, res, next) {
+    try {
+      const { buffer, filename, contentType } = await generateInterviewReport({
+        sessionId: req.params.id,
+        user: req.user,
+        format: req.query.format,
+      });
+      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
+      res.setHeader("Content-Type", contentType);
+      return res.send(buffer);
     } catch (error) {
       next(error);
     }
