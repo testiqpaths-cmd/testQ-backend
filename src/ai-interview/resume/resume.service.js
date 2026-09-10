@@ -1,9 +1,19 @@
+import crypto from "crypto";
 import { resumeParserService } from "./resume-parser.service.js";
 import { resumeTopicService } from "./resume-topic.service.js";
 import { Resume } from "../schemas/resume.schema.js";
+import { uploadBufferToCloudinary } from "../../common/utils/cloudinary.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
+import logger from "../../config/logger.js";
 
 const RAW_TEXT_CAP = 20000;
+const RESUME_FOLDER = "ai-interview/resumes";
+
+const contentHashOf = (rawText) =>
+  crypto
+    .createHash("sha256")
+    .update(String(rawText || "").trim().toLowerCase().replace(/\s+/g, " "))
+    .digest("hex");
 
 export class ResumeService {
   constructor(parser = resumeParserService, topicSelector = resumeTopicService) {
@@ -46,27 +56,63 @@ export class ResumeService {
    */
   async uploadAndSaveResume(userId, file, options = {}) {
     const processed = await this.processResume(file, options);
+    const contentHash = contentHashOf(processed.rawText);
+
+    // Same resume, same user, already stored -> reuse it. Skips a second
+    // Cloudinary upload and a duplicate DB row.
+    const existing = await Resume.findOne({ userId, contentHash }).lean();
+    if (existing) {
+      logger.info(`Resume ${existing.resumeId} reused for user ${userId} (content hash match)`);
+      return this.toDto(existing);
+    }
+
     const resumeId = this.generateResumeId();
 
-    await Resume.create({
+    // Store the original file (raw resource type for PDF/DOCX). Non-fatal:
+    // parsing/topics is the critical path.
+    let fileUrl = null;
+    let filePublicId = null;
+    if (file?.buffer) {
+      try {
+        const up = await uploadBufferToCloudinary(file.buffer, file.mimetype, RESUME_FOLDER, {
+          resource_type: "raw",
+          public_id: resumeId,
+        });
+        fileUrl = up.secure_url;
+        filePublicId = up.public_id;
+      } catch (err) {
+        logger.warn(`Resume file upload to Cloudinary failed (non-fatal): ${err.message}`);
+      }
+    }
+
+    const doc = await Resume.create({
       userId,
       resumeId,
       filename: processed.filename,
       sizeBytes: processed.sizeBytes,
       mimetype: file?.mimetype,
+      fileUrl,
+      filePublicId,
+      contentHash,
       rawText: (processed.rawText || "").slice(0, RAW_TEXT_CAP),
       extracted: processed.extracted,
       scopedTopics: processed.scopedTopics,
     });
 
+    return this.toDto(doc);
+  }
+
+  toDto(doc) {
     return {
-      resumeId,
-      filename: processed.filename,
-      sizeBytes: processed.sizeBytes,
-      skills: processed.extracted.skills,
-      experienceYears: processed.extracted.detectedExperienceYears,
-      summaryPreview: processed.extracted.summaryPreview,
-      recommendedTopics: processed.scopedTopics,
+      resumeId: doc.resumeId,
+      filename: doc.filename,
+      sizeBytes: doc.sizeBytes,
+      fileUrl: doc.fileUrl || null,
+      skills: doc.extracted?.skills || [],
+      experienceYears: doc.extracted?.detectedExperienceYears || 0,
+      summaryPreview: doc.extracted?.summaryPreview || "",
+      recommendedTopics: doc.scopedTopics || [],
+      uploadedAt: doc.createdAt,
     };
   }
 
@@ -77,18 +123,7 @@ export class ResumeService {
    */
   async getLatestForUser(userId) {
     const doc = await Resume.findOne({ userId }).sort({ createdAt: -1 }).lean();
-    if (!doc) return null;
-
-    return {
-      resumeId: doc.resumeId,
-      filename: doc.filename,
-      sizeBytes: doc.sizeBytes,
-      skills: doc.extracted?.skills || [],
-      experienceYears: doc.extracted?.detectedExperienceYears || 0,
-      summaryPreview: doc.extracted?.summaryPreview || "",
-      recommendedTopics: doc.scopedTopics || [],
-      uploadedAt: doc.createdAt,
-    };
+    return doc ? this.toDto(doc) : null;
   }
 
   /**

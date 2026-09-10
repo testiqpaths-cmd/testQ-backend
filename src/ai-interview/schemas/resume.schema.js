@@ -23,6 +23,14 @@ const resumeSchema = new Schema(
     filename: String,
     sizeBytes: Number,
     mimetype: String,
+    // Cloudinary (resource_type: raw) — the original file, so it can be
+    // re-downloaded / re-parsed later. Null if the upload failed (parsing
+    // is the critical path; file storage is a bonus).
+    fileUrl: { type: String, default: null },
+    filePublicId: { type: String, default: null },
+    // sha256 of the normalized resume text — lets a re-upload of the same
+    // resume reuse the existing record instead of storing a duplicate.
+    contentHash: { type: String, default: null, index: true },
     rawText: {
       type: String,
       default: "",
