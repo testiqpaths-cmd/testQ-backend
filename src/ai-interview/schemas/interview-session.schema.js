@@ -142,6 +142,17 @@ const interviewSessionSchema = new Schema(
       type: Schema.Types.Mixed,
       default: null,
     },
+    // Computed once by interview-results.service.js the first time results
+    // are requested (or eagerly on completion) and never invalidated —
+    // InterviewTurns are immutable once a session reaches a terminal state.
+    resultsSummary: {
+      type: Schema.Types.Mixed,
+      default: null,
+    },
+    resultsComputedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,

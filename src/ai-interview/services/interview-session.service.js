@@ -10,6 +10,7 @@ import { questionService } from "./question.service.js";
 import { InterviewAction } from "../enums/interview-action.enum.js";
 import { adaptiveEngineService } from "./adaptive-engine.service.js";
 import { answerAnalysisService } from "./answer-analysis.service.js";
+import { interviewResultsService } from "./interview-results.service.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
@@ -182,6 +183,24 @@ export class InterviewSessionService {
         extracted: processed.extracted,
       };
       scopedTopics = processed.scopedTopics;
+    } else if (payload.resumeId) {
+      // A previously uploaded+saved resume (see resumeService.uploadAndSaveResume) —
+      // recompute topics from its cached skills rather than reusing its
+      // cached scopedTopics verbatim, since role/duration/experienceLevel
+      // are only finalized in this "confirm interview settings" step, which
+      // can differ from what was set at upload time.
+      const saved = await resumeService.getByResumeId(userId, payload.resumeId);
+      resumeData = {
+        filename: saved.filename,
+        sizeBytes: saved.sizeBytes,
+        extracted: saved.extracted,
+      };
+      scopedTopics = resumeTopicService.selectInterviewTopics({
+        role,
+        candidateSkills: saved.extracted?.skills || [],
+        duration,
+        experienceLevel,
+      });
     } else if (payload.resumeData) {
       // Direct structured resume data provided
       resumeData = payload.resumeData;
@@ -344,6 +363,8 @@ export class InterviewSessionService {
         questionCount: item.questionCount,
         interviewTypes: item.interviewTypes,
         status: item.interviewState,
+        score: item.resultsSummary?.score ?? null,
+        readinessScore: item.resultsSummary?.readinessScore ?? null,
         date: item.createdAt,
         createdAt: item.createdAt,
       })),
@@ -659,6 +680,10 @@ export class InterviewSessionService {
 
       await session.save();
 
+      // Eagerly compute+cache results now, so the details page and history
+      // never hit a slow first-load lazy-compute path right after finishing.
+      await interviewResultsService.getInterviewResults(session.interviewId, user);
+
       return {
         sessionId: session.interviewId,
         nextAction: InterviewAction.COMPLETE_INTERVIEW,
@@ -691,6 +716,7 @@ export class InterviewSessionService {
         globalFollowUpCount: session.globalFollowUpCount,
         timeRemaining: session.timeRemaining,
         topic: session.currentTopic,
+        questionCount: session.questionCount,
       };
     }
 
@@ -730,6 +756,7 @@ export class InterviewSessionService {
         timeRemaining: session.timeRemaining,
         topic: session.currentTopic,
         topicQuestionCount: session.topicQuestionCount,
+        questionCount: session.questionCount,
       };
     }
 
@@ -753,7 +780,74 @@ export class InterviewSessionService {
       timeRemaining: session.timeRemaining,
       topic: session.currentTopic,
       topicQuestionCount: session.topicQuestionCount,
+      questionCount: session.questionCount,
     };
+  }
+
+  /**
+   * POST /ai-interview/:id/complete
+   * Force-finishes an interview regardless of adaptive-engine state — used
+   * both for a candidate-triggered "End Interview" and as the terminal step
+   * a natural completion can also route through. Idempotent: calling this
+   * on an already-terminal session just returns its (cached) results.
+   */
+  async completeInterview(sessionId, user) {
+    const session = await this.getSessionById(sessionId, user);
+
+    const TERMINAL_STATES = [
+      InterviewState.COMPLETED,
+      InterviewState.EVALUATED,
+      InterviewState.CANCELLED,
+      InterviewState.EXPIRED,
+    ];
+
+    if (!TERMINAL_STATES.includes(session.interviewState)) {
+      const turn = await InterviewTurn.findOne({ sessionId: session._id }).sort({
+        turnNumber: -1,
+      });
+
+      if (turn) {
+        if (turn.candidateAnswer && turn.processingState !== "ANALYZED") {
+          // Answered but never scored — analyze it fairly rather than discarding it.
+          await answerAnalysisService.analyzeTurnAnswer({
+            sessionId: session.interviewId,
+            user,
+            turnId: turn._id,
+          });
+        } else if (!turn.candidateAnswer) {
+          // Never answered — record it as a skipped turn with zeroed scores
+          // so the results computation needs no special-casing for it.
+          turn.answerStatus = "SKIPPED";
+          turn.relevanceScore = 0;
+          turn.correctnessScore = 0;
+          turn.completenessScore = 0;
+          turn.confidence = 0;
+          turn.feedbackSummary = "Question skipped — interview ended before this question was answered.";
+          turn.processingState = "EVALUATED";
+          turn.analysisTimestamp = new Date();
+          await turn.save();
+        }
+      }
+
+      // Reload in case analyzeTurnAnswer mutated session state underneath us.
+      const reloaded = await InterviewSession.findById(session._id);
+
+      if (Array.isArray(reloaded.coverageState)) {
+        reloaded.coverageState.forEach((c) => {
+          if (c.status === "IN_PROGRESS") c.status = "EVALUATED";
+        });
+      }
+      reloaded.interviewState = InterviewState.COMPLETED;
+      reloaded.endTime = reloaded.endTime || new Date();
+      reloaded.currentQuestion = null;
+      await reloaded.save();
+
+      logger.info(`Interview force-completed: ${reloaded.interviewId} by user ${user._id}`);
+
+      return interviewResultsService.getInterviewResults(reloaded.interviewId, user);
+    }
+
+    return interviewResultsService.getInterviewResults(session.interviewId, user);
   }
 }
 

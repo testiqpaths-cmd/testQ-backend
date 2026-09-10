@@ -1,5 +1,7 @@
 import { interviewSessionService } from "../services/interview-session.service.js";
 import { answerAnalysisService } from "../services/answer-analysis.service.js";
+import { interviewResultsService } from "../services/interview-results.service.js";
+import { interviewDashboardService } from "../services/interview-dashboard.service.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
 import logger from "../../config/logger.js";
@@ -129,28 +131,79 @@ export class AiInterviewController {
   }
 
   /**
-   * POST /ai-interview/resume/upload & POST /ai-interview/resume/:id/analyze
-   * Parse resume and extract detected skills/relevance without immediately starting session
+   * POST /ai-interview/resume/upload
+   * Parse a resume, extract skills/topics, and persist it so it can be
+   * reused later (GET /ai-interview/resume, or creating an interview from
+   * a resumeId) without re-uploading the file.
    */
   async parseResumeOnly(req, res, next) {
     try {
-      const processed = await resumeService.processResume(req.file, {
+      const data = await resumeService.uploadAndSaveResume(req.user._id, req.file, {
         role: req.body?.role || "Software Engineer",
         duration: Number(req.body?.duration || 30),
+        experienceLevel: req.body?.experienceLevel,
       });
 
-      return res.status(200).json({
-        success: true,
-        data: {
-          resumeId: `resume-${Date.now()}`,
-          filename: processed.filename,
-          sizeBytes: processed.sizeBytes,
-          skills: processed.extracted.skills,
-          experienceYears: processed.extracted.detectedExperienceYears,
-          summaryPreview: processed.extracted.summaryPreview,
-          recommendedTopics: processed.scopedTopics,
-        },
-      });
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/resume
+   * Returns the candidate's most recently uploaded resume, or null.
+   */
+  async getSavedResume(req, res, next) {
+    try {
+      const data = await resumeService.getLatestForUser(req.user._id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/dashboard
+   * Aggregated readiness/competency/stats view across the candidate's own
+   * completed interviews.
+   */
+  async getDashboard(req, res, next) {
+    try {
+      const data = await interviewDashboardService.getDashboard(req.user._id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/details & GET /ai-interview/:id/details
+   * Full scored results + per-question feedback for a completed interview.
+   */
+  async getInterviewResults(req, res, next) {
+    try {
+      const data = await interviewResultsService.getInterviewResults(
+        req.params.id,
+        req.user
+      );
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/complete & POST /ai-interview/:id/complete
+   * Force-finish an interview and return its scored results. Idempotent.
+   */
+  async completeInterview(req, res, next) {
+    try {
+      const data = await interviewSessionService.completeInterview(
+        req.params.id,
+        req.user
+      );
+      return res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);
     }

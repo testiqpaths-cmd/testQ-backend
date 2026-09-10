@@ -1,12 +1,13 @@
 import { z } from "zod";
 
 export const resumeInterviewSchema = z.object({
+  resumeId: z.string().trim().optional(),
   role: z.string().trim().min(2, "Target role must be at least 2 characters").optional(),
   roles: z.array(z.string().trim()).optional(),
   experienceLevel: z.string().trim().optional(),
   experience: z.string().trim().optional(),
   company: z.string().trim().optional(),
-  duration: z.coerce.number().min(5).max(120).optional().default(30),
+  duration: z.coerce.number().min(5).max(120).optional(),
   durationMinutes: z.coerce.number().min(5).max(120).optional(),
   difficulty: z
     .string()
