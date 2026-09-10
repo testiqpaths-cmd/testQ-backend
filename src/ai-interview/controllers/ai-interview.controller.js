@@ -7,6 +7,7 @@ import { conceptHistoryService } from "../services/concept-history.service.js";
 import { integrityService } from "../services/integrity.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
 import { sttProviderService } from "../stt/stt-provider.service.js";
+import { interviewShareService } from "../services/interview-share.service.js";
 import { generateInterviewReport } from "../reports/interview-report.service.js";
 import { InterviewSession } from "../schemas/interview-session.schema.js";
 import { InterviewTurn } from "../schemas/interview-turn.schema.js";
@@ -241,6 +242,54 @@ export class AiInterviewController {
         req.params.id,
         req.user
       );
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/share
+   * Owner / org / admin: issue a single-use, expiring link to launch this
+   * interview. DELETE revokes it.
+   */
+  async createShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.createShareLink(req.params.id, req.user, {
+        expiresInHours: req.body?.expiresInHours,
+      });
+      return res.status(201).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async revokeShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.revokeShareLink(req.params.id, req.user);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET  /ai-interview/join/:token  — preview a link (does not consume it)
+   * POST /ai-interview/join/:token  — consume it; returns the session to
+   *                                   route the candidate into the room
+   */
+  async peekShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.peekShareLink(req.params.token);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async consumeShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.consumeShareLink(req.params.token, req.user);
       return res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);

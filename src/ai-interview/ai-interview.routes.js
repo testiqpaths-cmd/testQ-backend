@@ -142,6 +142,12 @@ router.post(
 );
 router.post("/:id/transcribe", audioUpload.single("audio"), aiInterviewController.transcribeAudio);
 
+// Shareable one-time interview links
+router.get("/join/:token", aiInterviewController.peekShareLink);
+router.post("/join/:token", aiInterviewController.consumeShareLink);
+router.post("/sessions/:id/share", aiInterviewController.createShareLink);
+router.delete("/sessions/:id/share", aiInterviewController.revokeShareLink);
+
 // Session state
 router.get("/sessions/:id", aiInterviewController.getSession);
 router.get("/:id", aiInterviewController.getSession);

@@ -173,10 +173,37 @@ const interviewSessionSchema = new Schema(
       type: Date,
       default: null,
     },
+    // One-time shareable link to launch this interview. `shareToken` is a
+    // URL-safe random string; the link is single-use (shareTokenUsedAt) and
+    // time-boxed (shareTokenExpiresAt).
+    shareToken: {
+      type: String,
+      default: null,
+    },
+    shareTokenExpiresAt: {
+      type: Date,
+      default: null,
+    },
+    shareTokenUsedAt: {
+      type: Date,
+      default: null,
+    },
+    shareTokenCreatedBy: {
+      type: Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
   },
   {
     timestamps: true,
   }
+);
+
+// Sparse unique so many sessions can have a null token but a live token
+// is globally unique.
+interviewSessionSchema.index(
+  { shareToken: 1 },
+  { unique: true, sparse: true }
 );
 
 // Helpful compound indexes
