@@ -107,6 +107,8 @@ export class QuestionService {
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: finalDifficulty,
       competency: aiOutput.competency || "Technical Knowledge",
+      questionSource: aiOutput.questionSource || "ai_generated",
+      questionBankId: aiOutput.questionBankId || null,
       questionTimestamp: new Date(),
     });
 
@@ -226,6 +228,8 @@ export class QuestionService {
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: finalDifficulty,
       competency: aiOutput.competency || "Technical Knowledge",
+      questionSource: aiOutput.questionSource || "ai_generated",
+      questionBankId: aiOutput.questionBankId || null,
       questionTimestamp: new Date(),
       processingState: "QUESTION_GENERATED",
     });
@@ -336,6 +340,8 @@ export class QuestionService {
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: previousTurn.difficulty,
       competency: aiOutput.competency || "Technical Knowledge",
+      questionSource: aiOutput.questionSource || "ai_generated",
+      questionBankId: aiOutput.questionBankId || null,
       questionTimestamp: new Date(),
       processingState: "QUESTION_GENERATED",
       followUp: true,

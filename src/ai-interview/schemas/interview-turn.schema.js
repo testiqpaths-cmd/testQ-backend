@@ -45,6 +45,18 @@ const interviewTurnSchema = new Schema(
       type: String,
       default: "Technical Knowledge",
     },
+    // Where this question came from: a live AI call, the reusable DB
+    // QuestionBank, or the small hardcoded fallback set.
+    questionSource: {
+      type: String,
+      enum: ["ai_generated", "bank", "fallback"],
+      default: "ai_generated",
+    },
+    questionBankId: {
+      type: Types.ObjectId,
+      ref: "QuestionBank",
+      default: null,
+    },
     questionTimestamp: {
       type: Date,
       default: Date.now,

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { aiService } from "./ai.service.js";
 import { getFallbackQuestion } from "./fallback-questions.js";
+import { questionBankService } from "../services/question-bank.service.js";
 import logger from "../../config/logger.js";
 
 const aiQuestionResponseSchema = z.object({
@@ -81,7 +82,15 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
         const validated = aiQuestionResponseSchema.safeParse(normalized);
         if (validated.success) {
           logger.info(`AI generated question on topic ${topic} (${difficulty})`);
-          return validated.data;
+          // Persist it so a future interview can reuse it if the AI is
+          // unavailable then. Non-fatal, not awaited-critically.
+          await questionBankService.saveGeneratedQuestion({
+            ...validated.data,
+            role,
+            experienceLevel,
+            model: this.llm?.geminiModel || this.llm?.openaiModel || null,
+          });
+          return { ...validated.data, questionSource: "ai_generated" };
         } else {
           logger.warn(
             `AI response schema validation failed: ${validated.error.message}. Using fallback.`
@@ -92,9 +101,18 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
       logger.warn(`AI question generation exception: ${err.message}. Using fallback.`);
     }
 
-    // Controlled Fallback: Guaranteed safe, verified question
+    // 1st fallback: a previously AI-generated question from the DB bank.
+    const bankQ = await questionBankService.getBankQuestion({
+      topic,
+      difficulty,
+      excludeQuestions: previousQuestions,
+      role,
+    });
+    if (bankQ) return { ...bankQ, questionSource: "bank" };
+
+    // 2nd fallback: the small hardcoded set.
     logger.info(`Using verified fallback question for topic: ${topic} (${difficulty})`);
-    return getFallbackQuestion(topic, difficulty, previousQuestions);
+    return { ...getFallbackQuestion(topic, difficulty, previousQuestions), questionSource: "fallback" };
   }
 
   /**
@@ -164,14 +182,31 @@ STRICT RULES:
         const validated = aiQuestionResponseSchema.safeParse(normalized);
         if (validated.success) {
           logger.info(`AI generated follow-up question on topic ${topic}`);
-          return validated.data;
+          await questionBankService.saveGeneratedQuestion({
+            ...validated.data,
+            role,
+            experienceLevel,
+            isFollowUp: true,
+            model: this.llm?.geminiModel || this.llm?.openaiModel || null,
+          });
+          return { ...validated.data, questionSource: "ai_generated" };
         }
       }
     } catch (err) {
       logger.warn(`AI follow-up question generation exception: ${err.message}. Using fallback.`);
     }
 
-    // Deterministic fallback follow-up
+    // 1st fallback: a previously AI-generated follow-up from the DB bank.
+    const bankQ = await questionBankService.getBankQuestion({
+      topic,
+      difficulty,
+      excludeQuestions: [previousQuestion],
+      role,
+      isFollowUp: true,
+    });
+    if (bankQ) return { ...bankQ, questionSource: "bank" };
+
+    // 2nd fallback: deterministic follow-up.
     const focusArea = conceptsMissing[0] || topic;
     return {
       question: `Could you elaborate more on ${focusArea} and provide an example from your experience?`,
@@ -179,6 +214,7 @@ STRICT RULES:
       difficulty: difficulty.toUpperCase(),
       questionType: "TECHNICAL",
       competency: "Technical Knowledge",
+      questionSource: "fallback",
     };
   }
 }
