@@ -3,6 +3,7 @@ import { answerAnalysisService } from "../services/answer-analysis.service.js";
 import { interviewResultsService } from "../services/interview-results.service.js";
 import { interviewDashboardService } from "../services/interview-dashboard.service.js";
 import { interviewOrgService } from "../services/interview-org.service.js";
+import { conceptHistoryService } from "../services/concept-history.service.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
 import logger from "../../config/logger.js";
@@ -172,6 +173,20 @@ export class AiInterviewController {
   async getDashboard(req, res, next) {
     try {
       const data = await interviewDashboardService.getDashboard(req.user._id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/concept-history
+   * The candidate's own topic/concept mastery rolled up across all their
+   * interviews.
+   */
+  async getConceptHistory(req, res, next) {
+    try {
+      const data = await conceptHistoryService.getForCandidate(req.user._id);
       return res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);

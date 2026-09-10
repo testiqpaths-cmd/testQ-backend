@@ -3,12 +3,22 @@ import { InterviewPlan } from "../schemas/interview-plan.schema.js";
 import { InterviewState } from "../enums/interview-state.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { aiQuestionService } from "../ai/ai-question.service.js";
+import { conceptHistoryService } from "./concept-history.service.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
+
+const DIFFICULTY_LADDER = ["EASY", "MEDIUM", "HARD"];
 
 export class QuestionService {
   constructor(ai = aiQuestionService) {
     this.ai = ai;
+  }
+
+  bumpDifficulty(current, delta) {
+    const i = DIFFICULTY_LADDER.indexOf(String(current || "EASY").toUpperCase());
+    if (i < 0) return current;
+    const next = Math.min(DIFFICULTY_LADDER.length - 1, Math.max(0, i + delta));
+    return DIFFICULTY_LADDER[next];
   }
 
   /**
@@ -185,7 +195,20 @@ export class QuestionService {
     }
 
     const activeTopic = (topic || session.currentTopic || "TECHNICAL_FUNDAMENTALS").toUpperCase();
-    const targetDifficulty = (difficulty || session.difficulty || Difficulty.EASY).toUpperCase();
+    let targetDifficulty = (difficulty || session.difficulty || Difficulty.EASY).toUpperCase();
+
+    // If we're moving into a topic the candidate has strong prior history
+    // on (across earlier interviews), start it one notch harder — and one
+    // notch easier if they've historically struggled. Only applies to the
+    // first question of a topic (topicQuestionCount <= 1) and never for a
+    // plan that pins a fixed difficulty.
+    if ((session.topicQuestionCount || 0) <= 1 && (plan?.difficulty === "ADAPTIVE" || !plan?.difficulty)) {
+      const prior = await conceptHistoryService.getTopicBestScore(session.userId, activeTopic);
+      if (prior != null) {
+        if (prior >= 75) targetDifficulty = this.bumpDifficulty(targetDifficulty, +1);
+        else if (prior < 40) targetDifficulty = this.bumpDifficulty(targetDifficulty, -1);
+      }
+    }
 
     // Fetch previous questions asked in this session to prevent repetition
     let previousQuestions = [];

@@ -5,6 +5,7 @@ import { InterviewState } from "../enums/interview-state.enum.js";
 import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { aiAnswerAnalysisService } from "../ai/ai-answer-analysis.service.js";
+import { conceptHistoryService } from "./concept-history.service.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
@@ -318,6 +319,10 @@ export class AnswerAnalysisService {
     session.interviewState = InterviewState.WAITING_FOR_NEXT_QUESTION;
 
     await session.save();
+
+    // Fold this turn into the candidate's cross-interview concept history
+    // (non-fatal — used only to inform future difficulty choices).
+    await conceptHistoryService.recordTurn(session.userId, turn);
 
     logger.info(
       `Turn ${turn.turnNumber} analyzed for session ${session.interviewId}: status=${finalStatus}, score=${correctness}, followUpAllowed=${followUpAllowed}`

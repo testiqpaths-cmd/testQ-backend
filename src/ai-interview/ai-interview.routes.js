@@ -69,6 +69,9 @@ router.get("/resume", aiInterviewController.getSavedResume);
 // Candidate interview history
 router.get("/history", aiInterviewController.getHistory);
 
+// The candidate's own cross-interview topic/concept mastery rollup
+router.get("/concept-history", aiInterviewController.getConceptHistory);
+
 // Start interview session & generate first question
 router.post("/sessions/:id/start", aiInterviewController.startInterview);
 router.post("/:id/start", aiInterviewController.startInterview);
