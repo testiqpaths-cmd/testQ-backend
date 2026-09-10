@@ -2,6 +2,7 @@ import { Server } from "socket.io";
 import { setupIQRoomSocket } from "./iqRoomSocket.js";
 import { setupAssignedTestsSocket } from "./assignedTestsSocket.js";
 import { setupNewsUpdatesSocket } from "./newsUpdatesSocket.js";
+import { setupAiInterviewSocket } from "./aiInterviewSocket.js";
 import { corsOptions } from "../config/cors.js";
 
 let io;
@@ -14,6 +15,7 @@ export const setupSockets = (server) => {
   setupIQRoomSocket(io);
   setupAssignedTestsSocket(io);
   setupNewsUpdatesSocket(io);
+  setupAiInterviewSocket(io);
 
   return io;
 };
