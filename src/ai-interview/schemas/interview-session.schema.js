@@ -199,11 +199,12 @@ const interviewSessionSchema = new Schema(
   }
 );
 
-// Sparse unique so many sessions can have a null token but a live token
-// is globally unique.
+// Unique only across sessions that actually hold a token. A partial
+// filter (not `sparse`) is required because shareToken defaults to null:
+// `sparse` would still index every explicit null and collide on the 2nd.
 interviewSessionSchema.index(
   { shareToken: 1 },
-  { unique: true, sparse: true }
+  { unique: true, partialFilterExpression: { shareToken: { $type: "string" } } }
 );
 
 // Helpful compound indexes
