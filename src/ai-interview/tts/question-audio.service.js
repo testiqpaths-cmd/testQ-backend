@@ -9,6 +9,13 @@ const AUDIO_FOLDER = "ai-interview/question-audio";
 const normalize = (t) => String(t || "").trim().replace(/\s+/g, " ");
 
 export class QuestionAudioService {
+  constructor() {
+    // audioHash -> in-flight synth promise, so a background pre-generate
+    // and the client's fetch for the same question don't both call the
+    // TTS API (which wastes quota and worsens 429s).
+    this._inflight = new Map();
+  }
+
   isEnabled() {
     return ttsProviderService.isEnabled();
   }
@@ -38,6 +45,25 @@ export class QuestionAudioService {
       logger.warn(`QuestionAudio cache read failed (non-fatal): ${err.message}`);
     }
 
+    if (this._inflight.has(audioHash)) return this._inflight.get(audioHash);
+
+    const p = this.#synthAndStore(text, audioHash, desc, interviewId).finally(() =>
+      this._inflight.delete(audioHash)
+    );
+    this._inflight.set(audioHash, p);
+    return p;
+  }
+
+  /**
+   * Fire-and-forget: warm the cache for a question's audio so it's ready
+   * by the time the client asks for it. Never throws.
+   */
+  prewarm(text, { interviewId = null } = {}) {
+    if (!this.isEnabled() || !normalize(text)) return;
+    this.getOrCreate(text, { interviewId }).catch(() => {});
+  }
+
+  async #synthAndStore(text, audioHash, desc, interviewId) {
     const synth = await ttsProviderService.synthesize(text, { interviewId });
     if (!synth?.buffer?.length) return null;
 

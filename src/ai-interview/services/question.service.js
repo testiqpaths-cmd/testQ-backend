@@ -5,6 +5,7 @@ import { Difficulty } from "../enums/difficulty.enum.js";
 import { aiQuestionService } from "../ai/ai-question.service.js";
 import { conceptHistoryService } from "./concept-history.service.js";
 import { questionDedupService } from "./question-dedup.service.js";
+import { questionAudioService } from "../tts/question-audio.service.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
@@ -166,6 +167,9 @@ export class QuestionService {
 
     await turn.save();
 
+    // Warm the question's narration now so it's ready when the room asks.
+    questionAudioService.prewarm(turn.question, { interviewId: session.interviewId });
+
     // 5. Update Session State (Backend Authority)
     session.currentTopic = finalTopic;
     session.currentQuestion = {
@@ -308,6 +312,8 @@ export class QuestionService {
 
     await turn.save();
 
+    questionAudioService.prewarm(turn.question, { interviewId: session.interviewId });
+
     // Update session state (primary question count increments)
     session.currentTopic = finalTopic;
     session.difficulty = finalDifficulty;
@@ -431,6 +437,8 @@ export class QuestionService {
     });
 
     await turn.save();
+
+    questionAudioService.prewarm(turn.question, { interviewId: session.interviewId });
 
     // Update session state: follow-ups do NOT increment questionCount or topicQuestionCount
     session.currentQuestion = {
