@@ -9,6 +9,7 @@ import { resumeTopicService } from "../resume/resume-topic.service.js";
 import { questionService } from "./question.service.js";
 import { InterviewAction } from "../enums/interview-action.enum.js";
 import { adaptiveEngineService } from "./adaptive-engine.service.js";
+import { phaseService } from "./phase.service.js";
 import { answerAnalysisService } from "./answer-analysis.service.js";
 import { interviewResultsService } from "./interview-results.service.js";
 import { assertCanViewSession } from "../utils/authorize.js";
@@ -80,8 +81,18 @@ export class InterviewSessionService {
       userQuestionLimit: payload.questionCount,
     });
 
+    // 1b. Group the topics into ordered phases (INTRO -> ... -> SCENARIO).
+    // topicOrder follows phase order so the flat engine walks phases in
+    // sequence; an empty phasePlan leaves the engine's behaviour unchanged.
+    const phasePlan = phaseService.build(topics, {
+      globalQuestionLimit: plan.globalQuestionLimit,
+    });
+    const orderedTopics = phasePlan.length
+      ? phasePlan.flatMap((p) => p.topics)
+      : topics.map((t) => String(t).toUpperCase());
+
     // 2. Initialize Topic Coverage State
-    const coverageState = topics.map((topic) => ({
+    const coverageState = orderedTopics.map((topic) => ({
       topic,
       questionsAsked: 0,
       knowledgeGaps: 0,
@@ -103,13 +114,15 @@ export class InterviewSessionService {
       duration,
       difficulty,
       timeRemaining: duration * 60,
-      currentTopic: topics[0],
+      currentTopic: orderedTopics[0],
       currentQuestion: null,
       questionCount: 0,
       topicQuestionCount: 0,
       followUpCount: 0,
       globalFollowUpCount: 0,
       coverageState,
+      phasePlan,
+      currentPhase: phasePlan[0]?.phase || null,
       candidatePerformance: {
         baselineEstablished: false,
         baselineScore: 0,
@@ -119,8 +132,8 @@ export class InterviewSessionService {
         runningAccuracy: 0,
       },
       interviewState: InterviewState.READY,
-      allowedTopics: topics,
-      topicOrder: topics,
+      allowedTopics: orderedTopics,
+      topicOrder: orderedTopics,
       planId: plan._id,
       resumeData: null,
     });
@@ -229,8 +242,16 @@ export class InterviewSessionService {
       userQuestionLimit: payload.questionCount,
     });
 
+    // 1b. Group the scoped topics into ordered phases.
+    const phasePlan = phaseService.build(scopedTopics, {
+      globalQuestionLimit: plan.globalQuestionLimit,
+    });
+    const orderedTopics = phasePlan.length
+      ? phasePlan.flatMap((p) => p.topics)
+      : scopedTopics.map((t) => String(t).toUpperCase());
+
     // 2. Initialize Topic Coverage
-    const coverageState = scopedTopics.map((topic) => ({
+    const coverageState = orderedTopics.map((topic) => ({
       topic,
       questionsAsked: 0,
       knowledgeGaps: 0,
@@ -252,13 +273,15 @@ export class InterviewSessionService {
       duration,
       difficulty,
       timeRemaining: duration * 60,
-      currentTopic: scopedTopics[0],
+      currentTopic: orderedTopics[0],
       currentQuestion: null,
       questionCount: 0,
       topicQuestionCount: 0,
       followUpCount: 0,
       globalFollowUpCount: 0,
       coverageState,
+      phasePlan,
+      currentPhase: phasePlan[0]?.phase || null,
       candidatePerformance: {
         baselineEstablished: false,
         baselineScore: 0,
@@ -268,8 +291,8 @@ export class InterviewSessionService {
         runningAccuracy: 0,
       },
       interviewState: InterviewState.READY,
-      allowedTopics: scopedTopics,
-      topicOrder: scopedTopics,
+      allowedTopics: orderedTopics,
+      topicOrder: orderedTopics,
       planId: plan._id,
       resumeData,
     });
@@ -431,6 +454,9 @@ export class InterviewSessionService {
     // Generate first question (delegates to QuestionService with backend limits & fallback)
     const firstQuestion = await questionService.generateFirstQuestion(session, plan);
 
+    // Count Q1 against its phase.
+    phaseService.recordQuestion(session, session.currentTopic);
+
     await session.save();
 
     logger.info(`Interview started: ${session.interviewId} by user ${user._id}`);
@@ -448,6 +474,8 @@ export class InterviewSessionService {
       role: session.role,
       company: session.company,
       interviewType: session.interviewTypes?.[0] || "technical",
+      phase: session.currentPhase,
+      phaseProgress: phaseService.progress(session),
     };
   }
 
@@ -730,6 +758,8 @@ export class InterviewSessionService {
       session.currentTopic = decision.nextTopic;
       session.topicQuestionCount = 1;
       session.followUpCount = 0;
+      // Roll the phase forward if this topic belongs to a later phase.
+      phaseService.enterPhaseForTopic(session, decision.nextTopic);
       if (session.candidatePerformance) {
         session.candidatePerformance.consecutiveKnowledgeGapsInTopic = 0;
       }
@@ -739,6 +769,8 @@ export class InterviewSessionService {
         topic: decision.nextTopic,
         difficulty: decision.difficulty,
       });
+
+      phaseService.recordQuestion(session, session.currentTopic);
 
       await session.save();
 
@@ -752,6 +784,8 @@ export class InterviewSessionService {
         topic: session.currentTopic,
         topicQuestionCount: session.topicQuestionCount,
         questionCount: session.questionCount,
+        phase: session.currentPhase,
+        phaseProgress: phaseService.progress(session),
       };
     }
 
@@ -765,6 +799,8 @@ export class InterviewSessionService {
       difficulty: decision.difficulty,
     });
 
+    phaseService.recordQuestion(session, session.currentTopic);
+
     await session.save();
 
     return {
@@ -776,6 +812,8 @@ export class InterviewSessionService {
       topic: session.currentTopic,
       topicQuestionCount: session.topicQuestionCount,
       questionCount: session.questionCount,
+      phase: session.currentPhase,
+      phaseProgress: phaseService.progress(session),
     };
   }
 

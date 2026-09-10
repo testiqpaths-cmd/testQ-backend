@@ -2,6 +2,7 @@ import { InterviewAction } from "../enums/interview-action.enum.js";
 import { InterviewState } from "../enums/interview-state.enum.js";
 import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
+import { phaseService } from "./phase.service.js";
 import logger from "../../config/logger.js";
 
 export class AdaptiveEngineService {
@@ -107,6 +108,26 @@ export class AdaptiveEngineService {
       };
     }
 
+    // 5b. Phase Gate
+    // If the current phase has used its question budget (or covered all
+    // its topics), advance to the next phase even when the current topic's
+    // own per-topic budget isn't met.
+    if (phaseService.hasPlan(session) && phaseService.isPhaseExhausted(session)) {
+      const nextTopic =
+        phaseService.nextPhaseFirstTopic(session) || this.getNextTopic(session, plan);
+      if (nextTopic && nextTopic.toUpperCase() !== (session.currentTopic || "").toUpperCase()) {
+        return {
+          action: InterviewAction.SWITCH_TOPIC,
+          nextTopic,
+          difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+          reason: `Phase budget met; advancing to the ${phaseService.phaseOfTopic(
+            session,
+            nextTopic
+          )} phase (topic ${nextTopic}).`,
+        };
+      }
+    }
+
     // 6. Topic Switch Gates
     // Reason A: Consecutive knowledge gaps in topic (candidate has gap in this area, switch to avoid frustration)
     if (consecutiveGaps >= 2) {
@@ -200,12 +221,20 @@ export class AdaptiveEngineService {
    * @returns {string|null} Next topic string, or null if all topics are exhausted
    */
   getNextTopic(session, plan) {
-    const topicOrder =
+    let topicOrder =
       (Array.isArray(session.topicOrder) && session.topicOrder.length > 0
         ? session.topicOrder
         : session.allowedTopics) || [];
 
     if (topicOrder.length === 0) return null;
+
+    // Phase layer: once the current phase is done, restrict selection to
+    // topics from later phases so we don't linger on this phase's
+    // still-unasked topics (or revisit earlier phases).
+    if (phaseService.hasPlan(session) && phaseService.isPhaseExhausted(session)) {
+      const later = phaseService.laterPhaseTopics(session);
+      if (later.length > 0) topicOrder = later;
+    }
 
     const currentTopicUpper = (session.currentTopic || "").toUpperCase();
     const currentIndex = topicOrder.findIndex(

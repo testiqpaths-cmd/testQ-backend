@@ -24,6 +24,21 @@ const topicCoverageItemSchema = new Schema(
   { _id: false }
 );
 
+const phasePlanItemSchema = new Schema(
+  {
+    phase: { type: String, required: true },
+    topics: { type: [String], default: [] },
+    questionBudget: { type: Number, default: 0 },
+    questionsAsked: { type: Number, default: 0 },
+    status: {
+      type: String,
+      enum: ["PENDING", "IN_PROGRESS", "COMPLETED"],
+      default: "PENDING",
+    },
+  },
+  { _id: false }
+);
+
 const interviewSessionSchema = new Schema(
   {
     userId: {
@@ -112,6 +127,11 @@ const interviewSessionSchema = new Schema(
       default: 1800,
     },
     coverageState: [topicCoverageItemSchema],
+    // Phase layer (see constants/interview-phases.js). Ordered stages, each
+    // a slice of topicOrder with its own question budget. Empty => the
+    // adaptive engine runs flat, exactly as before.
+    phasePlan: { type: [phasePlanItemSchema], default: [] },
+    currentPhase: { type: String, default: null },
     candidatePerformance: {
       baselineEstablished: { type: Boolean, default: false },
       baselineScore: { type: Number, default: 0 },

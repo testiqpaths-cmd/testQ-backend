@@ -323,6 +323,15 @@ export class InterviewResultsService {
       questions,
       recommendedPractice: recommendedPractice.slice(0, 5),
       integritySignals,
+      phasePlan: Array.isArray(session.phasePlan)
+        ? session.phasePlan.map((p) => ({
+            phase: p.phase,
+            topics: p.topics,
+            questionsAsked: p.questionsAsked || 0,
+            questionBudget: p.questionBudget || 0,
+            status: p.status,
+          }))
+        : [],
     };
   }
 
