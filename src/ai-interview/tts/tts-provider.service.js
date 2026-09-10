@@ -50,7 +50,9 @@ export class TtsProviderService {
   constructor() {
     this.provider = (process.env.AI_INTERVIEW_TTS_PROVIDER || "gemini").toLowerCase();
     this.enabled = String(process.env.AI_INTERVIEW_TTS_ENABLED || "false").toLowerCase() === "true";
-    this.timeoutMs = Number(process.env.AI_TTS_TIMEOUT_MS) || 30000;
+    // Gemini's TTS preview models are usually 2-5s but occasionally hang;
+    // a shorter timeout + one retry beats a single long wait.
+    this.timeoutMs = Number(process.env.AI_TTS_TIMEOUT_MS) || 18000;
 
     this.geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || null;
     this.geminiModel = process.env.GEMINI_TTS_MODEL || "gemini-2.5-flash-preview-tts";
@@ -84,14 +86,24 @@ export class TtsProviderService {
     return { provider: "gemini", model: this.geminiModel, voice: this.geminiVoice };
   }
 
+  async #dispatch(text) {
+    if (this.provider === "elevenlabs") return this.callElevenLabs(text);
+    if (this.provider === "openai") return this.callOpenAI(text);
+    return this.callGemini(text);
+  }
+
   async synthesize(text, { interviewId = null } = {}) {
     if (!this.isEnabled() || !text || !String(text).trim()) return null;
     const start = Date.now();
     try {
       let out = null;
-      if (this.provider === "elevenlabs") out = await this.callElevenLabs(text);
-      else if (this.provider === "openai") out = await this.callOpenAI(text);
-      else out = await this.callGemini(text);
+      try {
+        out = await this.#dispatch(text);
+      } catch (err) {
+        const retryable = err.code === "ECONNABORTED" || /timeout/i.test(err.message || "") || err.response?.status === 503;
+        if (!retryable) throw err;
+        out = await this.#dispatch(text); // one retry for a transient hang
+      }
 
       await logCall({
         interviewId,
