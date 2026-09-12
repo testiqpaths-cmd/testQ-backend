@@ -168,7 +168,9 @@ export class QuestionService {
     await turn.save();
 
     // Warm the question's narration now so it's ready when the room asks.
-    questionAudioService.prewarm(turn.question, { interviewId: session.interviewId });
+    questionAudioService.prewarmForTurn(turn._id, turn.question, {
+      interviewId: session.interviewId,
+    });
 
     // 5. Update Session State (Backend Authority)
     session.currentTopic = finalTopic;
@@ -312,7 +314,9 @@ export class QuestionService {
 
     await turn.save();
 
-    questionAudioService.prewarm(turn.question, { interviewId: session.interviewId });
+    questionAudioService.prewarmForTurn(turn._id, turn.question, {
+      interviewId: session.interviewId,
+    });
 
     // Update session state (primary question count increments)
     session.currentTopic = finalTopic;
@@ -438,7 +442,9 @@ export class QuestionService {
 
     await turn.save();
 
-    questionAudioService.prewarm(turn.question, { interviewId: session.interviewId });
+    questionAudioService.prewarmForTurn(turn._id, turn.question, {
+      interviewId: session.interviewId,
+    });
 
     // Update session state: follow-ups do NOT increment questionCount or topicQuestionCount
     session.currentQuestion = {

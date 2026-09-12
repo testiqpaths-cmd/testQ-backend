@@ -1,5 +1,6 @@
 import crypto from "crypto";
 import { QuestionAudio } from "../schemas/question-audio.schema.js";
+import { InterviewTurn } from "../schemas/interview-turn.schema.js";
 import { ttsProviderService } from "./tts-provider.service.js";
 import { uploadBufferToCloudinary } from "../../common/utils/cloudinary.js";
 import logger from "../../config/logger.js";
@@ -61,6 +62,45 @@ export class QuestionAudioService {
   prewarm(text, { interviewId = null } = {}) {
     if (!this.isEnabled() || !normalize(text)) return;
     this.getOrCreate(text, { interviewId }).catch(() => {});
+  }
+
+  /**
+   * Same as prewarm(), but for a specific InterviewTurn: once synthesis
+   * finishes it persists the URL on that turn AND pushes a socket event
+   * to the interview's room, so the room reveals text+audio together the
+   * moment it's ready instead of waiting for the client's next poll tick
+   * (polling backoff alone can add several extra seconds on top of
+   * synthesis time). Fire-and-forget; never throws.
+   */
+  prewarmForTurn(turnId, text, { interviewId = null } = {}) {
+    if (!this.isEnabled() || !normalize(text) || !turnId) return;
+
+    this.getOrCreate(text, { interviewId })
+      .then(async (audio) => {
+        if (!audio?.url) return;
+
+        try {
+          await InterviewTurn.updateOne({ _id: turnId }, { questionAudioUrl: audio.url });
+        } catch (err) {
+          logger.warn(`Persisting prewarmed questionAudioUrl failed (non-fatal): ${err.message}`);
+        }
+
+        if (!interviewId) return;
+        try {
+          const { getIO } = await import("../../sockets/index.js");
+          getIO()
+            .of("/ai-interview")
+            .to(`interview:${interviewId}`)
+            .emit("question:audio-ready", {
+              turnId: String(turnId),
+              url: audio.url,
+              mimeType: audio.mimeType,
+            });
+        } catch (err) {
+          logger.warn(`Pushing question:audio-ready failed (non-fatal): ${err.message}`);
+        }
+      })
+      .catch(() => {});
   }
 
   async #synthAndStore(text, audioHash, desc, interviewId) {
