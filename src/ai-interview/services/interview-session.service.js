@@ -17,6 +17,27 @@ import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
 export class InterviewSessionService {
+  // sessionId -> in-flight Promise. The room can reach startInterview /
+  // submitAnswer / processNextAction through two transports (REST and the
+  // Socket.io channel), and the socket client falls back to REST if an ack
+  // is slow — without this, a slow AI call (question-gen + dedup retries
+  // can take 30s+) lets both transports run the same mutation concurrently,
+  // and the loser's session.save() dies with a Mongoose VersionError. A
+  // second call for a session already in flight just awaits the first.
+  #inflight = new Map();
+
+  async #withSessionLock(sessionId, fn) {
+    const key = String(sessionId);
+    const existing = this.#inflight.get(key);
+    if (existing) return existing;
+
+    const promise = Promise.resolve()
+      .then(fn)
+      .finally(() => this.#inflight.delete(key));
+    this.#inflight.set(key, promise);
+    return promise;
+  }
+
   /**
    * Generates a readable unique interview session ID
    */
@@ -399,6 +420,10 @@ export class InterviewSessionService {
    * transitions to IN_PROGRESS, and generates the first baseline question.
    */
   async startInterview(sessionId, user) {
+    return this.#withSessionLock(sessionId, () => this.#startInterviewImpl(sessionId, user));
+  }
+
+  async #startInterviewImpl(sessionId, user) {
     const session = await this.getSessionById(sessionId, user);
 
     // Idempotency: If already in progress and has a current question, return active state
@@ -486,6 +511,10 @@ export class InterviewSessionService {
    * transitions state to WAITING_FOR_NEXT_QUESTION.
    */
   async submitAnswer(sessionId, user, payload) {
+    return this.#withSessionLock(sessionId, () => this.#submitAnswerImpl(sessionId, user, payload));
+  }
+
+  async #submitAnswerImpl(sessionId, user, payload) {
     const session = await this.getSessionById(sessionId, user);
 
     // 1. State Gate: Only accept answers when IN_PROGRESS or PROCESSING_ANSWER
@@ -615,6 +644,10 @@ export class InterviewSessionService {
    * updates state/counters, and returns structured result.
    */
   async processNextAction(sessionId, user) {
+    return this.#withSessionLock(sessionId, () => this.#processNextActionImpl(sessionId, user));
+  }
+
+  async #processNextActionImpl(sessionId, user) {
     const session = await this.getSessionById(sessionId, user);
 
     // 1. Terminal / Inactive State Gate
@@ -849,6 +882,10 @@ export class InterviewSessionService {
    * on an already-terminal session just returns its (cached) results.
    */
   async completeInterview(sessionId, user) {
+    return this.#withSessionLock(sessionId, () => this.#completeInterviewImpl(sessionId, user));
+  }
+
+  async #completeInterviewImpl(sessionId, user) {
     const session = await this.getSessionById(sessionId, user);
 
     const TERMINAL_STATES = [
