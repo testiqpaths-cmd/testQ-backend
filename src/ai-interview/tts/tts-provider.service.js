@@ -65,6 +65,16 @@ export class TtsProviderService {
     this.openaiApiKey = process.env.OPENAI_API_KEY || null;
     this.openaiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
     this.openaiVoice = process.env.OPENAI_TTS_VOICE || "alloy";
+
+    // Google Cloud's Text-to-Speech product — a separate, GA (non-preview)
+    // API from the Gemini generateContent TTS above, with its own billing
+    // and its own API key (a Gemini/AI-Studio key does NOT automatically
+    // work here; the "Cloud Text-to-Speech API" must be enabled on a
+    // billed Google Cloud project and the key allowed to call it).
+    this.googleCloudApiKey =
+      process.env.GOOGLE_CLOUD_TTS_API_KEY || process.env.GOOGLE_CLOUD_API_KEY || null;
+    this.googleCloudVoice = process.env.GOOGLE_CLOUD_TTS_VOICE || "en-US-Neural2-C";
+    this.googleCloudLanguageCode = process.env.GOOGLE_CLOUD_TTS_LANGUAGE || "en-US";
   }
 
   isEnabled() {
@@ -72,6 +82,9 @@ export class TtsProviderService {
     if (this.provider === "gemini") return Boolean(this.geminiApiKey);
     if (this.provider === "elevenlabs") return Boolean(this.elevenApiKey);
     if (this.provider === "openai") return Boolean(this.openaiApiKey);
+    if (this.provider === "google-cloud" || this.provider === "google") {
+      return Boolean(this.googleCloudApiKey);
+    }
     return false;
   }
 
@@ -83,12 +96,18 @@ export class TtsProviderService {
     if (this.provider === "openai") {
       return { provider: "openai", model: this.openaiTtsModel, voice: this.openaiVoice };
     }
+    if (this.provider === "google-cloud" || this.provider === "google") {
+      return { provider: "google-cloud", model: this.googleCloudVoice, voice: this.googleCloudVoice };
+    }
     return { provider: "gemini", model: this.geminiModel, voice: this.geminiVoice };
   }
 
   async #dispatch(text) {
     if (this.provider === "elevenlabs") return this.callElevenLabs(text);
     if (this.provider === "openai") return this.callOpenAI(text);
+    if (this.provider === "google-cloud" || this.provider === "google") {
+      return this.callGoogleCloud(text);
+    }
     return this.callGemini(text);
   }
 
@@ -173,6 +192,23 @@ export class TtsProviderService {
       }
     );
     return { buffer: Buffer.from(res.data), mimeType: "audio/mpeg", ext: "mp3" };
+  }
+
+  /** Google Cloud Text-to-Speech (GA, not a preview model) — Neural2 voice. */
+  async callGoogleCloud(text) {
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${this.googleCloudApiKey}`;
+    const res = await axios.post(
+      url,
+      {
+        input: { text },
+        voice: { languageCode: this.googleCloudLanguageCode, name: this.googleCloudVoice },
+        audioConfig: { audioEncoding: "MP3" },
+      },
+      { timeout: this.timeoutMs, headers: { "Content-Type": "application/json" } }
+    );
+    const b64 = res.data?.audioContent;
+    if (!b64) return null;
+    return { buffer: Buffer.from(b64, "base64"), mimeType: "audio/mpeg", ext: "mp3" };
   }
 }
 

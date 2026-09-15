@@ -10,6 +10,17 @@ async function logCall(row) {
   }
 }
 
+/** Map a recorded clip's mimetype to a Google Cloud STT encoding value. */
+function googleSttEncoding(mimeType) {
+  const m = String(mimeType || "").toLowerCase();
+  if (m.includes("webm")) return "WEBM_OPUS"; // MediaRecorder's browser default
+  if (m.includes("ogg")) return "OGG_OPUS";
+  if (m.includes("flac")) return "FLAC";
+  if (m.includes("wav")) return "LINEAR16";
+  if (m.includes("mp3") || m.includes("mpeg")) return "MP3";
+  return null; // let Google infer it from the container where it can (WAV/FLAC)
+}
+
 /**
  * Provider-agnostic speech-to-text. Gemini is the default (multimodal
  * transcription via generateContent); OpenAI (whisper) and Deepgram are
@@ -37,6 +48,14 @@ export class SttProviderService {
 
     this.deepgramApiKey = process.env.DEEPGRAM_API_KEY || null;
     this.deepgramModel = process.env.DEEPGRAM_STT_MODEL || "nova-2";
+
+    // Google Cloud's Speech-to-Text product — a separate, GA API from the
+    // Gemini multimodal-transcription approach above, with its own billing
+    // and its own API key (enable "Cloud Speech-to-Text API" on a billed
+    // Google Cloud project; a Gemini/AI-Studio key won't work here as-is).
+    this.googleCloudApiKey =
+      process.env.GOOGLE_CLOUD_STT_API_KEY || process.env.GOOGLE_CLOUD_API_KEY || null;
+    this.googleCloudLanguageCode = process.env.GOOGLE_CLOUD_STT_LANGUAGE || "en-US";
   }
 
   isEnabled() {
@@ -44,12 +63,16 @@ export class SttProviderService {
     if (this.provider === "gemini") return Boolean(this.geminiApiKey);
     if (this.provider === "openai") return Boolean(this.openaiApiKey);
     if (this.provider === "deepgram") return Boolean(this.deepgramApiKey);
+    if (this.provider === "google-cloud" || this.provider === "google") {
+      return Boolean(this.googleCloudApiKey);
+    }
     return false;
   }
 
   model() {
     if (this.provider === "openai") return this.openaiModel;
     if (this.provider === "deepgram") return this.deepgramModel;
+    if (this.provider === "google-cloud" || this.provider === "google") return "google-cloud-speech-v1";
     return this.geminiModel;
   }
 
@@ -60,7 +83,9 @@ export class SttProviderService {
       let text = null;
       if (this.provider === "openai") text = await this.callOpenAI(buffer, mimeType);
       else if (this.provider === "deepgram") text = await this.callDeepgram(buffer, mimeType);
-      else text = await this.callGemini(buffer, mimeType);
+      else if (this.provider === "google-cloud" || this.provider === "google") {
+        text = await this.callGoogleCloud(buffer, mimeType);
+      } else text = await this.callGemini(buffer, mimeType);
 
       text = (text || "").trim();
       await logCall({
@@ -139,6 +164,26 @@ export class SttProviderService {
       }
     );
     return res.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+  }
+
+  /**
+   * Google Cloud Speech-to-Text (GA v1, synchronous recognize) — fine for
+   * short interview-answer clips (this endpoint caps at ~1 minute audio).
+   */
+  async callGoogleCloud(buffer, mimeType) {
+    const encoding = googleSttEncoding(mimeType);
+    const config = { languageCode: this.googleCloudLanguageCode, enableAutomaticPunctuation: true };
+    if (encoding) config.encoding = encoding; // omitted -> Google infers from WAV/FLAC headers
+
+    const res = await axios.post(
+      `https://speech.googleapis.com/v1/speech:recognize?key=${this.googleCloudApiKey}`,
+      { config, audio: { content: buffer.toString("base64") } },
+      { timeout: this.timeoutMs, headers: { "Content-Type": "application/json" }, maxBodyLength: Infinity }
+    );
+    return (res.data?.results || [])
+      .map((r) => r.alternatives?.[0]?.transcript)
+      .filter(Boolean)
+      .join(" ");
   }
 }
 
