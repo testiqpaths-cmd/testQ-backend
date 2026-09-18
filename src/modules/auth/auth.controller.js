@@ -2,11 +2,16 @@ import {
   register as registerService,
   login as loginService,
   exchangeLaunchToken as exchangeLaunchTokenService,
+  createSsoTicket as createSsoTicketService,
+  verifySsoTicket as verifySsoTicketService,
+  verifyCredentials as verifyCredentialsService,
+  setPassword as setPasswordService,
   firebaseAuth as firebaseAuthService,
   githubAuth as githubAuthService,
   checkUserExists as checkUserExistsService,
 } from "./auth.service.js";
 import  logger  from "../../config/logger.js";
+import env from "../../config/env.js";
 import {
   accessCookieOptions,
   refreshCookieOptions,
@@ -18,6 +23,17 @@ import {
 } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { findUserById } from "./repositories/auth.repository.js";
+
+// "Complete" means enough to be worth collecting before someone pays:
+// phone number + full education details. Address is deliberately not
+// required here — heavier to fill out and not needed for the resume
+// builder/support use cases this gate exists for.
+const isProfileComplete = (user) =>
+  Boolean(user.phone) &&
+  Boolean(user.education?.qualification) &&
+  Boolean(user.education?.stream) &&
+  Boolean(user.education?.passingYear) &&
+  Boolean(user.education?.college);
 
 const buildAuthUserResponse = (user) => ({
   id: user._id,
@@ -32,6 +48,10 @@ const buildAuthUserResponse = (user) => ({
   plan: user.plan,
   isEmailVerified: user.isEmailVerified,
   lastLogin: user.lastLogin,
+  hasSetPassword: user.hasSetPassword,
+  phone: user.phone,
+  education: user.education,
+  isProfileComplete: isProfileComplete(user),
 });
 
 
@@ -156,6 +176,45 @@ export const exchangeLaunchTokenController = async (req, res) => {
   }
 };
 
+/**
+ * Mints a one-time SSO ticket for the currently logged-in user and hands
+ * back the full redirect URL — authMiddleware-protected, since only an
+ * already-authenticated testQ browser session should be able to mint one.
+ */
+export const ssoLaunchController = async (req, res) => {
+  try {
+    const ticket = await createSsoTicketService(req.user._id);
+    const redirectUrl = `${env.RESUME_BUILDER_FRONTEND_URL}/sso?ticket=${ticket}`;
+    res.status(200).json({ success: true, ticket, redirectUrl });
+  } catch (err) {
+    logger.error(`SSO launch error: ${err.message}`);
+    res.status(500).json({ success: false, message: "Could not create SSO ticket" });
+  }
+};
+
+/**
+ * Redeems an SSO ticket on behalf of a satellite app's backend (currently
+ * the resume builder). No authMiddleware — the caller has no testQ session
+ * of its own, it's a server-to-server call authenticated instead by a
+ * shared X-Service-Api-Key header. Returns 200 with { valid: false, reason }
+ * for an expired/replayed/unpaid ticket — that's an expected outcome the
+ * caller branches on, not a server error.
+ */
+export const ssoVerifyController = async (req, res) => {
+  const providedKey = req.headers["x-service-api-key"];
+  if (!env.SSO_SERVICE_API_KEY || !providedKey || providedKey !== env.SSO_SERVICE_API_KEY) {
+    return res.status(401).json({ success: false, message: "Invalid service credentials" });
+  }
+  try {
+    const { ticket } = req.body;
+    const result = await verifySsoTicketService(ticket);
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error(`SSO verify error: ${err.message}`);
+    return res.status(500).json({ valid: false, reason: "server_error" });
+  }
+};
+
 /** Firebase login/register */
 export const firebaseAuthController = async (req, res) => {
   try {
@@ -242,9 +301,53 @@ export const meController = async (req, res) => {
   try {
     const user = await findUserById(req.user._id);
     if (!user) throw new AuthError("User not found");
-    res.json({ id: user.id, email: user.email, role: user.role, organizationId: user.organizationId ?? null });
+    res.json({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      organizationId: user.organizationId ?? null,
+      hasSetPassword: user.hasSetPassword,
+      isProfileComplete: isProfileComplete(user),
+    });
   } catch (err) {
     res.status(404).json({ message: err.message });
+  }
+};
+
+/**
+ * Verifies a raw email+password pair for a satellite app's backend (the
+ * resume builder's direct-login form) — same X-Service-Api-Key trust
+ * boundary as ssoVerifyController, just a different credential shape.
+ */
+export const ssoVerifyCredentialsController = async (req, res) => {
+  const providedKey = req.headers["x-service-api-key"];
+  if (!env.SSO_SERVICE_API_KEY || !providedKey || providedKey !== env.SSO_SERVICE_API_KEY) {
+    return res.status(401).json({ success: false, message: "Invalid service credentials" });
+  }
+  try {
+    const { email, password } = req.body;
+    const result = await verifyCredentialsService(email, password);
+    return res.status(200).json(result);
+  } catch (err) {
+    logger.error(`SSO verify-credentials error: ${err.message}`);
+    return res.status(500).json({ valid: false, reason: "server_error" });
+  }
+};
+
+/**
+ * Lets the current logged-in user set a real password — used by the
+ * "set a password before checkout" gate for Google/GitHub-only accounts.
+ */
+export const setPasswordController = async (req, res) => {
+  try {
+    const user = await setPasswordService(req.user._id, req.body.newPassword);
+    res.status(200).json({
+      success: true,
+      message: "Password set successfully",
+      user: buildAuthUserResponse(user),
+    });
+  } catch (err) {
+    res.status(400).json({ success: false, message: err.message });
   }
 };
 export const githubLoginController = (req, res) => {
@@ -351,7 +454,9 @@ export const updateProfileController = async (req, res) => {
       profileImage: user.profileImage,
       phone: user.phone,
       address: user.address,
-      education: user.education
+      education: user.education,
+      hasSetPassword: user.hasSetPassword,
+      isProfileComplete: isProfileComplete(user),
     } });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message || "Failed to update profile" });
