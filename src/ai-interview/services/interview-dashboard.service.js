@@ -45,7 +45,7 @@ export class InterviewDashboardService {
       interviewState: { $in: ["COMPLETED", "EVALUATED"] },
     })
       .sort({ createdAt: -1 })
-      .select("questionCount createdAt resultsSummary")
+      .select("questionCount createdAt resultsSummary role company difficulty interviewId")
       .lean();
 
     const validScores = sessions
@@ -91,9 +91,16 @@ export class InterviewDashboardService {
     };
 
     const performanceTrend = sessions
-      .slice(0, TREND_LENGTH)
-      .reverse()
-      .map((s) => ({ label: shortDate(s.createdAt), score: s.resultsSummary?.score ?? 0 }));
+      .map((s) => ({
+        id: s.interviewId || s._id,
+        date: s.createdAt,
+        label: shortDate(s.createdAt),
+        role: s.role || "Software Engineer",
+        difficulty: s.difficulty || "medium",
+        score: s.resultsSummary?.score ?? 0,
+        readinessScore: s.resultsSummary?.readinessScore ?? 0,
+      }))
+      .reverse();
 
     const readinessDelta = latest && previous ? readinessScore - (previous.readinessScore ?? 0) : 0;
 

@@ -376,9 +376,9 @@ export class InterviewSessionService {
   /**
    * List interview sessions for a specific user (paginated)
    */
-  async getUserSessions(userId, { page = 1, limit = 10 } = {}) {
+  async getUserSessions(userId, { page = 1, limit = 100 } = {}) {
     const pageNum = Math.max(1, parseInt(page, 10) || 1);
-    const limitNum = Math.min(50, Math.max(1, parseInt(limit, 10) || 10));
+    const limitNum = Math.min(500, Math.max(1, parseInt(limit, 10) || 100));
     const skip = (pageNum - 1) * limitNum;
 
     const [items, total] = await Promise.all([
