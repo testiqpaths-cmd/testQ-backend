@@ -357,14 +357,23 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     isIQRoomTest: { $ne: true },
   };
 
-  if (userCreatedAt) {
-    filters.createdAt = { $gte: new Date(userCreatedAt) };
-  }
-
-  // Combined into $and (rather than two competing top-level $or keys) since
-  // both the search condition and the SELECT_STUDENT gate below need their
-  // own $or.
+  // Combined into $and (rather than competing top-level $or keys) since the
+  // registration-date gate, the search condition and the SELECT_STUDENT gate
+  // below each need their own $or.
   const andConditions = [];
+
+  // A test created before the student registered is hidden only once it has
+  // ended; one still running or upcoming stays visible. Mirrors hasTestEnded:
+  // ended = FIXED schedule with an endTime in the past.
+  if (userCreatedAt) {
+    andConditions.push({
+      $or: [
+        { createdAt: { $gte: new Date(userCreatedAt) } },
+        { scheduleType: { $ne: "FIXED" } },
+        { endTime: { $not: { $lt: new Date() } } },
+      ],
+    });
+  }
 
   if (String(search || "").trim()) {
     andConditions.push({
