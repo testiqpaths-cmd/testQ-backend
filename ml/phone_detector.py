@@ -183,3 +183,8 @@ async def detect_phone_api(
             status_code=500,
             detail=f"Phone detection failed: {str(error)}"
         )
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("phone_detector:app", host="127.0.0.1", port=8000, reload=True)
