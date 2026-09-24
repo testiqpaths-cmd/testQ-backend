@@ -36,22 +36,24 @@ export class QuestionService {
    * @param {{ userId: any, interviewId: string, topic: string }} ctx
    * @returns {Promise<{ aiOutput: Object, questionEmbedding: number[]|null }>}
    */
-  async generateWithDedup(generate, { userId, interviewId, topic }) {
+  async generateWithDedup(generate, { userId, interviewId, topic, sessionQuestions = [] }) {
     let aiOutput = await generate([]);
     let embedding = await questionDedupService.embedQuestion(aiOutput.question, interviewId);
 
-    if (embedding) {
-      const dup = await questionDedupService.findDuplicate(embedding, userId, { topic });
-      if (dup.isDuplicate) {
-        logger.info(
-          `Dedup: regenerating near-duplicate question (cosine ${dup.similarity.toFixed(3)} vs "${(dup.closestMatch?.question || "").slice(0, 70)}")`
-        );
-        const exclude = [aiOutput.question, dup.closestMatch?.question].filter(Boolean);
-        const retry = await generate(exclude);
-        const retryEmbedding = await questionDedupService.embedQuestion(retry.question, interviewId);
-        aiOutput = retry;
-        embedding = retryEmbedding || embedding;
-      }
+    const dup = await questionDedupService.findDuplicate(embedding, userId, {
+      topic,
+      questionText: aiOutput.question,
+      sessionQuestions,
+    });
+    if (dup.isDuplicate) {
+      logger.info(
+        `Dedup: regenerating near-duplicate question (${dup.reason || "cosine"} ${dup.similarity.toFixed(3)} vs "${(dup.closestMatch?.question || "").slice(0, 70)}")`
+      );
+      const exclude = [aiOutput.question, dup.closestMatch?.question].filter(Boolean);
+      const retry = await generate(exclude);
+      const retryEmbedding = await questionDedupService.embedQuestion(retry.question, interviewId);
+      aiOutput = retry;
+      embedding = retryEmbedding || embedding;
     }
 
     return { aiOutput, questionEmbedding: embedding };
@@ -133,11 +135,12 @@ export class QuestionService {
           topic: activeTopic,
           difficulty: targetDifficulty,
           previousQuestions: exclude,
+          conceptsAlreadyTested: [],
           resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
           interviewType: session.interviewTypes?.[0] || "technical",
           interviewId: session.interviewId,
         }),
-      { userId: session.userId, interviewId: session.interviewId, topic: activeTopic }
+      { userId: session.userId, interviewId: session.interviewId, topic: activeTopic, sessionQuestions: [] }
     );
 
     // 3. Backend Verification of AI Output
@@ -148,6 +151,7 @@ export class QuestionService {
     // Normalize and verify topic
     const finalTopic = String(aiOutput.topic || activeTopic).toUpperCase();
     const finalDifficulty = String(aiOutput.difficulty || targetDifficulty).toUpperCase();
+    const finalConcept = aiOutput.concept || null;
 
     // 4. Persist InterviewTurn in Database
     const turn = new InterviewTurn({
@@ -156,6 +160,7 @@ export class QuestionService {
       turnNumber: 1,
       topic: finalTopic,
       question: aiOutput.question.trim(),
+      concept: finalConcept,
       questionEmbedding: questionEmbedding || undefined,
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: finalDifficulty,
@@ -183,7 +188,10 @@ export class QuestionService {
       difficulty: turn.difficulty,
       questionType: turn.questionType,
       competency: turn.competency,
+      concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
+      isFollowUp: false,
+      subIndex: null,
     };
     session.questionCount = 1;
     session.topicQuestionCount = 1;
@@ -221,7 +229,10 @@ export class QuestionService {
       difficulty: turn.difficulty,
       questionType: turn.questionType,
       competency: turn.competency,
+      concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
+      isFollowUp: false,
+      subIndex: null,
     };
   }
 
@@ -257,13 +268,15 @@ export class QuestionService {
       }
     }
 
-    // Fetch previous questions asked in this session to prevent repetition
+    // Fetch previous questions and concepts asked in this session to prevent repetition
     let previousQuestions = [];
+    let conceptsAlreadyTested = [];
     try {
       const pastTurns = await InterviewTurn.find({ sessionId: session._id })
-        .select("question")
+        .select("question concept")
         .lean();
       previousQuestions = pastTurns.map((t) => t.question).filter(Boolean);
+      conceptsAlreadyTested = pastTurns.map((t) => t.concept).filter(Boolean);
     } catch {
       // Non-fatal if query fails
     }
@@ -278,16 +291,18 @@ export class QuestionService {
           topic: activeTopic,
           difficulty: targetDifficulty,
           previousQuestions: [...previousQuestions, ...exclude],
+          conceptsAlreadyTested,
           resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
           interviewType: session.interviewTypes?.[0] || "technical",
           interviewId: session.interviewId,
         }),
-      { userId: session.userId, interviewId: session.interviewId, topic: activeTopic }
+      { userId: session.userId, interviewId: session.interviewId, topic: activeTopic, sessionQuestions: previousQuestions }
     );
 
     const finalQuestion = aiOutput.question.trim();
     const finalTopic = String(aiOutput.topic || activeTopic).toUpperCase();
     const finalDifficulty = String(aiOutput.difficulty || targetDifficulty).toUpperCase();
+    const finalConcept = aiOutput.concept || null;
 
     // Determine sequential turnNumber across all session turns
     const lastTurnDoc = await InterviewTurn.findOne({ sessionId: session._id })
@@ -302,6 +317,7 @@ export class QuestionService {
       turnNumber: nextTurnNumber,
       topic: finalTopic,
       question: finalQuestion,
+      concept: finalConcept,
       questionEmbedding: questionEmbedding || undefined,
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: finalDifficulty,
@@ -331,7 +347,10 @@ export class QuestionService {
       difficulty: turn.difficulty,
       questionType: turn.questionType,
       competency: turn.competency,
+      concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
+      isFollowUp: false,
+      subIndex: null,
     };
 
     // Update topic coverage state
@@ -375,7 +394,10 @@ export class QuestionService {
       difficulty: turn.difficulty,
       questionType: turn.questionType,
       competency: turn.competency,
+      concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
+      isFollowUp: false,
+      subIndex: null,
     };
   }
 
@@ -394,18 +416,31 @@ export class QuestionService {
       throw new ApiError(400, "Session and previous turn are required for follow-up.");
     }
 
+    let previousQuestions = [];
+    try {
+      const pastTurns = await InterviewTurn.find({ sessionId: session._id })
+        .select("question")
+        .lean();
+      previousQuestions = pastTurns.map((t) => t.question).filter(Boolean);
+    } catch {
+      // Non-fatal
+    }
+
     const aiOutput = await this.ai.generateFollowUpQuestion({
       role: session.role,
       experienceLevel: session.experienceLevel,
       topic: previousTurn.topic,
       difficulty: previousTurn.difficulty,
       previousQuestion: previousTurn.question,
+      previousQuestions,
       candidateAnswer: previousTurn.candidateAnswer || "",
       conceptsMissing: previousTurn.conceptsMissing || [],
+      conceptsDemonstrated: previousTurn.conceptsDemonstrated || [],
       interviewId: session.interviewId,
     });
 
     const finalQuestion = aiOutput.question.trim();
+    const finalConcept = aiOutput.concept || previousTurn.concept || null;
 
     // Embed for future dedup comparisons; follow-ups are inherently tied to
     // the parent answer so we don't regenerate them, just record the vector.
@@ -427,6 +462,7 @@ export class QuestionService {
       turnNumber: nextTurnNumber,
       topic: previousTurn.topic,
       question: finalQuestion,
+      concept: finalConcept,
       questionEmbedding: questionEmbedding || undefined,
       questionType: aiOutput.questionType || "TECHNICAL",
       difficulty: previousTurn.difficulty,
@@ -437,6 +473,7 @@ export class QuestionService {
       processingState: "QUESTION_GENERATED",
       followUp: true,
       isFollowUp: true,
+      subIndex: "b",
       parentTurnId: previousTurn._id,
     });
 
@@ -456,8 +493,10 @@ export class QuestionService {
       difficulty: turn.difficulty,
       questionType: turn.questionType,
       competency: turn.competency,
+      concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
       isFollowUp: true,
+      subIndex: "b",
       parentTurnId: previousTurn._id.toString(),
     };
 
@@ -474,8 +513,10 @@ export class QuestionService {
       difficulty: turn.difficulty,
       questionType: turn.questionType,
       competency: turn.competency,
+      concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
       isFollowUp: true,
+      subIndex: "b",
       parentTurnId: previousTurn._id.toString(),
     };
   }

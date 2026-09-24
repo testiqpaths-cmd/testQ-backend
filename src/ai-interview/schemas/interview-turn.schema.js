@@ -199,6 +199,20 @@ const interviewTurnSchema = new Schema(
       ref: "InterviewTurn",
       default: null,
     },
+    concept: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    depthLevel: {
+      type: String,
+      enum: ["SHALLOW", "ADEQUATE", "DEEP", null],
+      default: null,
+    },
+    subIndex: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,

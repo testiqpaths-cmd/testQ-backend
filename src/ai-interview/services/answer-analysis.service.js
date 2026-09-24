@@ -133,7 +133,8 @@ export class AnswerAnalysisService {
         completenessScore: turn.completenessScore,
         conceptsDemonstrated: turn.conceptsDemonstrated || [],
         conceptsMissing: turn.conceptsMissing || [],
-        followUpAllowed: Boolean(turn.followUp),
+        depthLevel: turn.depthLevel || "ADEQUATE",
+        followUpAllowed: Boolean(turn.followUpAllowed),
         feedbackSummary: turn.feedbackSummary,
         interviewState: session.interviewState,
       };
@@ -157,6 +158,8 @@ export class AnswerAnalysisService {
     let difficultyRec = turn.difficulty;
     let topicContinuation = true;
 
+    let depthLevel = "ADEQUATE";
+
     if (isNoResponse) {
       // The candidate said/typed nothing before the response timer ran
       // out. Score it as a non-answer — no follow-up, drop difficulty a
@@ -169,6 +172,7 @@ export class AnswerAnalysisService {
       correctness = 0;
       completeness = 0;
       confidence = 0;
+      depthLevel = "SHALLOW";
       conceptsDemonstrated = [];
       conceptsMissing = [turn.topic];
       feedbackSummary = "No answer was given before the response time limit.";
@@ -185,6 +189,7 @@ export class AnswerAnalysisService {
       correctness = 0;
       completeness = 0;
       confidence = 100; // Certain in not knowing
+      depthLevel = "SHALLOW";
       conceptsDemonstrated = [];
       conceptsMissing = [turn.topic];
       feedbackSummary = "Explicit knowledge gap expressed. Moving to next concept.";
@@ -208,6 +213,7 @@ export class AnswerAnalysisService {
       correctness = aiResult.correctnessScore ?? 60;
       completeness = aiResult.completenessScore ?? 50;
       confidence = aiResult.confidence ?? 70;
+      depthLevel = aiResult.depthLevel || (completeness < 70 ? "SHALLOW" : "ADEQUATE");
       conceptsDemonstrated = aiResult.conceptsDemonstrated || [];
       conceptsMissing = aiResult.conceptsMissing || [];
       feedbackSummary = aiResult.feedbackSummary || "Candidate answer evaluated.";
@@ -228,13 +234,17 @@ export class AnswerAnalysisService {
     const maxGlobalFollowUps = plan?.maxGlobalFollowUps ?? 3;
     const isAlreadyFollowUp = Boolean(turn.parentTurnId || (turn.followUp && maxFollowUpsPerQ <= 1));
 
+    const isQualityCandidateForFollowUp =
+      finalStatus === AnswerStatus.PARTIAL ||
+      (finalStatus === AnswerStatus.ACCURATE && (depthLevel === "SHALLOW" || completeness < 75 || aiFollowUpRecommended));
+
     if (
       !isAlreadyFollowUp &&
       !isExplicitGap &&
-      finalStatus === AnswerStatus.PARTIAL &&
+      isQualityCandidateForFollowUp &&
       aiFollowUpRecommended &&
-      session.followUpCount < maxFollowUpsPerQ &&
-      session.globalFollowUpCount < maxGlobalFollowUps &&
+      (session.followUpCount || 0) < maxFollowUpsPerQ &&
+      (session.globalFollowUpCount || 0) < maxGlobalFollowUps &&
       session.timeRemaining > 120 &&
       (session.candidatePerformance?.consecutiveKnowledgeGapsInTopic || 0) < 2
     ) {
@@ -249,6 +259,7 @@ export class AnswerAnalysisService {
     turn.correctnessScore = correctness;
     turn.completenessScore = completeness;
     turn.confidence = confidence;
+    turn.depthLevel = depthLevel;
     turn.conceptsDemonstrated = conceptsDemonstrated;
     turn.conceptsMissing = conceptsMissing;
     turn.feedbackSummary = feedbackSummary;

@@ -34,20 +34,28 @@ export class AiService {
   }
 
   /**
-   * Runs `fn(attempt)` once, then once more on a transient error (503, 429,
-   * timeout). Each attempt is logged to AiCallLog via `fn` itself.
+   * Runs `fn(attempt)` with up to 2 retries (3 total attempts) on transient
+   * errors (503, 429, timeout) using exponential backoff with jitter.
    */
-  async withRetry(fn) {
-    try {
-      return await fn(1);
-    } catch (err) {
-      const status = err.response?.status;
-      const retryable =
-        status === 503 || status === 429 || err.code === "ECONNABORTED" || /timeout/i.test(err.message || "");
-      if (!retryable) throw err;
-      await new Promise((r) => setTimeout(r, 800));
-      return fn(2);
+  async withRetry(fn, maxAttempts = 3) {
+    let lastErr;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        return await fn(attempt);
+      } catch (err) {
+        lastErr = err;
+        const status = err.response?.status;
+        const retryable =
+          status === 503 || status === 429 || err.code === "ECONNABORTED" || /timeout/i.test(err.message || "");
+        if (!retryable || attempt === maxAttempts) {
+          throw err;
+        }
+        const backoffMs = 800 * attempt + Math.floor(Math.random() * 400);
+        logger.warn(`AI request transient error (${status || err.code}), retrying attempt ${attempt + 1}/${maxAttempts} after ${backoffMs}ms...`);
+        await new Promise((r) => setTimeout(r, backoffMs));
+      }
     }
+    throw lastErr;
   }
 
   /**
@@ -91,7 +99,11 @@ export class AiService {
     const payload = {
       system_instruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: userPrompt }] }],
-      generationConfig: { temperature: 0.3, response_mime_type: "application/json" },
+      generationConfig: {
+        temperature: 0.3,
+        response_mime_type: "application/json",
+        max_output_tokens: 600,
+      },
     };
 
     const start = Date.now();
@@ -141,6 +153,7 @@ export class AiService {
       ],
       response_format: { type: "json_object" },
       temperature: 0.3,
+      max_tokens: 600,
     };
 
     const start = Date.now();

@@ -12,10 +12,13 @@ export const aiAnswerAnalysisSchema = z.object({
   correctnessScore: z.coerce.number().min(0).max(100).default(50),
   completenessScore: z.coerce.number().min(0).max(100).default(50),
   confidence: z.coerce.number().min(0).max(100).default(60),
+  depthLevel: z.enum(["SHALLOW", "ADEQUATE", "DEEP"]).default("ADEQUATE"),
   conceptsDemonstrated: z.array(z.string()).default([]),
   conceptsMissing: z.array(z.string()).default([]),
+  isExplicitGap: z.boolean().default(false),
   feedbackSummary: z.string().default("Candidate response analyzed."),
   followUpRecommended: z.boolean().default(false),
+  followUpReason: z.string().optional().default(""),
   difficultyRecommendation: z
     .enum(["EASY", "MEDIUM", "HARD"])
     .nullable()
@@ -51,11 +54,11 @@ export class AiAnswerAnalysisService {
     experienceLevel = "1-3 Years",
     interviewId = null,
   }) {
-    const systemPrompt = `You are an expert technical interviewer evaluating a candidate's answer for the role of ${role} (${experienceLevel}).
+    const systemPrompt = `You are an expert technical interviewer for TestQ evaluating a candidate's answer for the role of ${role} (${experienceLevel}).
 
 STRICT TASK:
 Analyze the candidate's answer for the question asked.
-Assess technical correctness, relevance, completeness, and demonstrated understanding.
+Assess technical correctness, relevance, completeness, depth, and whether a follow-up question is warranted.
 
 STRICT JSON OUTPUT FORMAT:
 {
@@ -64,20 +67,25 @@ STRICT JSON OUTPUT FORMAT:
   "correctnessScore": 0-100,
   "completenessScore": 0-100,
   "confidence": 0-100,
+  "depthLevel": "SHALLOW" | "ADEQUATE" | "DEEP",
   "conceptsDemonstrated": ["concept1", "concept2"],
   "conceptsMissing": ["concept3"],
+  "isExplicitGap": false,
   "feedbackSummary": "Brief constructive technical feedback",
   "followUpRecommended": true | false,
+  "followUpReason": "Why a follow-up should or should not be asked",
   "difficultyRecommendation": "EASY" | "MEDIUM" | "HARD" | null,
   "topicContinuationRecommended": true | false
 }
 
 GUIDELINES:
-- "ACCURATE": Correct technical explanation covering the core aspects.
-- "PARTIAL": Demonstrates some understanding but incomplete or minor inaccuracies. (followUpRecommended may be true).
-- "KNOWLEDGE_GAP": Candidate explicitly expresses not knowing or having no experience. (followUpRecommended MUST be false).
-- "INCORRECT": Factual errors or fundamentally flawed technical explanation.
-- Return ONLY valid JSON.`;
+- "ACCURATE": Core technical points are correct.
+  - If the answer is accurate but brief/high-level/shallow, or mentions a technical claim without elaboration, mark depthLevel: "SHALLOW" and set followUpRecommended: true.
+  - If the answer is comprehensive and solid, mark depthLevel: "DEEP" and set followUpRecommended: false.
+- "PARTIAL": Demonstrates some understanding but incomplete, missing key mechanisms, or lacks depth. Set depthLevel: "SHALLOW", followUpRecommended: true.
+- "KNOWLEDGE_GAP": Candidate explicitly expresses not knowing, having no experience, or passes (e.g. "I don't know", "not sure", "haven't used this"). Mark isExplicitGap: true, followUpRecommended MUST be false.
+- "INCORRECT": Factual errors or fundamentally flawed technical explanation. followUpRecommended: false.
+- Return ONLY valid JSON matching the format.`;
 
     const userPrompt = `Question: "${question}"
 Topic: "${topic}"
@@ -94,7 +102,7 @@ Candidate Answer: "${candidateAnswer}"`;
       if (rawAiResponse) {
         const validated = aiAnswerAnalysisSchema.safeParse(rawAiResponse);
         if (validated.success) {
-          logger.info(`AI analyzed candidate answer (status: ${validated.data.answerStatus})`);
+          logger.info(`AI analyzed candidate answer (status: ${validated.data.answerStatus}, depth: ${validated.data.depthLevel}, followUp: ${validated.data.followUpRecommended})`);
           return validated.data;
         } else {
           logger.warn(
@@ -127,6 +135,7 @@ Candidate Answer: "${candidateAnswer}"`;
     let correctness = 60;
     let completeness = 50;
     let relevance = 75;
+    let depth = "ADEQUATE";
     let followUp = false;
 
     if (wordCount < 4) {
@@ -134,16 +143,19 @@ Candidate Answer: "${candidateAnswer}"`;
       correctness = 20;
       completeness = 20;
       relevance = 40;
+      depth = "SHALLOW";
     } else if (wordCount >= 25) {
       status = AnswerStatus.ACCURATE;
       correctness = 80;
       completeness = 75;
       relevance = 85;
+      depth = "DEEP";
     } else {
-      // Moderate length answer (10-24 words)
+      // Moderate length answer (4-24 words)
       status = AnswerStatus.PARTIAL;
       correctness = 65;
       completeness = 60;
+      depth = "SHALLOW";
       followUp = true;
     }
 
@@ -153,13 +165,16 @@ Candidate Answer: "${candidateAnswer}"`;
       correctnessScore: correctness,
       completenessScore: completeness,
       confidence: 70,
+      depthLevel: depth,
       conceptsDemonstrated: [topic],
       conceptsMissing: [],
+      isExplicitGap: false,
       feedbackSummary:
         status === AnswerStatus.ACCURATE
           ? "Good explanation addressing the question."
           : "Answer demonstrates basic understanding but lacks full depth.",
       followUpRecommended: followUp,
+      followUpReason: followUp ? "Answer is concise; follow up for depth" : "Sufficient answer length",
       difficultyRecommendation: difficulty,
       topicContinuationRecommended: true,
     };
