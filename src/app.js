@@ -8,7 +8,7 @@ import { errorMiddleware } from "./common/middlewares/error.middleware.js";
 import { requestLogger } from "./common/middlewares/logger.middleware.js";
 import logger from "./config/logger.js";
 import { corsOptions } from "./config/cors.js";
-
+import phoneDetectionRoutes from "./routes/phoneDetection.routes.js";
 
 const app = express();
 
@@ -54,7 +54,7 @@ app.get("/", (req, res) => {
 // Error middleware (after routes)
 app.use(errorMiddleware);
 
-
+app.use("/api", phoneDetectionRoutes);
 
 
 
