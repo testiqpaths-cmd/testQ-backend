@@ -168,7 +168,7 @@ export class QuestionService {
           questionsAsked: 1,
           knowledgeGaps: 0,
           coveragePercentage: 100,
-          knowledgeLevel: "HIGH",
+          knowledgeLevel: "NONE",
           status: "IN_PROGRESS",
         });
       }
