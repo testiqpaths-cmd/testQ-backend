@@ -229,16 +229,23 @@ export class AnswerAnalysisService {
     // - Never exceed maxGlobalFollowUps
     // - Never follow up if timeRemaining < 120s
     // - Never follow up if consecutive knowledge gaps in topic >= 2
+    // - Never follow up on introduction turn
     let followUpAllowed = false;
     const maxFollowUpsPerQ = plan?.maxFollowUpsPerQuestion ?? 1;
     const maxGlobalFollowUps = plan?.maxGlobalFollowUps ?? 3;
     const isAlreadyFollowUp = Boolean(turn.parentTurnId || (turn.followUp && maxFollowUpsPerQ <= 1));
+
+    const isIntro =
+      turn.turnNumber === 1 ||
+      (turn.topic && turn.topic.toUpperCase() === "INTRODUCTION") ||
+      turn.concept === "Introduction";
 
     const isQualityCandidateForFollowUp =
       finalStatus === AnswerStatus.PARTIAL ||
       (finalStatus === AnswerStatus.ACCURATE && (depthLevel === "SHALLOW" || completeness < 75 || aiFollowUpRecommended));
 
     if (
+      !isIntro &&
       !isAlreadyFollowUp &&
       !isExplicitGap &&
       isQualityCandidateForFollowUp &&

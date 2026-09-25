@@ -57,7 +57,7 @@ const interviewTurnSchema = new Schema(
     // QuestionBank, or the small hardcoded fallback set.
     questionSource: {
       type: String,
-      enum: ["ai_generated", "bank", "fallback"],
+      enum: ["ai_generated", "bank", "fallback", "predefined"],
       default: "ai_generated",
     },
     questionBankId: {

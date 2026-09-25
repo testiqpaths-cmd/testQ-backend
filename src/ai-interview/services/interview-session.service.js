@@ -463,12 +463,8 @@ export class InterviewSessionService {
     session.timeRemaining = session.duration * 60;
     session.interviewState = InterviewState.IN_PROGRESS;
 
-    // Initialize current topic
-    const firstTopic =
-      (session.topicOrder && session.topicOrder[0]) ||
-      (session.allowedTopics && session.allowedTopics[0]) ||
-      "TECHNICAL_FUNDAMENTALS";
-    session.currentTopic = firstTopic;
+    // Initialize current topic for introduction
+    session.currentTopic = "INTRODUCTION";
 
     // Retrieve internal plan
     const plan = await InterviewPlan.findById(session.planId);

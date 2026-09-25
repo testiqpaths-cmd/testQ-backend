@@ -98,75 +98,33 @@ export class QuestionService {
       );
     }
 
-    // Determine current active topic
-    const activeTopic =
-      session.currentTopic ||
-      (session.topicOrder && session.topicOrder[0]) ||
-      (session.allowedTopics && session.allowedTopics[0]) ||
-      "TECHNICAL_FUNDAMENTALS";
-
-    // Validate topic is in allowedTopics
-    if (
-      session.allowedTopics &&
-      session.allowedTopics.length > 0 &&
-      !session.allowedTopics.includes(activeTopic)
-    ) {
-      throw new ApiError(400, `Topic ${activeTopic} is not in session allowed topics.`);
-    }
-
     // Check duration expiration
     if (session.timeRemaining <= 0) {
       throw new ApiError(400, "Interview duration has expired.");
     }
 
-    // Determine baseline difficulty
-    const targetDifficulty = this.determineBaselineDifficulty(
-      plan?.difficulty || session.difficulty,
-      1
-    );
+    // 2. The first question of every interview is ALWAYS the introductory question
+    const introQuestionText =
+      "Tell me about yourself, your background, and what you've been working on recently.";
+    const finalTopic = "INTRODUCTION";
+    const finalDifficulty = Difficulty.EASY;
+    const finalConcept = "Introduction";
+    const finalCompetency = "Communication & Background";
+    const finalQuestionType = "BEHAVIORAL";
 
-    // 2. Delegate to AI Intelligence Layer (with built-in fallback +
-    //    cross-interview semantic dedup)
-    const { aiOutput, questionEmbedding } = await this.generateWithDedup(
-      (exclude) =>
-        this.ai.generateQuestion({
-          role: session.role,
-          experienceLevel: session.experienceLevel,
-          topic: activeTopic,
-          difficulty: targetDifficulty,
-          previousQuestions: exclude,
-          conceptsAlreadyTested: [],
-          resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
-          interviewType: session.interviewTypes?.[0] || "technical",
-          interviewId: session.interviewId,
-        }),
-      { userId: session.userId, interviewId: session.interviewId, topic: activeTopic, sessionQuestions: [] }
-    );
-
-    // 3. Backend Verification of AI Output
-    if (!aiOutput || !aiOutput.question || !aiOutput.question.trim()) {
-      throw new ApiError(500, "Failed to generate valid interview question.");
-    }
-
-    // Normalize and verify topic
-    const finalTopic = String(aiOutput.topic || activeTopic).toUpperCase();
-    const finalDifficulty = String(aiOutput.difficulty || targetDifficulty).toUpperCase();
-    const finalConcept = aiOutput.concept || null;
-
-    // 4. Persist InterviewTurn in Database
+    // 3. Persist InterviewTurn in Database
     const turn = new InterviewTurn({
       sessionId: session._id,
       interviewId: session.interviewId,
       turnNumber: 1,
       topic: finalTopic,
-      question: aiOutput.question.trim(),
+      question: introQuestionText,
       concept: finalConcept,
-      questionEmbedding: questionEmbedding || undefined,
-      questionType: aiOutput.questionType || "TECHNICAL",
+      questionType: finalQuestionType,
       difficulty: finalDifficulty,
-      competency: aiOutput.competency || "Technical Knowledge",
-      questionSource: aiOutput.questionSource || "ai_generated",
-      questionBankId: aiOutput.questionBankId || null,
+      competency: finalCompetency,
+      questionSource: "predefined",
+      questionBankId: null,
       questionTimestamp: new Date(),
     });
 
@@ -177,7 +135,7 @@ export class QuestionService {
       interviewId: session.interviewId,
     });
 
-    // 5. Update Session State (Backend Authority)
+    // 4. Update Session State (Backend Authority)
     session.currentTopic = finalTopic;
     session.currentQuestion = {
       id: turn._id.toString(),
@@ -205,12 +163,12 @@ export class QuestionService {
         session.coverageState[topicIndex].questionsAsked = 1;
         session.coverageState[topicIndex].status = "IN_PROGRESS";
       } else {
-        session.coverageState.push({
+        session.coverageState.unshift({
           topic: finalTopic,
           questionsAsked: 1,
           knowledgeGaps: 0,
-          coveragePercentage: 10,
-          knowledgeLevel: "NONE",
+          coveragePercentage: 100,
+          knowledgeLevel: "HIGH",
           status: "IN_PROGRESS",
         });
       }
