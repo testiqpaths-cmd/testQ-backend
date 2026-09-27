@@ -45,6 +45,16 @@ const userSchema = new Schema(
       required: true,
     },
 
+    // false for accounts auto-created via Google/GitHub OAuth, where the
+    // password field holds a random, unguessable hash the user never sees —
+    // distinguishes "has a password they actually know" from "merely has
+    // some hash in the password field," which register()-created accounts
+    // and password-having OAuth-linked accounts both otherwise share.
+    hasSetPassword: {
+      type: Boolean,
+      default: true,
+    },
+
     role: {
       type: String,
       enum: ["STUDENT", "ORGANIZATION", "IQPATH_ADMIN"],

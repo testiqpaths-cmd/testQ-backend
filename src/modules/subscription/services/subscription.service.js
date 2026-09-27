@@ -64,6 +64,62 @@ export const getUserSubscription = async (userId) => {
 };
 
 /**
+ * Single source of truth for "does this user have paid access" — shared by
+ * the cross-app SSO verify endpoint (resume builder) and any future internal
+ * gate, so both apply the exact same rule. Deliberately returns the plan
+ * name/expiry alongside the boolean since callers that need to reject also
+ * want to explain why (e.g. "renew your plan" vs "you're not logged in").
+ *
+ * Org accounts and org-affiliated students are treated as having access,
+ * same "unmetered, not unpaid" rule getUserSubscription already applies to
+ * them elsewhere — an org seat is a paid seat, just not metered per-student.
+ */
+export const getPaidAccessStatus = async (userId) => {
+  const user = await User.findById(userId).select("role organizationId status");
+  if (!user || user.status === "SUSPENDED") {
+    return { hasActivePaidAccess: false, planName: null, subscriptionExpiresAt: null };
+  }
+
+  const isOrganization = user.role === "ORGANIZATION";
+  const isOrgAffiliatedStudent = user.role === "STUDENT" && Boolean(user.organizationId);
+  if (isOrganization || isOrgAffiliatedStudent) {
+    return { hasActivePaidAccess: true, planName: "Organization", subscriptionExpiresAt: null };
+  }
+
+  const sub = await getUserSubscription(userId);
+  if (!sub || sub.status !== "ACTIVE") {
+    return { hasActivePaidAccess: false, planName: sub?.planId?.name ?? null, subscriptionExpiresAt: sub?.expiresAt ?? null };
+  }
+  if (sub.expiresAt && sub.expiresAt <= new Date()) {
+    return { hasActivePaidAccess: false, planName: sub.planId.name, subscriptionExpiresAt: sub.expiresAt };
+  }
+
+  // Access is governed purely by the RESUME_BUILDER PlanFeature toggle
+  // (Subscriptions > Plans > Features in the admin panel) — an admin can
+  // grant it to any plan, including the free tier, or revoke it from a paid
+  // one. There is deliberately no "isPaidPlan" pre-condition gating this:
+  // an earlier version required the plan to be non-default/priced>0 before
+  // even checking the feature flag, which silently ignored an admin
+  // enabling RESUME_BUILDER on the free plan. Fails CLOSED (unlike
+  // checkFeatureAccess's fail-open default elsewhere in this file) if the
+  // feature or its plan mapping doesn't exist — this gate protects paid
+  // content, so "not configured" must mean "no access", not "unlimited
+  // access".
+  const feature = await Feature.findOne({ key: "RESUME_BUILDER", active: true });
+  let resumeBuilderEnabled = false;
+  if (feature) {
+    const planFeature = await PlanFeature.findOne({ planId: sub.planId._id, featureId: feature._id });
+    resumeBuilderEnabled = Boolean(planFeature?.enabled);
+  }
+
+  return {
+    hasActivePaidAccess: resumeBuilderEnabled,
+    planName: sub.planId.name,
+    subscriptionExpiresAt: sub.expiresAt,
+  };
+};
+
+/**
  * Ensures feature reset logic is applied based on resetType
  */
 const handleResetLogic = async (usageRecord, resetType) => {

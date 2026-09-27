@@ -1,6 +1,6 @@
 import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
-import { computeTestStatus } from "./utils/status.js";
+import { computeTestStatus, hasTestEnded } from "./utils/status.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 import { isTestMandatoryForStudent } from "./utils/visibility.js";
 import UserModel from "../../models/user.model.js";
@@ -59,10 +59,15 @@ export async function getTest(req, res) {
     if (req.user?.role === "STUDENT") {
       const User = (await import("../../modules/auth/models/User.model.js")).default;
       const dbUser = await User.findById(req.user._id || req.user.id).select("createdAt");
-      if (dbUser && req.test?.createdAt && new Date(req.test.createdAt) < new Date(dbUser.createdAt)) {
+      if (
+        dbUser &&
+        req.test?.createdAt &&
+        new Date(req.test.createdAt) < new Date(dbUser.createdAt) &&
+        hasTestEnded(req.test)
+      ) {
         return res.status(403).json({
           success: false,
-          message: "You cannot access a test created before your registration date",
+          message: "This test ended before your registration date",
         });
       }
     }
@@ -241,9 +246,18 @@ export const getAssignedTests = async (req, res) => {
     // same as the original per-test `.findOne().sort({submittedAt:-1})`.
     for (const attempt of relevantAttempts) {
       const key = String(attempt.testId);
-      attemptsCountByTest.set(key, (attemptsCountByTest.get(key) || 0) + 1);
-      if (!latestAttemptIdByTest.has(key) && latestAttemptStatuses.has(attempt.status)) {
-        latestAttemptIdByTest.set(key, attempt._id);
+      // Only a real, consumed attempt (submitted/evaluated/missed) counts
+      // against maxAttempts — an IN_PROGRESS or PENDING attempt isn't "made"
+      // yet. Without this filter, a freshly-created IN_PROGRESS attempt
+      // (e.g. right after startTestAttemptAPI, before the student has even
+      // finished identity verification) immediately satisfies
+      // maxAttempts<=1 below and flips status to COMPLETED — steering the
+      // UI to "View Results" for a test that was never actually started.
+      if (latestAttemptStatuses.has(attempt.status)) {
+        attemptsCountByTest.set(key, (attemptsCountByTest.get(key) || 0) + 1);
+        if (!latestAttemptIdByTest.has(key)) {
+          latestAttemptIdByTest.set(key, attempt._id);
+        }
       }
     }
 
