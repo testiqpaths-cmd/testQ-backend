@@ -463,12 +463,8 @@ export class InterviewSessionService {
     session.timeRemaining = session.duration * 60;
     session.interviewState = InterviewState.IN_PROGRESS;
 
-    // Initialize current topic
-    const firstTopic =
-      (session.topicOrder && session.topicOrder[0]) ||
-      (session.allowedTopics && session.allowedTopics[0]) ||
-      "TECHNICAL_FUNDAMENTALS";
-    session.currentTopic = firstTopic;
+    // Initialize current topic for introduction
+    session.currentTopic = "INTRODUCTION";
 
     // Retrieve internal plan
     const plan = await InterviewPlan.findById(session.planId);
@@ -550,16 +546,18 @@ export class InterviewSessionService {
 
     // 4. Find the existing InterviewTurn created in Phase 2
     let turn = null;
-    if (session.currentQuestion.id || session.currentQuestion.questionId) {
+    const targetQId = payload.questionId || payload.turnId;
+    if (targetQId) {
+      turn = await InterviewTurn.findById(targetQId);
+    }
+
+    if (!turn && (session.currentQuestion?.id || session.currentQuestion?.questionId)) {
       const qId = session.currentQuestion.id || session.currentQuestion.questionId;
       turn = await InterviewTurn.findById(qId);
     }
 
     if (!turn) {
-      turn = await InterviewTurn.findOne({
-        sessionId: session._id,
-        turnNumber: session.questionCount,
-      });
+      turn = await InterviewTurn.findOne({ sessionId: session._id }).sort({ turnNumber: -1 });
     }
 
     if (!turn) {
@@ -792,6 +790,7 @@ export class InterviewSessionService {
         nextAction: InterviewAction.FOLLOW_UP,
         interviewState: session.interviewState,
         currentQuestion: newQuestion,
+        isFollowUp: true,
         followUpCount: session.followUpCount,
         globalFollowUpCount: session.globalFollowUpCount,
         timeRemaining: session.timeRemaining,
@@ -837,6 +836,7 @@ export class InterviewSessionService {
         switchedTopic: decision.nextTopic,
         interviewState: session.interviewState,
         currentQuestion: newQuestion,
+        isFollowUp: false,
         timeRemaining: session.timeRemaining,
         topic: session.currentTopic,
         topicQuestionCount: session.topicQuestionCount,
@@ -865,6 +865,7 @@ export class InterviewSessionService {
       nextAction: InterviewAction.ASK_QUESTION,
       interviewState: session.interviewState,
       currentQuestion: newQuestion,
+      isFollowUp: false,
       timeRemaining: session.timeRemaining,
       topic: session.currentTopic,
       topicQuestionCount: session.topicQuestionCount,

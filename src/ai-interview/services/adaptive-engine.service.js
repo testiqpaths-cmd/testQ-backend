@@ -63,12 +63,48 @@ export class AdaptiveEngineService {
 
     // 4. Strict Knowledge Gap Gate
     // STRICT MANDATE: Explicit knowledge gaps NEVER permit a follow-up or defense request.
-    const isKnowledgeGap = lastTurn?.answerStatus === AnswerStatus.KNOWLEDGE_GAP;
+    const normStatus = lastTurn?.answerStatus || lastTurn?.status;
+    const isKnowledgeGap =
+      normStatus === AnswerStatus.KNOWLEDGE_GAP ||
+      lastTurn?.isExplicitGap === true;
+
+    // 4b. Introduction Turn Transition Gate
+    // If the last turn was the introductory question (Turn 1 or topic INTRODUCTION),
+    // we never allow follow-up and immediately switch to the first planned topic.
+    const isIntro =
+      lastTurn?.turnNumber === 1 ||
+      (lastTurn?.topic && lastTurn.topic.toUpperCase() === "INTRODUCTION") ||
+      (session.currentTopic && session.currentTopic.toUpperCase() === "INTRODUCTION");
+
+    if (isIntro) {
+      const candidateTopics = (
+        session.topicOrder?.length ? session.topicOrder : session.allowedTopics || []
+      ).filter((t) => t && t.toUpperCase() !== "INTRODUCTION");
+
+      const nextTopic =
+        candidateTopics[0] ||
+        this.getNextTopic(session, plan) ||
+        "TECHNICAL_FUNDAMENTALS";
+
+      const nextDifficulty = this.determineBaselineDifficulty(
+        plan?.difficulty || session.difficulty
+      );
+
+      logger.info(
+        `Session ${session.interviewId}: Introduction turn completed. Switching to first planned topic: ${nextTopic} (difficulty: ${nextDifficulty}).`
+      );
+      return {
+        action: InterviewAction.SWITCH_TOPIC,
+        nextTopic,
+        difficulty: nextDifficulty,
+        reason: `Introduction completed; transitioning to first interview topic: ${nextTopic}.`,
+      };
+    }
 
     // 5. Follow-Up Authorization Gate
     // Rules for FOLLOW_UP:
-    // - Answer must be PARTIAL (not ACCURATE, not KNOWLEDGE_GAP, not INCORRECT)
-    // - Follow-up must be authorized (turn.followUp === true)
+    // - Answer must be PARTIAL or shallow ACCURATE (not KNOWLEDGE_GAP, not INCORRECT)
+    // - Follow-up must be authorized (turn.followUp === true or turn.followUpAllowed === true)
     // - Follow-up count on current question < maxFollowUpsPerQuestion (strict 1)
     // - Global follow-up count < maxGlobalFollowUps (default 3)
     // - Time remaining > 120s
@@ -86,10 +122,17 @@ export class AdaptiveEngineService {
         ? Boolean(lastTurn.followUpAllowed)
         : Boolean(lastTurn?.followUp);
 
+    const isQualityCandidateForFollowUp =
+      normStatus === AnswerStatus.PARTIAL ||
+      (normStatus === AnswerStatus.ACCURATE &&
+        (lastTurn?.depthLevel === "SHALLOW" ||
+          (lastTurn?.completenessScore != null && lastTurn.completenessScore < 75) ||
+          Boolean(lastTurn?.followUpRecommended)));
+
     const canFollowUp =
       !isAlreadyFollowUp &&
       !isKnowledgeGap &&
-      lastTurn?.answerStatus === AnswerStatus.PARTIAL &&
+      isQualityCandidateForFollowUp &&
       followUpApproved &&
       (session.followUpCount || 0) < maxFollowUpsPerQ &&
       (session.globalFollowUpCount || 0) < maxGlobalFollowUps &&
@@ -100,11 +143,15 @@ export class AdaptiveEngineService {
       logger.info(
         `Session ${session.interviewId}: Follow-up authorized for turn ${session.questionCount} on topic ${session.currentTopic}.`
       );
+      const reason =
+        lastTurn?.answerStatus === AnswerStatus.PARTIAL
+          ? "Candidate demonstrated partial understanding; probing missing concepts with follow-up."
+          : "Candidate provided accurate but high-level explanation; probing deeper implementation details.";
       return {
         action: InterviewAction.FOLLOW_UP,
         topic: session.currentTopic,
         difficulty: lastTurn?.difficulty || Difficulty.EASY,
-        reason: "Candidate demonstrated partial understanding; probing missing concepts with follow-up.",
+        reason,
       };
     }
 
@@ -226,6 +273,9 @@ export class AdaptiveEngineService {
         ? session.topicOrder
         : session.allowedTopics) || [];
 
+    // Exclude INTRODUCTION from ever being chosen as a subsequent interview topic
+    topicOrder = topicOrder.filter((t) => t && t.toUpperCase() !== "INTRODUCTION");
+
     if (topicOrder.length === 0) return null;
 
     // Phase layer: once the current phase is done, restrict selection to
@@ -327,6 +377,15 @@ export class AdaptiveEngineService {
 
     // Default fallback
     return currentDiff || Difficulty.EASY;
+  }
+
+  /**
+   * Baseline difficulty for topic initialization.
+   */
+  determineBaselineDifficulty(planDifficulty) {
+    const norm = (planDifficulty || Difficulty.ADAPTIVE).toUpperCase();
+    if (norm === Difficulty.ADAPTIVE) return Difficulty.EASY;
+    return norm;
   }
 }
 

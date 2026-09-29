@@ -57,7 +57,7 @@ const interviewTurnSchema = new Schema(
     // QuestionBank, or the small hardcoded fallback set.
     questionSource: {
       type: String,
-      enum: ["ai_generated", "bank", "fallback"],
+      enum: ["ai_generated", "bank", "fallback", "predefined"],
       default: "ai_generated",
     },
     questionBankId: {
@@ -197,6 +197,20 @@ const interviewTurnSchema = new Schema(
     parentTurnId: {
       type: Types.ObjectId,
       ref: "InterviewTurn",
+      default: null,
+    },
+    concept: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+    depthLevel: {
+      type: String,
+      enum: ["SHALLOW", "ADEQUATE", "DEEP", null],
+      default: null,
+    },
+    subIndex: {
+      type: String,
       default: null,
     },
   },
