@@ -59,7 +59,7 @@ export const getSeriesStats = async (req, res) => {
 
 export const createSeries = async (req, res, next) => {
   try {
-    const { title, description, visibility, allowedOrganizations, allowedStudents, tests = [], plannedTestCount } = req.body;
+    const { title, description, visibility, allowedOrganizations, allowedStudents, tests = [], plannedTestCount, category, companyId } = req.body;
 
     if (!title?.trim()) {
       return res
@@ -93,6 +93,8 @@ export const createSeries = async (req, res, next) => {
         allowedStudents,
         tests: cleanedTests,
         plannedTestCount: cleanedPlannedTestCount,
+        category: category || "GENERAL",
+        companyId: companyId && mongoose.Types.ObjectId.isValid(companyId) ? companyId : null,
       },
       req.user
     );

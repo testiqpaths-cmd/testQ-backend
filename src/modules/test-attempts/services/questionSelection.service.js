@@ -31,9 +31,10 @@ const buildFilters = (test) => {
       filters.topicId = { $in: test.topicIds };
     }
 
-    // ✅ Company-wise: combined with subject/topic via AND — every filter
-    // here is its own top-level key, so Mongo requires all of them to match.
-    if (Array.isArray(test.companyIds) && test.companyIds.length) {
+    // ✅ Company-wise: support singular companyId or companyIds array
+    if (test.companyId) {
+      filters.companyIds = { $in: [test.companyId] };
+    } else if (Array.isArray(test.companyIds) && test.companyIds.length) {
       filters.companyIds = { $in: test.companyIds };
     }
   }
@@ -72,12 +73,20 @@ const toSafeQuestion = (question, order) => ({
 });
 
 export const selectAttemptQuestions = async (test) => {
-  const filters = buildFilters(test);
   const desiredCount = Math.max(1, Number(test.totalQuestions) || 0);
+  let questions = [];
 
-  const questions = await Question.find(filters)
-    .select("_id questionText type options correctAnswer imageUrl")
-    .lean();
+  // If the test has pre-selected frozen questions, use them directly
+  if (Array.isArray(test.questions) && test.questions.length > 0) {
+    questions = await Question.find({ _id: { $in: test.questions } })
+      .select("_id questionText type options correctAnswer imageUrl")
+      .lean();
+  } else {
+    const filters = buildFilters(test);
+    questions = await Question.find(filters)
+      .select("_id questionText type options correctAnswer imageUrl")
+      .lean();
+  }
 
   const selectedQuestions = shuffle(questions).slice(0, Math.min(desiredCount, questions.length));
 

@@ -4,16 +4,27 @@ import Company from "../../models/company.model.js";
 import Question from "../../models/question.model.js";
 import Test from "../../models/test.model.js";
 
+import { generateSlug } from "../../models/company.model.js";
+
 // Read-only list for the Company-wise Test dropdown — reuses the existing
 // Company model (see src/models/company.model.js), same as
 // subject-topic.controller.js's getAllSubjects for Subjects.
 export const getAllCompanies = asyncHandler(async (req, res) => {
   const companies = await Company.find({ isActive: true })
-    .select("name description logo isActive")
+    .select("name slug description logo isActive")
     .sort({ name: 1 })
     .lean();
 
   res.json({ success: true, data: companies });
+});
+
+export const getCompanyBySlug = asyncHandler(async (req, res) => {
+  const { slug } = req.params;
+  const company = await Company.findOne({ slug, isActive: true }).lean();
+  if (!company) {
+    throw new ApiError(404, "Company not found");
+  }
+  res.json({ success: true, data: company });
 });
 
 export const createCompany = asyncHandler(async (req, res) => {
@@ -51,7 +62,10 @@ export const updateCompany = asyncHandler(async (req, res) => {
   }
 
   const update = {};
-  if (name !== undefined) update.name = name;
+  if (name !== undefined) {
+    update.name = name;
+    update.slug = generateSlug(name);
+  }
   if (description !== undefined) update.description = description;
   if (logo !== undefined) update.logo = logo || null;
   if (isActive !== undefined) update.isActive = isActive;

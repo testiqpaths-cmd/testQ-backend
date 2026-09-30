@@ -32,9 +32,15 @@ const toIdArray = (...values) =>
 const normalizeSeriesTestPayload = (data) => {
   const subjectIds = toIdArray(data.subjectIds, data.subjectId);
   const topicIds = toIdArray(data.topicIds, data.topicId);
+  const companyIds = toIdArray(data.companyIds, data.companyId);
 
-  if (data.questionSource !== "EXCEL" && !subjectIds.length) {
-    throw new Error("At least one subject is required");
+  if (
+    data.questionSource !== "EXCEL" &&
+    !subjectIds.length &&
+    !companyIds.length &&
+    (!data.questions || !data.questions.length)
+  ) {
+    throw new Error("At least one subject or company is required");
   }
 
   return {
@@ -42,6 +48,8 @@ const normalizeSeriesTestPayload = (data) => {
     subjectId: subjectIds[0] || data.subjectId,
     subjectIds,
     topicIds,
+    companyId: data.companyId || (companyIds[0] ? new mongoose.Types.ObjectId(companyIds[0]) : null),
+    companyIds,
   };
 };
 

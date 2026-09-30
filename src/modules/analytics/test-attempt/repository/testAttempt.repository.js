@@ -2,7 +2,7 @@ import TestAttempt from "../../../../models/testAttempt.model.js";
 import TestAssignment from "../../../../models/testAssignment.model.js";
 import mongoose from "mongoose";
 
-export const findAttemptsByStudent = async (studentId, { includeIQRoom = false } = {}) => {
+export const findAttemptsByStudent = async (studentId, { includeIQRoom = false, category = "GENERAL" } = {}) => {
   try {
     if (!mongoose.Types.ObjectId.isValid(studentId)) {
       throw new Error("Invalid student id");
@@ -14,18 +14,34 @@ export const findAttemptsByStudent = async (studentId, { includeIQRoom = false }
     // results (the admin/org "Tests and Performance" report, which has its
     // own IQ Room tab) opt in via includeIQRoom.
     const iqRoomFilter = includeIQRoom ? {} : { $or: [{ iqRoomId: null }, { iqRoomId: { $exists: false } }] };
+
+    let categoryFilter = {};
+    if (category === "GENERAL") {
+      categoryFilter = { testCategory: { $ne: "COMPANY" } };
+    } else if (category === "COMPANY") {
+      categoryFilter = { testCategory: "COMPANY" };
+    }
+
     const attempts = await TestAttempt.find({
       studentId: new mongoose.Types.ObjectId(studentId),
       status: { $in: ["SUBMITTED", "EVALUATED", "MISSED"] },
       ...iqRoomFilter,
+      ...categoryFilter,
     })
       .select(
-        "testId iqRoomId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
+        "testId iqRoomId testCategory companyId totalScore maxScore percentage resultStatus status submittedAt evaluatedAt totalQuestions duration"
       )
       .populate({
         path: 'testId',
-        select: 'title duration totalQuestions testSeriesId totalMarks createdBy isIQRoomTest',
-        populate: { path: 'testSeriesId', select: 'title' },
+        select: 'title duration totalQuestions testSeriesId totalMarks createdBy isIQRoomTest companyId companyStage',
+        populate: [
+          { path: 'testSeriesId', select: 'title category companyId' },
+          { path: 'companyId', select: 'name slug logoUrl' },
+        ],
+      })
+      .populate({
+        path: 'companyId',
+        select: 'name slug logoUrl',
       })
       .sort({ submittedAt: -1 })
       .lean();
@@ -56,6 +72,8 @@ export const findAttemptsByStudent = async (studentId, { includeIQRoom = false }
       // normal assign/accept flow — they never get a TestAssignment record,
       // so gating on one here would silently drop every IQ Room attempt.
       if (a.iqRoomId) return true;
+      // Company tests bypass the normal org TestAssignment acceptance gate
+      if (a.testCategory === "COMPANY") return true;
       const testId = String(a.testId?._id || a.testId || "");
       const assignment = assignmentMap.get(testId);
       return Boolean(assignment?.acceptedAt) && assignment.status !== "DECLINED";
@@ -67,6 +85,7 @@ export const findAttemptsByStudent = async (studentId, { includeIQRoom = false }
       const testName = test.title || (test.testCode ? `Test (${test.testCode})` : 'Untitled Test');
       const testType = test.testSeriesId ? 'Test Series' : 'Single Test';
       const seriesName = test.testSeriesId ? (test.testSeriesId.title || null) : null;
+      const company = a.companyId || (test.companyId && typeof test.companyId === "object" ? test.companyId : null);
       const resolvedTotalMarks =
         Number.isFinite(a.maxScore) && a.maxScore > 0
           ? a.maxScore
@@ -85,6 +104,9 @@ export const findAttemptsByStudent = async (studentId, { includeIQRoom = false }
         testName,
         testType,
         seriesName,
+        testCategory: a.testCategory || "GENERAL",
+        company: company ? { id: String(company._id), name: company.name, slug: company.slug, logoUrl: company.logoUrl } : null,
+        companyStage: test.companyStage || null,
         attemptDate: a.submittedAt ? new Date(a.submittedAt).toISOString().split('T')[0] : null,
         attemptTime: a.submittedAt ? new Date(a.submittedAt).toISOString().split('T')[1]?.slice(0,5) : null,
         totalQuestions: test.totalQuestions || a.totalQuestions || 0,

@@ -12,7 +12,8 @@ export const getMyResultsController = async (req, res, next) => {
       });
     }
 
-    const results = await getStudentResults(studentId);
+    const category = req.query.category || "GENERAL";
+    const results = await getStudentResults(studentId, { category });
 
     res.status(200).json({
       success: true,

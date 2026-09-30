@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { authMiddleware } from "../../common/middlewares/auth.middleware.js";
 import { validate } from "../../common/middlewares/validate.middleware.js";
-import { getAllCompanies, createCompany, updateCompany, deleteCompany } from "./company.controller.js";
+import { getAllCompanies, getCompanyBySlug, createCompany, updateCompany, deleteCompany } from "./company.controller.js";
 import { createCompanySchema, updateCompanySchema } from "./company.schema.js";
 
 const router = Router();
@@ -12,6 +12,7 @@ const router = Router();
 // upload, same as resolveOrCreateSubjectId/TopicId), not managed through a
 // dedicated admin screen.
 router.get("/", authMiddleware, getAllCompanies);
+router.get("/slug/:slug", authMiddleware, getCompanyBySlug);
 router.post("/", authMiddleware, validate(createCompanySchema), createCompany);
 router.put("/:id", authMiddleware, validate(updateCompanySchema), updateCompany);
 router.delete("/:id", authMiddleware, deleteCompany);

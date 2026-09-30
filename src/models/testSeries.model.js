@@ -26,7 +26,21 @@ const TestSeriesSchema = new mongoose.Schema(
     allowedOrganizations: [{ type: mongoose.Schema.Types.ObjectId }],
     allowedStudents: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     tests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
-    seriesCode: String
+    seriesCode: String,
+
+    // Company Exam Preparation fields
+    category: {
+      type: String,
+      enum: ["GENERAL", "COMPANY"],
+      default: "GENERAL",
+      index: true,
+    },
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+      index: true,
+    },
   },
   { timestamps: true }
 );
@@ -35,5 +49,6 @@ const TestSeriesSchema = new mongoose.Schema(
 // on every series creation query by title. Neither was indexed.
 TestSeriesSchema.index({ "createdBy.userId": 1 });
 TestSeriesSchema.index({ title: 1 });
+TestSeriesSchema.index({ category: 1, companyId: 1, createdAt: -1 });
 
 export default mongoose.model("TestSeries", TestSeriesSchema);

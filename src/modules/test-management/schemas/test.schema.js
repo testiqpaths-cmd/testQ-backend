@@ -8,6 +8,10 @@ export const createTestSchema = z
     description: z.string().optional(),
 
     subjectId: objectId.optional(),
+    companyId: objectId.optional().nullable(),
+    companyIds: z.array(objectId).optional(),
+    companyStage: z.string().optional().nullable(),
+    questions: z.array(objectId).optional(),
 
     visibility: z.enum(["PUBLIC", "ORG_ONLY", "LINK_ONLY"]),
     allowedOrganizations: z.array(objectId).optional(),
@@ -36,14 +40,14 @@ export const createTestSchema = z
     isIQRoomTest: z.boolean().optional(),
   })
   .superRefine((data, ctx) => {
-    /* Visibility rules */
-    if (
-      data.questionSource !== "EXCEL" &&
-      (!data.subjectIds || data.subjectIds.length === 0)
-    ) {
+    /* Subject or Company required for SUBJECT_TOPIC */
+    const hasSubject = Array.isArray(data.subjectIds) && data.subjectIds.length > 0;
+    const hasCompany = Boolean(data.companyId) || (Array.isArray(data.companyIds) && data.companyIds.length > 0);
+
+    if (data.questionSource !== "EXCEL" && !hasSubject && !hasCompany && (!data.questions || !data.questions.length)) {
       ctx.addIssue({
         path: ["subjectIds"],
-        message: "At least one subject is required",
+        message: "At least one subject or company is required",
       });
     }
 

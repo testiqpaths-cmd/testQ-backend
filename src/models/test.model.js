@@ -6,8 +6,11 @@ const testSchema = new Schema({
   description: { type: String },
   subjectId: { type: Types.ObjectId, ref: "Subject"},
 
-   // ✅ Added companyIds
+   // ✅ Company references
   companyIds: [{ type: Types.ObjectId, ref: "Company" }],
+  companyId: { type: Types.ObjectId, ref: "Company", default: null, index: true },
+  companyStage: { type: String, default: null },
+  questions: [{ type: Types.ObjectId, ref: "Question" }],
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
@@ -65,5 +68,6 @@ testSchema.index({ isDeleted: 1, isPublished: 1, isIQRoomTest: 1, createdAt: -1 
 testSchema.index({ "createdBy.userId": 1, isDeleted: 1, createdAt: -1 });
 testSchema.index({ status: 1, isDeleted: 1 });
 testSchema.index({ testSeriesId: 1 });
+testSchema.index({ companyId: 1, isDeleted: 1 });
 
 export default model("Test", testSchema);

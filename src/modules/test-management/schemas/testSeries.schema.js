@@ -9,7 +9,9 @@ export const createTestSeriesSchema = z.object({
   visibility: z.enum(["PUBLIC", "ORG_ONLY", "LINK_ONLY"]),
 
   allowedOrganizations: z.array(objectId).optional(),
-  
+
+  category: z.enum(["GENERAL", "COMPANY"]).optional().default("GENERAL"),
+  companyId: objectId.optional().nullable(),
 
   tests: z.array(objectId).optional(),
 });

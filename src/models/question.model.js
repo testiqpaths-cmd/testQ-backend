@@ -70,4 +70,13 @@ const questionSchema = new mongoose.Schema({
 // endpoints filter the same way — none of it indexed beyond excelBatchId.
 questionSchema.index({ subjectId: 1, topicId: 1, type: 1, difficulty: 1 });
 
+// Fast question selection by company and subject/topic
+questionSchema.index({
+  companyIds: 1,
+  subjectId: 1,
+  topicId: 1,
+  difficulty: 1,
+  type: 1,
+});
+
 export default mongoose.model("Question", questionSchema);

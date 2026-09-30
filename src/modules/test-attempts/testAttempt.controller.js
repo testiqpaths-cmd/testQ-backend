@@ -229,8 +229,26 @@ export const startTestAttemptController = async (req, res, next) => {
     // for it; the record is simply already there by the time a student
     // reaches this endpoint.
     if (req.user?.role === "STUDENT" && !iqRoomId) {
+      let isCompanyTest = Boolean(test.companyId);
+      if (!isCompanyTest && test.testSeriesId) {
+        const TestSeries = (await import("../../models/testSeries.model.js")).default;
+        const series = await TestSeries.findById(test.testSeriesId).select("category companyId").lean();
+        if (series && (series.category === "COMPANY" || series.companyId)) {
+          isCompanyTest = true;
+        }
+      }
+
       const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-      const assignment = await TestAssignment.findOne({ testId, studentId });
+      let assignment = await TestAssignment.findOne({ testId, studentId });
+      if (!assignment && isCompanyTest) {
+        assignment = await TestAssignment.create({
+          testId,
+          studentId,
+          status: "ACCEPTED",
+          acceptedAt: new Date(),
+        });
+      }
+
       if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
         return res.status(400).json({
           success: false,
@@ -338,11 +356,30 @@ export const startTestAttemptController = async (req, res, next) => {
       }
     }
 
+    // Determine testCategory & companyId
+    let testCategory = "GENERAL";
+    let companyId = test.companyId || (Array.isArray(test.companyIds) && test.companyIds.length ? test.companyIds[0] : null);
+
+    if (test.testSeriesId) {
+      const TestSeries = (await import("../../models/testSeries.model.js")).default;
+      const series = await TestSeries.findById(test.testSeriesId).select("category companyId").lean();
+      if (series && series.category === "COMPANY") {
+        testCategory = "COMPANY";
+        if (series.companyId) companyId = series.companyId;
+      }
+    }
+
+    if (companyId && testCategory !== "COMPANY") {
+      testCategory = "COMPANY";
+    }
+
     // 6) Create attempt
     const attempt = await TestAttempt.create({
       testId,
       studentId,
       iqRoomId: iqRoomId || null,
+      testCategory,
+      companyId: companyId || null,
       startedAt,
       endsAt,
       duration,
