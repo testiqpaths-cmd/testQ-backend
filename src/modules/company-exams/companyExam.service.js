@@ -73,7 +73,7 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
     .populate({
       path: "tests",
       match: { isDeleted: 0, isPublished: true },
-      select: "title description duration totalQuestions totalMarks companyStage difficulty type scheduleType startTime endTime status secureBrowserRequired createdAt",
+      select: "title description duration totalQuestions totalMarks companyStage companyStageKey companyStageName companyStageOrder passingPercentage difficulty type scheduleType startTime endTime status secureBrowserRequired createdAt",
     })
     .sort({ createdAt: -1 })
     .lean();
@@ -85,14 +85,14 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
     isPublished: true,
     isSeriesTest: { $ne: true },
   })
-    .select("title description duration totalQuestions totalMarks companyStage difficulty type scheduleType startTime endTime status secureBrowserRequired createdAt")
+    .select("title description duration totalQuestions totalMarks companyStage companyStageKey companyStageName companyStageOrder passingPercentage difficulty type scheduleType startTime endTime status secureBrowserRequired createdAt")
     .sort({ createdAt: -1 })
     .lean();
 
   // If studentId provided, fetch attempts to show progress
-  let attemptMap = new Map();
+  let studentAttempts = [];
   if (studentId && mongoose.Types.ObjectId.isValid(studentId)) {
-    const attempts = await TestAttempt.find({
+    studentAttempts = await TestAttempt.find({
       studentId: new mongoose.Types.ObjectId(studentId),
       $or: [
         { companyId: company._id },
@@ -100,59 +100,203 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       ],
       status: { $in: ["IN_PROGRESS", "SUBMITTED", "EVALUATED", "MISSED"] },
     })
-      .select("testId status resultStatus totalScore maxScore percentage submittedAt startedAt")
+      .select("testId status resultStatus totalScore maxScore percentage submittedAt startedAt companyStageKey")
       .sort({ submittedAt: -1, startedAt: -1 })
       .lean();
+  }
 
-    for (const att of attempts) {
-      const tId = String(att.testId);
-      if (!attemptMap.has(tId)) {
-        attemptMap.set(tId, {
-          attemptId: String(att._id),
-          status: att.status,
-          resultStatus: att.resultStatus || null,
-          score: att.totalScore || 0,
-          maxScore: att.maxScore || 0,
-          percentage: Number.isFinite(att.percentage) ? Math.round(att.percentage) : 0,
-          submittedAt: att.submittedAt || null,
-          startedAt: att.startedAt || null,
-        });
+  // Group attempts by testId: track latest attempt and best completed attempt
+  const testAttemptMap = new Map();
+  for (const att of studentAttempts) {
+    const tId = String(att.testId);
+    if (!testAttemptMap.has(tId)) {
+      testAttemptMap.set(tId, {
+        latest: att,
+        bestCompleted: null,
+      });
+    }
+    const entry = testAttemptMap.get(tId);
+    if (att.status === "SUBMITTED" || att.status === "EVALUATED") {
+      if (!entry.bestCompleted || (att.totalScore || 0) > (entry.bestCompleted.totalScore || 0)) {
+        entry.bestCompleted = att;
       }
     }
   }
 
-  const attachAttemptInfo = (test) => {
-    const att = attemptMap.get(String(test._id)) || null;
-    return {
-      ...test,
-      attempt: att,
-    };
-  };
+  let totalAvailableTests = 0;
+  let totalCompletedTests = 0;
+  let totalWeightedMarksObtained = 0;
+  let totalWeightedMaxMarks = 0;
+  let totalRoundsCount = 0;
+  let clearedRoundsCount = 0;
 
-  const processedSeries = seriesList.map((s) => ({
-    ...s,
-    tests: Array.isArray(s.tests) ? s.tests.map(attachAttemptInfo) : [],
-  }));
+  // Process series into structured rounds
+  const processedSeries = seriesList.map((series) => {
+    const rawTests = Array.isArray(series.tests) ? series.tests : [];
+    const progressionMode = series.progressionMode || "SEQUENTIAL";
+    const seriesCutoff = series.passingPercentage || 50;
 
-  const processedStandalone = standaloneTests.map(attachAttemptInfo);
+    // Group tests by companyStageOrder / companyStageKey
+    const roundGroups = new Map();
 
-  // Calculate student summary
-  let totalTests = 0;
-  let completedTests = 0;
-  let totalPercentage = 0;
+    for (const test of rawTests) {
+      const order = Number(test.companyStageOrder) || 1;
+      const stageKey = test.companyStageKey || `ROUND_${order}`;
+      const stageName = test.companyStageName || test.companyStage || `Round ${order}`;
 
-  const countTest = (t) => {
-    totalTests++;
-    if (t.attempt && (t.attempt.status === "SUBMITTED" || t.attempt.status === "EVALUATED")) {
-      completedTests++;
-      totalPercentage += t.attempt.percentage || 0;
+      if (!roundGroups.has(order)) {
+        roundGroups.set(order, {
+          stageKey,
+          stageName,
+          stageOrder: order,
+          tests: [],
+        });
+      }
+      roundGroups.get(order).tests.push(test);
     }
-  };
 
-  processedSeries.forEach((s) => s.tests.forEach(countTest));
-  processedStandalone.forEach(countTest);
+    // Sort rounds by stageOrder ascending
+    const sortedRoundOrders = Array.from(roundGroups.keys()).sort((a, b) => a - b);
 
-  const averageScore = completedTests > 0 ? Math.round(totalPercentage / completedTests) : 0;
+    // Track sequential qualification state across rounds
+    let previousRoundPassed = true;
+    let previousRoundInfo = null;
+
+    const rounds = sortedRoundOrders.map((order) => {
+      const round = roundGroups.get(order);
+      totalRoundsCount++;
+
+      let roundTotalMarks = 0;
+      let roundObtainedMarks = 0;
+      let allTestsCompleted = true;
+      let hasAnyTestStarted = false;
+
+      const processedTests = round.tests.map((test) => {
+        totalAvailableTests++;
+        const attemptEntry = testAttemptMap.get(String(test._id));
+        const latestAtt = attemptEntry?.latest || null;
+        const bestAtt = attemptEntry?.bestCompleted || null;
+
+        const isTestCompleted = Boolean(bestAtt);
+        if (isTestCompleted) {
+          totalCompletedTests++;
+          totalWeightedMarksObtained += bestAtt.totalScore || 0;
+          totalWeightedMaxMarks += test.totalMarks || bestAtt.maxScore || 0;
+          roundObtainedMarks += bestAtt.totalScore || 0;
+        } else {
+          allTestsCompleted = false;
+        }
+
+        if (latestAtt?.status === "IN_PROGRESS") {
+          hasAnyTestStarted = true;
+        }
+
+        roundTotalMarks += test.totalMarks || 0;
+
+        return {
+          _id: test._id,
+          title: test.title,
+          description: test.description,
+          duration: test.duration,
+          totalQuestions: test.totalQuestions,
+          totalMarks: test.totalMarks,
+          difficulty: test.difficulty,
+          companyStage: test.companyStage,
+          companyStageKey: test.companyStageKey,
+          companyStageName: test.companyStageName,
+          companyStageOrder: test.companyStageOrder,
+          passingPercentage: test.passingPercentage || seriesCutoff,
+          secureBrowserRequired: test.secureBrowserRequired,
+          isCompleted: isTestCompleted,
+          attempt: latestAtt
+            ? {
+                attemptId: String(latestAtt._id),
+                status: latestAtt.status,
+                resultStatus: latestAtt.resultStatus || null,
+                score: bestAtt?.totalScore || latestAtt.totalScore || 0,
+                maxScore: bestAtt?.maxScore || latestAtt.maxScore || test.totalMarks,
+                percentage: bestAtt ? Math.round(bestAtt.percentage || 0) : Math.round(latestAtt.percentage || 0),
+                submittedAt: latestAtt.submittedAt || null,
+              }
+            : null,
+        };
+      });
+
+      const roundPercentage = roundTotalMarks > 0 ? Math.round((roundObtainedMarks / roundTotalMarks) * 100) : 0;
+      const isRoundPassed = allTestsCompleted && roundPercentage >= seriesCutoff;
+
+      if (isRoundPassed) {
+        clearedRoundsCount++;
+      }
+
+      // Progression lock logic
+      let isLocked = false;
+      let lockReason = null;
+
+      if (progressionMode === "SEQUENTIAL" && order > 1) {
+        if (!previousRoundPassed) {
+          isLocked = true;
+          if (previousRoundInfo && !previousRoundInfo.allTestsCompleted) {
+            lockReason = `Complete all tests in Round ${previousRoundInfo.stageOrder} (${previousRoundInfo.stageName}) to unlock.`;
+          } else if (previousRoundInfo) {
+            lockReason = `Round ${previousRoundInfo.stageOrder} cutoff not met (${previousRoundInfo.roundPercentage}% / Required ${seriesCutoff}%). Retake Round ${previousRoundInfo.stageOrder} to qualify.`;
+          } else {
+            lockReason = `Previous round qualification required to unlock this stage.`;
+          }
+        }
+      }
+
+      // Update state for next round
+      previousRoundPassed = isRoundPassed;
+      previousRoundInfo = {
+        stageOrder: order,
+        stageName: round.stageName,
+        allTestsCompleted,
+        roundPercentage,
+      };
+
+      return {
+        stageKey: round.stageKey,
+        stageName: round.stageName,
+        stageOrder: order,
+        isLocked,
+        lockReason,
+        isCompleted: allTestsCompleted,
+        isPassed: isRoundPassed,
+        hasInProgress: hasAnyTestStarted,
+        roundScore: roundObtainedMarks,
+        roundTotalMarks,
+        roundPercentage,
+        passingPercentage: seriesCutoff,
+        tests: processedTests,
+      };
+    });
+
+    return {
+      _id: series._id,
+      title: series.title,
+      description: series.description,
+      progressionMode,
+      patternVersion: series.patternVersion || "2026",
+      passingPercentage: seriesCutoff,
+      rounds,
+    };
+  });
+
+  // Calculate overall weighted readiness
+  const overallPercentage =
+    totalWeightedMaxMarks > 0
+      ? Math.round((totalWeightedMarksObtained / totalWeightedMaxMarks) * 100)
+      : 0;
+
+  let readinessBand = "Needs More Practice";
+  if (overallPercentage >= 85) {
+    readinessBand = "Advanced Placement Readiness";
+  } else if (overallPercentage >= 70) {
+    readinessBand = "Strong Placement Readiness";
+  } else if (overallPercentage >= 50) {
+    readinessBand = "Developing Placement Readiness";
+  }
 
   return {
     company: {
@@ -164,11 +308,16 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       description: company.description || null,
     },
     series: processedSeries,
-    standaloneTests: processedStandalone,
+    standaloneTests,
     studentStats: {
-      totalTests,
-      completedTests,
-      averageScore,
+      totalTests: totalAvailableTests,
+      completedTests: totalCompletedTests,
+      totalWeightedMarksObtained,
+      totalWeightedMaxMarks,
+      overallPercentage,
+      readinessBand,
+      totalRounds: totalRoundsCount,
+      clearedRounds: clearedRoundsCount,
     },
   };
 };

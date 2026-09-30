@@ -41,6 +41,19 @@ const TestSeriesSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    progressionMode: {
+      type: String,
+      enum: ["SEQUENTIAL", "OPEN"],
+      default: "SEQUENTIAL",
+    },
+    patternVersion: {
+      type: String,
+      default: "2026",
+    },
+    passingPercentage: {
+      type: Number,
+      default: 50,
+    },
   },
   { timestamps: true }
 );

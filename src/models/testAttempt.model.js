@@ -34,6 +34,12 @@ const testAttemptSchema = new mongoose.Schema(
       index: true,
     },
 
+    companyStageKey: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
     startedAt: {
       type: Date,
       default: Date.now,
@@ -256,5 +262,6 @@ testAttemptSchema.index({ createdAt: 1 });
 // Backs student company-wise results filtering
 testAttemptSchema.index({ studentId: 1, testCategory: 1, submittedAt: -1 });
 testAttemptSchema.index({ companyId: 1, studentId: 1 });
+testAttemptSchema.index({ studentId: 1, companyId: 1, companyStageKey: 1 });
 
 export default mongoose.model("TestAttempt", testAttemptSchema);

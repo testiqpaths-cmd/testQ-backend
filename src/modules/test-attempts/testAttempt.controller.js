@@ -175,6 +175,67 @@ export const startTestAttemptController = async (req, res, next) => {
       });
     }
 
+    // Company Sequential Progression Gate
+    if (req.user?.role === "STUDENT" && test.testSeriesId && (test.companyId || test.companyStageKey)) {
+      const TestSeries = (await import("../../models/testSeries.model.js")).default;
+      const series = await TestSeries.findById(test.testSeriesId).select("category progressionMode passingPercentage").lean();
+
+      if (series && series.category === "COMPANY" && series.progressionMode !== "OPEN" && (test.companyStageOrder || 1) > 1) {
+        const targetOrder = test.companyStageOrder || 1;
+        const previousTests = await Test.find({
+          testSeriesId: test.testSeriesId,
+          isDeleted: 0,
+          isPublished: true,
+          companyStageOrder: { $lt: targetOrder },
+        }).select("_id companyStageOrder companyStageKey totalMarks passingPercentage").lean();
+
+        if (previousTests.length > 0) {
+          const prevTestIds = previousTests.map((t) => t._id);
+          const prevAttempts = await TestAttempt.find({
+            studentId,
+            testId: { $in: prevTestIds },
+            status: { $in: ["SUBMITTED", "EVALUATED"] },
+          }).select("testId totalScore maxScore percentage").lean();
+
+          // Group by stage order
+          const stagesMap = new Map();
+          for (const pt of previousTests) {
+            const order = pt.companyStageOrder || 1;
+            if (!stagesMap.has(order)) stagesMap.set(order, []);
+            stagesMap.get(order).push(pt);
+          }
+
+          const cutoff = series.passingPercentage || 50;
+
+          for (const [order, stageTests] of stagesMap.entries()) {
+            let stageTotalMarks = 0;
+            let stageObtainedMarks = 0;
+
+            for (const st of stageTests) {
+              const testAttempts = prevAttempts.filter((a) => String(a.testId) === String(st._id));
+              if (testAttempts.length === 0) {
+                return res.status(403).json({
+                  success: false,
+                  message: `This stage is locked. Please complete all tests in Round ${order} first.`,
+                });
+              }
+              const bestScore = Math.max(...testAttempts.map((a) => a.totalScore || 0));
+              stageObtainedMarks += bestScore;
+              stageTotalMarks += st.totalMarks || 0;
+            }
+
+            const stagePct = stageTotalMarks > 0 ? (stageObtainedMarks / stageTotalMarks) * 100 : 0;
+            if (stagePct < cutoff) {
+              return res.status(403).json({
+                success: false,
+                message: `Round ${order} cutoff not met (${Math.round(stagePct)}% / Required ${cutoff}%). Retake Round ${order} to unlock this stage.`,
+              });
+            }
+          }
+        }
+      }
+    }
+
     // Secure-browser tests can only be started once the testQ-browser
     // Electron app has claimed a live ExamSession for this student+test —
     // otherwise the normal unlocked browser tab would silently bypass the
@@ -380,6 +441,7 @@ export const startTestAttemptController = async (req, res, next) => {
       iqRoomId: iqRoomId || null,
       testCategory,
       companyId: companyId || null,
+      companyStageKey: test.companyStageKey || null,
       startedAt,
       endsAt,
       duration,
