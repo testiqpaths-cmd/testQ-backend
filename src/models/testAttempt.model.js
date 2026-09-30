@@ -40,6 +40,28 @@ const testAttemptSchema = new mongoose.Schema(
       index: true,
     },
 
+    roundAttemptId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    roundAttemptNumber: {
+      type: Number,
+      default: 1,
+    },
+
+    isCompleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    isPassed: {
+      type: Boolean,
+      default: false,
+    },
+
     startedAt: {
       type: Date,
       default: Date.now,

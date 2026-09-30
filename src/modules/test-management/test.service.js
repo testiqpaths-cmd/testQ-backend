@@ -160,6 +160,13 @@ export async function updateTest(test, payload, user) {
 export async function deleteTest(test) {
   test.isDeleted = 1;
   await test.save();
+
+  if (test.testSeriesId) {
+    const TestSeries = (await import("../../models/testSeries.model.js")).default;
+    await TestSeries.findByIdAndUpdate(test.testSeriesId, {
+      $pull: { tests: test._id },
+    });
+  }
 }
 
 export const getAllTests = async () => {

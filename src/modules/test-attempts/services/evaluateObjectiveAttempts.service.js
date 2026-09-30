@@ -136,12 +136,16 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   if (hasSubjective) {
     attempt.status = "SUBMITTED";
     attempt.resultStatus = attempt.expireReason === "CHEATING" ? "FAIL" : null;
+    attempt.isCompleted = true;
+    attempt.isPassed = false;
   } else {
     attempt.status = "EVALUATED";
     attempt.resultStatus =
       attempt.expireReason === "CHEATING"
         ? "FAIL"
         : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+    attempt.isCompleted = true;
+    attempt.isPassed = attempt.resultStatus === "PASS";
   }
 
   if (!attempt.iqRoomId) {

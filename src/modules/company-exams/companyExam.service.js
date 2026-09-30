@@ -100,7 +100,7 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       ],
       status: { $in: ["IN_PROGRESS", "SUBMITTED", "EVALUATED", "MISSED"] },
     })
-      .select("testId status resultStatus totalScore maxScore percentage submittedAt startedAt companyStageKey")
+      .select("testId status resultStatus totalScore maxScore percentage submittedAt startedAt companyStageKey roundAttemptId roundAttemptNumber isCompleted isPassed")
       .sort({ submittedAt: -1, startedAt: -1 })
       .lean();
   }
@@ -166,9 +166,11 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       const round = roundGroups.get(order);
       totalRoundsCount++;
 
+      const roundConf = series.roundsConfig?.find((r) => r.stageOrder === order);
+      const roundCutoff = roundConf?.cutoffPercentage ?? seriesCutoff;
+      const retakePolicy = roundConf?.retakePolicy ?? (series.mode === "SIMULATION" ? "ALL_TESTS" : "FAILED_ONLY");
+
       let roundTotalMarks = 0;
-      let roundObtainedMarks = 0;
-      let allTestsCompleted = true;
       let hasAnyTestStarted = false;
 
       const processedTests = round.tests.map((test) => {
@@ -178,14 +180,8 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
         const bestAtt = attemptEntry?.bestCompleted || null;
 
         const isTestCompleted = Boolean(bestAtt);
-        if (isTestCompleted) {
-          totalCompletedTests++;
-          totalWeightedMarksObtained += bestAtt.totalScore || 0;
-          totalWeightedMaxMarks += test.totalMarks || bestAtt.maxScore || 0;
-          roundObtainedMarks += bestAtt.totalScore || 0;
-        } else {
-          allTestsCompleted = false;
-        }
+        const testCutoff = test.passingPercentage || roundCutoff;
+        const isTestPassed = isTestCompleted && (bestAtt.percentage >= testCutoff || (bestAtt.totalScore / (test.totalMarks || 1)) * 100 >= testCutoff);
 
         if (latestAtt?.status === "IN_PROGRESS") {
           hasAnyTestStarted = true;
@@ -205,9 +201,10 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
           companyStageKey: test.companyStageKey,
           companyStageName: test.companyStageName,
           companyStageOrder: test.companyStageOrder,
-          passingPercentage: test.passingPercentage || seriesCutoff,
+          passingPercentage: testCutoff,
           secureBrowserRequired: test.secureBrowserRequired,
           isCompleted: isTestCompleted,
+          isPassed: isTestPassed,
           attempt: latestAtt
             ? {
                 attemptId: String(latestAtt._id),
@@ -216,17 +213,107 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
                 score: bestAtt?.totalScore || latestAtt.totalScore || 0,
                 maxScore: bestAtt?.maxScore || latestAtt.maxScore || test.totalMarks,
                 percentage: bestAtt ? Math.round(bestAtt.percentage || 0) : Math.round(latestAtt.percentage || 0),
+                roundAttemptNumber: latestAtt.roundAttemptNumber || 1,
                 submittedAt: latestAtt.submittedAt || null,
               }
             : null,
         };
       });
 
-      const roundPercentage = roundTotalMarks > 0 ? Math.round((roundObtainedMarks / roundTotalMarks) * 100) : 0;
-      const isRoundPassed = allTestsCompleted && roundPercentage >= seriesCutoff;
+      // Atomic Round Attempt Evaluation using roundAttemptId
+      const roundTestIds = new Set(round.tests.map((t) => String(t._id)));
+      const roundAttempts = studentAttempts.filter((a) => roundTestIds.has(String(a.testId)));
+
+      const roundAttemptSessions = new Map();
+      for (const a of roundAttempts) {
+        const rKey = a.roundAttemptId || `SESSION_${a.roundAttemptNumber || 1}`;
+        if (!roundAttemptSessions.has(rKey)) {
+          roundAttemptSessions.set(rKey, new Map());
+        }
+        const sessionMap = roundAttemptSessions.get(rKey);
+        if (
+          !sessionMap.has(String(a.testId)) ||
+          (a.totalScore || 0) > (sessionMap.get(String(a.testId)).totalScore || 0)
+        ) {
+          sessionMap.set(String(a.testId), a);
+        }
+      }
+
+      let bestCompleteRoundScore = 0;
+      let bestCompleteRoundMax = roundTotalMarks;
+      let bestCompleteRoundPct = 0;
+      let hasAnyCompleteRound = false;
+
+      for (const sessionMap of roundAttemptSessions.values()) {
+        const allCompletedInSession = round.tests.every(
+          (t) =>
+            sessionMap.has(String(t._id)) &&
+            (sessionMap.get(String(t._id)).status === "SUBMITTED" ||
+              sessionMap.get(String(t._id)).status === "EVALUATED")
+        );
+
+        if (allCompletedInSession) {
+          hasAnyCompleteRound = true;
+          let sessionObtained = 0;
+          let sessionMax = 0;
+          for (const t of round.tests) {
+            const att = sessionMap.get(String(t._id));
+            sessionObtained += att.totalScore || 0;
+            sessionMax += t.totalMarks || att.maxScore || 0;
+          }
+          const sessionPct = sessionMax > 0 ? Math.round((sessionObtained / sessionMax) * 100) : 0;
+          if (sessionPct > bestCompleteRoundPct || !bestCompleteRoundScore) {
+            bestCompleteRoundPct = sessionPct;
+            bestCompleteRoundScore = sessionObtained;
+            bestCompleteRoundMax = sessionMax;
+          }
+        }
+      }
+
+      // Fallback for independent test attempts if no unified session exists
+      if (!hasAnyCompleteRound) {
+        const allTestsCompletedIndependently = round.tests.every((t) =>
+          testAttemptMap.get(String(t._id))?.bestCompleted
+        );
+        if (allTestsCompletedIndependently) {
+          hasAnyCompleteRound = true;
+          let indepObtained = 0;
+          for (const t of round.tests) {
+            indepObtained += testAttemptMap.get(String(t._id))?.bestCompleted?.totalScore || 0;
+          }
+          bestCompleteRoundScore = indepObtained;
+          bestCompleteRoundMax = roundTotalMarks;
+          bestCompleteRoundPct = roundTotalMarks > 0 ? Math.round((indepObtained / roundTotalMarks) * 100) : 0;
+        }
+      }
+
+      // Determine round qualification & status
+      let roundStatus = "NOT_STARTED";
+      const isRoundPassed = hasAnyCompleteRound && bestCompleteRoundPct >= roundCutoff;
 
       if (isRoundPassed) {
+        roundStatus = "PASSED";
         clearedRoundsCount++;
+      } else if (hasAnyCompleteRound) {
+        roundStatus = "FAILED";
+      } else if (hasAnyTestStarted || roundAttempts.length > 0) {
+        roundStatus = "IN_PROGRESS";
+      }
+
+      // Add to overall readiness tracking if round has valid scores
+      if (hasAnyCompleteRound) {
+        totalWeightedMarksObtained += bestCompleteRoundScore;
+        totalWeightedMaxMarks += bestCompleteRoundMax;
+        totalCompletedTests += round.tests.length;
+      } else {
+        // Count partial completed tests
+        for (const pt of processedTests) {
+          if (pt.isCompleted) {
+            totalCompletedTests++;
+            totalWeightedMarksObtained += pt.attempt?.score || 0;
+            totalWeightedMaxMarks += pt.totalMarks || 0;
+          }
+        }
       }
 
       // Progression lock logic
@@ -236,10 +323,10 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       if (progressionMode === "SEQUENTIAL" && order > 1) {
         if (!previousRoundPassed) {
           isLocked = true;
-          if (previousRoundInfo && !previousRoundInfo.allTestsCompleted) {
-            lockReason = `Complete all tests in Round ${previousRoundInfo.stageOrder} (${previousRoundInfo.stageName}) to unlock.`;
-          } else if (previousRoundInfo) {
-            lockReason = `Round ${previousRoundInfo.stageOrder} cutoff not met (${previousRoundInfo.roundPercentage}% / Required ${seriesCutoff}%). Retake Round ${previousRoundInfo.stageOrder} to qualify.`;
+          if (previousRoundInfo && previousRoundInfo.status === "FAILED") {
+            lockReason = `Round ${previousRoundInfo.stageOrder} cutoff not met (${previousRoundInfo.roundPercentage}% / Required ${previousRoundInfo.cutoff}%). Retake Round ${previousRoundInfo.stageOrder} to qualify.`;
+          } else if (previousRoundInfo && previousRoundInfo.status === "IN_PROGRESS") {
+            lockReason = `Complete and clear all tests in Round ${previousRoundInfo.stageOrder} (${previousRoundInfo.stageName}) to unlock.`;
           } else {
             lockReason = `Previous round qualification required to unlock this stage.`;
           }
@@ -251,8 +338,9 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       previousRoundInfo = {
         stageOrder: order,
         stageName: round.stageName,
-        allTestsCompleted,
-        roundPercentage,
+        status: roundStatus,
+        roundPercentage: bestCompleteRoundPct,
+        cutoff: roundCutoff,
       };
 
       return {
@@ -261,13 +349,15 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
         stageOrder: order,
         isLocked,
         lockReason,
-        isCompleted: allTestsCompleted,
+        status: roundStatus,
+        isCompleted: hasAnyCompleteRound,
         isPassed: isRoundPassed,
-        hasInProgress: hasAnyTestStarted,
-        roundScore: roundObtainedMarks,
-        roundTotalMarks,
-        roundPercentage,
-        passingPercentage: seriesCutoff,
+        retakePolicy,
+        roundScore: bestCompleteRoundScore,
+        roundTotalMarks: bestCompleteRoundMax,
+        roundPercentage: bestCompleteRoundPct,
+        cutoffPercentage: roundCutoff,
+        passingPercentage: roundCutoff,
         tests: processedTests,
       };
     });
@@ -276,9 +366,11 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       _id: series._id,
       title: series.title,
       description: series.description,
+      mode: series.mode || "SIMULATION",
       progressionMode,
       patternVersion: series.patternVersion || "2026",
       passingPercentage: seriesCutoff,
+      roundsConfig: series.roundsConfig || [],
       rounds,
     };
   });

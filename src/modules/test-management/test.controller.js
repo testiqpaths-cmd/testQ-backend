@@ -322,6 +322,18 @@ export const publishTest = async (req, res, next) => {
 
     req.test.isPublished = true;
     req.test.publishedAt = new Date();
+
+    // Freeze question set and snapshot question content upon publish
+    if (!Array.isArray(req.test.questionSnapshot) || req.test.questionSnapshot.length === 0) {
+      if (Array.isArray(req.test.questions) && req.test.questions.length > 0) {
+        const Question = (await import("../../models/question.model.js")).default;
+        const questions = await Question.find({ _id: { $in: req.test.questions } })
+          .select("_id questionText type options correctAnswer imageUrl")
+          .lean();
+        req.test.questionSnapshot = questions;
+      }
+    }
+
     // Derive the real lifecycle status (UPCOMING/ACTIVE/COMPLETED) from
     // isPublished + schedule instead of hardcoding "PUBLISHED" — the literal
     // "PUBLISHED" string doesn't match `getAssignedTests`' filter or the

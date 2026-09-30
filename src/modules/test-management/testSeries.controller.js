@@ -59,12 +59,34 @@ export const getSeriesStats = async (req, res) => {
 
 export const createSeries = async (req, res, next) => {
   try {
-    const { title, description, visibility, allowedOrganizations, allowedStudents, tests = [], plannedTestCount, category, companyId } = req.body;
+    const {
+      title,
+      description,
+      visibility,
+      allowedOrganizations,
+      allowedStudents,
+      tests = [],
+      plannedTestCount,
+      category,
+      companyId,
+      mode,
+      progressionMode,
+      patternVersion,
+      passingPercentage,
+      roundsConfig,
+    } = req.body;
 
     if (!title?.trim()) {
       return res
         .status(400)
         .json({ success: false, message: "Title is required" });
+    }
+
+    if (category === "COMPANY" && req.user?.role !== "IQPATH_ADMIN") {
+      return res.status(403).json({
+        success: false,
+        message: "Only IQPATH_ADMIN is authorized to create company placement tracks",
+      });
     }
 
     let cleanedPlannedTestCount;
@@ -95,6 +117,11 @@ export const createSeries = async (req, res, next) => {
         plannedTestCount: cleanedPlannedTestCount,
         category: category || "GENERAL",
         companyId: companyId && mongoose.Types.ObjectId.isValid(companyId) ? companyId : null,
+        mode: mode || "SIMULATION",
+        progressionMode: progressionMode || "SEQUENTIAL",
+        patternVersion: patternVersion || "2026",
+        passingPercentage: typeof passingPercentage === "number" ? passingPercentage : 50,
+        roundsConfig: Array.isArray(roundsConfig) ? roundsConfig : [],
       },
       req.user
     );

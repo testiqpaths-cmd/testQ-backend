@@ -76,8 +76,10 @@ export const selectAttemptQuestions = async (test) => {
   const desiredCount = Math.max(1, Number(test.totalQuestions) || 0);
   let questions = [];
 
-  // If the test has pre-selected frozen questions, use them directly
-  if (Array.isArray(test.questions) && test.questions.length > 0) {
+  // 1) If the test has an immutable frozen question snapshot from publish time, use it directly!
+  if (Array.isArray(test.questionSnapshot) && test.questionSnapshot.length > 0) {
+    questions = test.questionSnapshot;
+  } else if (Array.isArray(test.questions) && test.questions.length > 0) {
     questions = await Question.find({ _id: { $in: test.questions } })
       .select("_id questionText type options correctAnswer imageUrl")
       .lean();

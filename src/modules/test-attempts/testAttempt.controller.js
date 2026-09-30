@@ -178,7 +178,7 @@ export const startTestAttemptController = async (req, res, next) => {
     // Company Sequential Progression Gate
     if (req.user?.role === "STUDENT" && test.testSeriesId && (test.companyId || test.companyStageKey)) {
       const TestSeries = (await import("../../models/testSeries.model.js")).default;
-      const series = await TestSeries.findById(test.testSeriesId).select("category progressionMode passingPercentage").lean();
+      const series = await TestSeries.findById(test.testSeriesId).select("category progressionMode passingPercentage roundsConfig").lean();
 
       if (series && series.category === "COMPANY" && series.progressionMode !== "OPEN" && (test.companyStageOrder || 1) > 1) {
         const targetOrder = test.companyStageOrder || 1;
@@ -195,7 +195,7 @@ export const startTestAttemptController = async (req, res, next) => {
             studentId,
             testId: { $in: prevTestIds },
             status: { $in: ["SUBMITTED", "EVALUATED"] },
-          }).select("testId totalScore maxScore percentage").lean();
+          }).select("testId totalScore maxScore percentage roundAttemptId roundAttemptNumber").lean();
 
           // Group by stage order
           const stagesMap = new Map();
@@ -205,30 +205,82 @@ export const startTestAttemptController = async (req, res, next) => {
             stagesMap.get(order).push(pt);
           }
 
-          const cutoff = series.passingPercentage || 50;
-
           for (const [order, stageTests] of stagesMap.entries()) {
-            let stageTotalMarks = 0;
-            let stageObtainedMarks = 0;
+            const roundConf = series.roundsConfig?.find((r) => r.stageOrder === order);
+            const cutoff = roundConf?.cutoffPercentage ?? series.passingPercentage ?? 50;
 
-            for (const st of stageTests) {
-              const testAttempts = prevAttempts.filter((a) => String(a.testId) === String(st._id));
-              if (testAttempts.length === 0) {
+            const stageTestIdStrs = new Set(stageTests.map((st) => String(st._id)));
+            const stageAttempts = prevAttempts.filter((a) => stageTestIdStrs.has(String(a.testId)));
+
+            // Group stage attempts by roundAttemptId to find Best Complete Round Attempt
+            const roundAttemptGroups = new Map();
+            for (const a of stageAttempts) {
+              const rKey = a.roundAttemptId || `LEGACY_${a.roundAttemptNumber || 1}`;
+              if (!roundAttemptGroups.has(rKey)) {
+                roundAttemptGroups.set(rKey, new Map());
+              }
+              const testMap = roundAttemptGroups.get(rKey);
+              if (!testMap.has(String(a.testId)) || (a.totalScore || 0) > (testMap.get(String(a.testId)).totalScore || 0)) {
+                testMap.set(String(a.testId), a);
+              }
+            }
+
+            let hasQualifiedCompleteRound = false;
+            let bestRoundPct = 0;
+            let hasCompletedAllInAnyRound = false;
+
+            for (const testMap of roundAttemptGroups.values()) {
+              const allCompletedInGroup = stageTests.every((st) => testMap.has(String(st._id)));
+              if (allCompletedInGroup) {
+                hasCompletedAllInAnyRound = true;
+                let grpTotal = 0;
+                let grpObtained = 0;
+                for (const st of stageTests) {
+                  const att = testMap.get(String(st._id));
+                  grpObtained += att.totalScore || 0;
+                  grpTotal += st.totalMarks || att.maxScore || 0;
+                }
+                const pct = grpTotal > 0 ? (grpObtained / grpTotal) * 100 : 0;
+                if (pct > bestRoundPct) bestRoundPct = pct;
+                if (pct >= cutoff) {
+                  hasQualifiedCompleteRound = true;
+                  break;
+                }
+              }
+            }
+
+            // Fallback for legacy attempts without roundAttemptId
+            if (!hasQualifiedCompleteRound && !hasCompletedAllInAnyRound) {
+              const hasAllAttempted = stageTests.every((st) =>
+                stageAttempts.some((a) => String(a.testId) === String(st._id))
+              );
+              if (!hasAllAttempted) {
                 return res.status(403).json({
                   success: false,
                   message: `This stage is locked. Please complete all tests in Round ${order} first.`,
                 });
               }
-              const bestScore = Math.max(...testAttempts.map((a) => a.totalScore || 0));
-              stageObtainedMarks += bestScore;
-              stageTotalMarks += st.totalMarks || 0;
+              let grpTotal = 0;
+              let grpObtained = 0;
+              for (const st of stageTests) {
+                const bestTestAttScore = Math.max(
+                  ...stageAttempts.filter((a) => String(a.testId) === String(st._id)).map((a) => a.totalScore || 0)
+                );
+                grpObtained += bestTestAttScore;
+                grpTotal += st.totalMarks || 0;
+              }
+              const legacyPct = grpTotal > 0 ? (grpObtained / grpTotal) * 100 : 0;
+              if (legacyPct >= cutoff) {
+                hasQualifiedCompleteRound = true;
+              } else {
+                bestRoundPct = legacyPct;
+              }
             }
 
-            const stagePct = stageTotalMarks > 0 ? (stageObtainedMarks / stageTotalMarks) * 100 : 0;
-            if (stagePct < cutoff) {
+            if (!hasQualifiedCompleteRound) {
               return res.status(403).json({
                 success: false,
-                message: `Round ${order} cutoff not met (${Math.round(stagePct)}% / Required ${cutoff}%). Retake Round ${order} to unlock this stage.`,
+                message: `Round ${order} cutoff not met (${Math.round(bestRoundPct)}% / Required ${cutoff}%). Retake Round ${order} to unlock this stage.`,
               });
             }
           }
@@ -417,16 +469,61 @@ export const startTestAttemptController = async (req, res, next) => {
       }
     }
 
-    // Determine testCategory & companyId
+    // Determine testCategory, companyId & atomic round session
     let testCategory = "GENERAL";
     let companyId = test.companyId || (Array.isArray(test.companyIds) && test.companyIds.length ? test.companyIds[0] : null);
+    let roundAttemptId = null;
+    let roundAttemptNumber = 1;
 
     if (test.testSeriesId) {
       const TestSeries = (await import("../../models/testSeries.model.js")).default;
-      const series = await TestSeries.findById(test.testSeriesId).select("category companyId").lean();
+      const series = await TestSeries.findById(test.testSeriesId).select("category companyId mode progressionMode roundsConfig").lean();
       if (series && series.category === "COMPANY") {
         testCategory = "COMPANY";
         if (series.companyId) companyId = series.companyId;
+
+        // Atomic round session logic
+        const stageOrder = test.companyStageOrder || 1;
+        const siblingTests = await Test.find({
+          testSeriesId: test.testSeriesId,
+          isDeleted: 0,
+          isPublished: true,
+          companyStageOrder: stageOrder,
+        }).select("_id").lean();
+
+        const siblingTestIds = siblingTests.map((t) => t._id);
+
+        const priorRoundAttempts = await TestAttempt.find({
+          studentId,
+          testId: { $in: siblingTestIds },
+        }).select("testId status roundAttemptId roundAttemptNumber createdAt").sort({ roundAttemptNumber: -1, createdAt: -1 }).lean();
+
+        if (priorRoundAttempts.length > 0) {
+          const maxNum = priorRoundAttempts[0].roundAttemptNumber || 1;
+          const currentBatch = priorRoundAttempts.filter((a) => (a.roundAttemptNumber || 1) === maxNum);
+
+          const thisTestDone = currentBatch.some(
+            (a) => String(a.testId) === String(test._id) && (a.status === "SUBMITTED" || a.status === "EVALUATED")
+          );
+          const allSiblingsDone = siblingTestIds.every((sId) =>
+            currentBatch.some((a) => String(a.testId) === String(sId) && (a.status === "SUBMITTED" || a.status === "EVALUATED"))
+          );
+
+          if (!thisTestDone && !allSiblingsDone && currentBatch[0].roundAttemptId) {
+            // Sibling test(s) started/completed in this round attempt, but this test is not yet completed -> RESUME round session!
+            roundAttemptId = currentBatch[0].roundAttemptId;
+            roundAttemptNumber = maxNum;
+          } else {
+            // Start a new round attempt cycle
+            roundAttemptNumber = maxNum + 1;
+            const uid = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36);
+            roundAttemptId = `ROUND_${stageOrder}_${uid}`;
+          }
+        } else {
+          roundAttemptNumber = 1;
+          const uid = crypto.randomUUID ? crypto.randomUUID() : Date.now().toString(36);
+          roundAttemptId = `ROUND_${stageOrder}_${uid}`;
+        }
       }
     }
 
@@ -442,6 +539,10 @@ export const startTestAttemptController = async (req, res, next) => {
       testCategory,
       companyId: companyId || null,
       companyStageKey: test.companyStageKey || null,
+      roundAttemptId,
+      roundAttemptNumber,
+      isCompleted: false,
+      isPassed: false,
       startedAt,
       endsAt,
       duration,

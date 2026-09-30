@@ -41,6 +41,11 @@ const TestSeriesSchema = new mongoose.Schema(
       default: null,
       index: true,
     },
+    mode: {
+      type: String,
+      enum: ["PRACTICE", "SIMULATION"],
+      default: "SIMULATION",
+    },
     progressionMode: {
       type: String,
       enum: ["SEQUENTIAL", "OPEN"],
@@ -54,6 +59,19 @@ const TestSeriesSchema = new mongoose.Schema(
       type: Number,
       default: 50,
     },
+    roundsConfig: [
+      {
+        stageOrder: { type: Number, required: true },
+        stageKey: { type: String, required: true },
+        stageName: { type: String, default: "" },
+        cutoffPercentage: { type: Number, default: 50 },
+        retakePolicy: {
+          type: String,
+          enum: ["ALL_TESTS", "FAILED_ONLY"],
+          default: "ALL_TESTS",
+        },
+      },
+    ],
   },
   { timestamps: true }
 );

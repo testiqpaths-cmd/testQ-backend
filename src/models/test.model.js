@@ -15,6 +15,8 @@ const testSchema = new Schema({
   companyStageOrder: { type: Number, default: 1 }, // 1, 2, 3...
   passingPercentage: { type: Number, default: 50 },
   questions: [{ type: Types.ObjectId, ref: "Question" }],
+  // Immutable frozen question content snapshot captured at publish time
+  questionSnapshot: [{ type: Schema.Types.Mixed, default: undefined }],
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
