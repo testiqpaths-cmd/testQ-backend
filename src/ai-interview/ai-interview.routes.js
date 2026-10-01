@@ -13,6 +13,9 @@ import { audioUpload } from "./middlewares/audio-upload.middleware.js";
 
 const router = express.Router();
 
+// Direct fast audio stream for HTML5 audio tags (keyed by SHA256 audio hash, zero auth friction for media playback)
+router.get("/audio/stream/:audioHash", aiInterviewController.streamQuestionAudio);
+
 // All AI Interview routes require authentication and the AI_INTERVIEW
 // plan feature (seeded enabled on every plan for now — see
 // database/migrations/seed-ai-interview-feature.js — so this is the gating

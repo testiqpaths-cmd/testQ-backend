@@ -10,7 +10,20 @@ const aiQuestionResponseSchema = z.object({
   topic: z.string().trim().min(1),
   difficulty: z.enum(["EASY", "MEDIUM", "HARD", "ADAPTIVE"]),
   questionType: z
-    .enum(["TECHNICAL", "CONCEPTUAL", "PROBLEM_SOLVING", "BEHAVIORAL", "PROJECT", "HR"])
+    .enum([
+      "TECHNICAL",
+      "CONCEPTUAL",
+      "PROBLEM_SOLVING",
+      "BEHAVIORAL",
+      "PROJECT",
+      "HR",
+      "INITIAL",
+      "CLARIFICATION",
+      "DEPTH_PROBE",
+      "PRACTICAL",
+      "SCENARIO",
+      "VALIDATION",
+    ])
     .optional()
     .default("TECHNICAL"),
   competency: z.string().optional().default("Technical Knowledge"),
@@ -150,41 +163,73 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
       previousQuestions = [],
       conceptsDemonstrated = [],
       conceptsMissing = [],
+      followUpType = "DEPTH_PROBE",
       interviewId = null,
     } = context;
+
+    let targetQuestionType = "DEPTH_PROBE";
+    if (followUpType === "CLARIFICATION" || followUpType === "EASY") {
+      targetQuestionType = "CLARIFICATION";
+    } else if (followUpType === "PRACTICAL" || followUpType === "HARD") {
+      targetQuestionType = "PRACTICAL";
+    } else if (followUpType === "SCENARIO") {
+      targetQuestionType = "SCENARIO";
+    } else if (followUpType === "VALIDATION") {
+      targetQuestionType = "VALIDATION";
+    }
 
     const missingStr =
       conceptsMissing.length > 0
         ? conceptsMissing.join(", ")
-        : "practical implementation details and depth";
+        : "practical implementation details, trade-offs, and depth";
+
+    const misconceptionsStr =
+      Array.isArray(options?.misconceptions) && options.misconceptions.length > 0
+        ? `\n- Identified Misconceptions to probe: ${options.misconceptions.join(", ")}`
+        : "";
+
+    const authenticityStr =
+      options?.experienceAuthenticity === "THEORETICAL_TEXTBOOK"
+        ? "\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario to test genuine project experience."
+        : "";
 
     const systemPrompt = `You are a professional technical interviewer for TestQ conducting an interview for the role of ${role} (${experienceLevel}).
 The candidate was asked: "${previousQuestion}"
 The candidate provided this answer: "${candidateAnswer}"
 Evaluation Notes:
 - Concepts demonstrated: ${conceptsDemonstrated.join(", ") || "Basic explanation"}
-- Missing or shallow aspects: ${missingStr}
+- Missing or shallow aspects: ${missingStr}${misconceptionsStr}${authenticityStr}
+- Probe type requested: ${targetQuestionType} (${difficulty})
 
 Your task is to generate ONE single focused follow-up question.
 STRICT RULES:
-1. Ground the follow-up question directly in what the candidate said and probe deeper into the missing aspects, practical implementation details, trade-offs, or a concrete example.
-2. DO NOT repeat or paraphrase the original question "${previousQuestion}".
-3. DO NOT repeat any of these questions previously asked in the interview:
+1. Ground the follow-up question directly in what the candidate said and probe deeper into:
+   - Misconceptions (if candidate voiced a misconception, constructively challenge it without sounding condescending).
+   - Experience Authenticity (if answer sounded textbook, ask how they implemented, debugged, or configured this in their actual project experience).
+   - Missing aspects ("${missingStr}"), internal mechanics, or concrete production trade-offs.
+   - If candidate introduced a relevant adjacent concept (e.g., ORM -> N+1 queries -> database indexing), controlled branching into that related concept is encouraged.
+2. Question Types:
+   - If CLARIFICATION: ask a constructive clarifying question addressing the core concepts they touched on.
+   - If DEPTH_PROBE: probe internal mechanics, execution lifecycle, or how it works under the hood.
+   - If PRACTICAL / SCENARIO: ask for real-world application, optimization, or trade-offs between alternatives.
+   - If VALIDATION: present a brief concrete technical scenario to validate hands-on experience.
+3. DO NOT repeat or paraphrase the original question "${previousQuestion}".
+4. DO NOT repeat any of these questions previously asked in the interview:
 ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (None yet)"}
-4. The question must be constructive, concise, direct, and conversational.
-5. Target topic: ${topic}.
-6. Target difficulty: ${difficulty}.
-7. Return ONLY valid JSON matching this exact structure:
+5. The question must be constructive, concise, direct, and conversational.
+6. Target topic: ${topic}.
+7. Target difficulty: ${difficulty}.
+8. Return ONLY valid JSON matching this exact structure:
 {
   "question": "Your targeted follow-up question here",
   "concept": "${topic.toLowerCase()} follow-up",
   "topic": "${topic.toUpperCase()}",
   "difficulty": "${difficulty.toUpperCase()}",
-  "questionType": "TECHNICAL",
+  "questionType": "${targetQuestionType}",
   "competency": "Technical Knowledge"
 }`;
 
-    const userPrompt = `Generate a targeted follow-up question probing "${missingStr}" based on what the candidate explained for "${topic}".`;
+    const userPrompt = `Generate a targeted ${targetQuestionType} follow-up question probing "${missingStr}" based on what the candidate explained for "${topic}".`;
 
     try {
       const rawAiResponse = await this.llm.generateStructuredJson({
@@ -199,11 +244,12 @@ ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (No
           concept: String(rawAiResponse.concept || `${topic.toLowerCase()} follow-up`).trim(),
           topic: String(rawAiResponse.topic || topic).toUpperCase(),
           difficulty: String(rawAiResponse.difficulty || difficulty).toUpperCase(),
+          questionType: rawAiResponse.questionType || targetQuestionType,
         };
 
         const validated = aiQuestionResponseSchema.safeParse(normalized);
         if (validated.success) {
-          logger.info(`AI generated follow-up question on topic ${topic} (concept: ${validated.data.concept})`);
+          logger.info(`AI generated follow-up question on topic ${topic} (type: ${validated.data.questionType}, concept: ${validated.data.concept})`);
           await questionBankService.saveGeneratedQuestion({
             ...validated.data,
             role,
@@ -235,7 +281,7 @@ ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (No
       concept: `${topic.toLowerCase()} practical application`,
       topic: topic.toUpperCase(),
       difficulty: difficulty.toUpperCase(),
-      questionType: "TECHNICAL",
+      questionType: targetQuestionType,
       competency: "Technical Knowledge",
       questionSource: "fallback",
     };

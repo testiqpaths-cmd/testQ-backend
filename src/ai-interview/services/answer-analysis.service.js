@@ -23,38 +23,58 @@ export class AnswerAnalysisService {
    */
   isExplicitKnowledgeGap(rawAnswer) {
     if (!rawAnswer || typeof rawAnswer !== "string") return false;
-    const clean = rawAnswer.trim().toLowerCase();
+    const clean = rawAnswer.trim().toLowerCase().replace(/[.!?,…]+$/g, "").trim();
 
-    // Regex patterns for explicit admission of not knowing
+    // Direct hard admissions of not knowing or wishing to skip
+    const HARD_GAP_PATTERNS = [
+      /^(?:sorry,?\s*)?(?:i\s+)?(?:don'?t|do\s+not)\s+know$/i,
+      /^(?:sorry,?\s*)?(?:i'?m|i\s+am)\s+not\s+(?:really\s+)?sure$/i,
+      /^(?:sorry,?\s*)?not\s+really\s+sure(?:\s+about\s+this)?$/i,
+      /^(?:have\s+)?no\s+idea$/i,
+      /^(?:pass|skip)(?:\s+(?:this\s+question|on\s+this))?$/i,
+      /^(?:can'?t|cannot)\s+(?:recall|remember|answer)$/i,
+      /^(?:i\s+)?(?:don'?t|do\s+not)\s+remember$/i,
+      /^(?:never\s+used\s+it(?:\s+before)?)$/i,
+    ];
+
+    if (HARD_GAP_PATTERNS.some((p) => p.test(clean))) return true;
+
+    // Check if phrase contains explicit gap language
     const EXPLICIT_GAP_PATTERNS = [
       /\b(?:i\s+)?(?:don'?t|do\s+not)\s+know\b/i,
       /\b(?:i'?m|i\s+am)\s+not\s+(?:really\s+)?sure\b/i,
-      /\bnot\s+(?:really\s+)?sure\b/i,
+      /\bnot\s+really\s+sure\b/i,
       /\b(?:haven'?t|have\s+never|never)\s+(?:worked|dealt)\s+with\b/i,
       /\b(?:haven'?t|have\s+never|never)\s+used\b/i,
-      /\b(?:don'?t|do\s+not)\s+remember\b/i,
-      /\b(?:can'?t|cannot)\s+recall\b/i,
-      /\b(?:can'?t|cannot)\s+answer\b/i,
       /\b(?:have\s+)?no\s+idea\b/i,
       /\bpass\s+(?:this\s+question|on\s+this)?\b/i,
       /\bskip\s+(?:this\s+question)?\b/i,
+      /\b(?:can'?t|cannot)\s+answer\b/i,
+      /\b(?:don'?t|can'?t|cannot)\s+remember\b/i,
     ];
 
     const matchesPattern = EXPLICIT_GAP_PATTERNS.some((pattern) => pattern.test(clean));
     if (!matchesPattern) return false;
 
-    // Distinguish explicit gap from a detailed answer that merely hedges (e.g. "I think X is Y, but I'm not sure if Z"):
-    // If the answer is short (< 20 words) and contains gap language, it is definitely a knowledge gap.
-    const wordCount = clean.split(/\s+/).filter(Boolean).length;
-    if (wordCount < 20) return true;
+    const words = clean.split(/\s+/).filter(Boolean);
+    const wordCount = words.length;
 
-    // If longer, check whether the knowledge gap phrase dominates the response
-    const gapOnlyPatterns = [
-      /^(?:sorry,?\s*)?(?:i\s+)?(?:don'?t|do\s+not)\s+know/i,
-      /^(?:sorry,?\s*)?(?:i'?m|i\s+am)\s+not\s+sure/i,
-      /^(?:i\s+)?(?:haven'?t|have\s+never)\s+worked\s+with/i,
+    // If answer is short (< 8 words) and contains gap language, it's a knowledge gap.
+    if (wordCount < 8) return true;
+
+    // Distinguish explicit gap from hedging with substantive technical explanation:
+    // e.g. "I'm not completely sure, but I think Django middleware intercepts the request..."
+    const hasHedgingExplanation = /\b(?:but|however|i\s+think|i\s+believe|perhaps|might\s+be|could\s+be)\b/i.test(clean);
+    if (hasHedgingExplanation && wordCount >= 8) {
+      return false; // Let the AI evaluate the technical accuracy!
+    }
+
+    // Dominant gap phrases (e.g. "Sorry, I don't know anything about this topic at all")
+    const gapDominantPatterns = [
+      /^(?:sorry,?\s*)?(?:i\s+)?(?:don'?t|do\s+not)\s+know(?:\s+anything|\s+much)?\s*(?:about)?/i,
+      /^(?:sorry,?\s*)?(?:i\s+)?(?:haven'?t|have\s+never)\s+(?:worked|used)/i,
     ];
-    return gapOnlyPatterns.some((p) => p.test(clean));
+    return gapDominantPatterns.some((p) => p.test(clean)) && wordCount < 20;
   }
 
   /**
@@ -159,11 +179,14 @@ export class AnswerAnalysisService {
     let topicContinuation = true;
 
     let depthLevel = "ADEQUATE";
+    let knowledgeLevel = "INTERMEDIATE";
+    let knowledgeConfidence = 60;
+    let depthEstablished = false;
+    let practicalUnderstanding = "ADEQUATE";
+    let followUpType = "NONE";
+    let aiResult = null;
 
     if (isNoResponse) {
-      // The candidate said/typed nothing before the response timer ran
-      // out. Score it as a non-answer — no follow-up, drop difficulty a
-      // notch, keep covering the topic with the next question.
       logger.info(
         `No response recorded for session ${session.interviewId} (turn ${turn.turnNumber}). Scoring as SKIPPED.`
       );
@@ -173,6 +196,11 @@ export class AnswerAnalysisService {
       completeness = 0;
       confidence = 0;
       depthLevel = "SHALLOW";
+      knowledgeLevel = "NONE";
+      knowledgeConfidence = 100;
+      depthEstablished = false;
+      practicalUnderstanding = "NONE";
+      followUpType = "NONE";
       conceptsDemonstrated = [];
       conceptsMissing = [turn.topic];
       feedbackSummary = "No answer was given before the response time limit.";
@@ -180,7 +208,6 @@ export class AnswerAnalysisService {
       difficultyRec = Difficulty.EASY;
       topicContinuation = true;
     } else if (isExplicitGap) {
-      // Deterministic Knowledge Gap Enforcement
       logger.info(
         `Explicit knowledge gap detected for session ${session.interviewId} (turn ${turn.turnNumber}). Strict no-followup enforced.`
       );
@@ -190,6 +217,11 @@ export class AnswerAnalysisService {
       completeness = 0;
       confidence = 100; // Certain in not knowing
       depthLevel = "SHALLOW";
+      knowledgeLevel = "NONE";
+      knowledgeConfidence = 100;
+      depthEstablished = true;
+      practicalUnderstanding = "NONE";
+      followUpType = "NONE";
       conceptsDemonstrated = [];
       conceptsMissing = [turn.topic];
       feedbackSummary = "Explicit knowledge gap expressed. Moving to next concept.";
@@ -197,14 +229,29 @@ export class AnswerAnalysisService {
       difficultyRec = Difficulty.EASY;
       topicContinuation = false;
     } else {
+      let previousSessionTurns = [];
+      try {
+        previousSessionTurns = await InterviewTurn.find({
+          sessionId: session._id,
+          _id: { $ne: turn._id },
+          candidateAnswer: { $exists: true, $ne: null },
+        })
+          .sort({ turnNumber: 1 })
+          .select("turnNumber question candidateAnswer topic")
+          .lean();
+      } catch {
+        // Non-fatal
+      }
+
       // Delegate to AI Analysis Layer
-      const aiResult = await this.ai.analyzeCandidateAnswer({
+      aiResult = await this.ai.analyzeCandidateAnswer({
         question: turn.question,
         candidateAnswer: turn.candidateAnswer,
         topic: turn.topic,
         difficulty: turn.difficulty,
         role: session.role,
         experienceLevel: session.experienceLevel,
+        previousTurns: previousSessionTurns,
         interviewId: session.interviewId,
       });
 
@@ -214,6 +261,21 @@ export class AnswerAnalysisService {
       completeness = aiResult.completenessScore ?? 50;
       confidence = aiResult.confidence ?? 70;
       depthLevel = aiResult.depthLevel || (completeness < 70 ? "SHALLOW" : "ADEQUATE");
+      knowledgeLevel =
+        aiResult.knowledgeLevel ||
+        (correctness >= 90
+          ? "EXCELLENT"
+          : correctness >= 75
+          ? "STRONG"
+          : correctness >= 50
+          ? "INTERMEDIATE"
+          : correctness >= 25
+          ? "BASIC"
+          : "NONE");
+      knowledgeConfidence = aiResult.knowledgeConfidence ?? 70;
+      depthEstablished = Boolean(aiResult.depthEstablished);
+      practicalUnderstanding = aiResult.practicalUnderstanding || "ADEQUATE";
+      followUpType = aiResult.followUpType || "NONE";
       conceptsDemonstrated = aiResult.conceptsDemonstrated || [];
       conceptsMissing = aiResult.conceptsMissing || [];
       feedbackSummary = aiResult.feedbackSummary || "Candidate answer evaluated.";
@@ -222,18 +284,30 @@ export class AnswerAnalysisService {
       topicContinuation = aiResult.topicContinuationRecommended ?? true;
     }
 
-    // 5. BACKEND AUTHORITY: Authorize or reject follow-up
-    // Strict rules:
-    // - Never follow up on KNOWLEDGE_GAP
-    // - Never exceed maxFollowUpsPerQuestion (strict 1)
-    // - Never exceed maxGlobalFollowUps
-    // - Never follow up if timeRemaining < 120s
-    // - Never follow up if consecutive knowledge gaps in topic >= 2
-    // - Never follow up on introduction turn
+    const evidenceLevel = isNoResponse
+      ? "LOW"
+      : isExplicitGap
+      ? "HIGH" // Certain evidence of gap
+      : aiResult?.evidenceLevel || (depthLevel === "DEEP" ? "MEDIUM" : "LOW");
+
+    const contradictionDetected = Boolean(aiResult?.contradictionDetected);
+    const contradictionDetails = aiResult?.contradictionDetails || null;
+    const misconceptions = Array.isArray(aiResult?.misconceptions) ? aiResult.misconceptions : [];
+    const experienceAuthenticity = aiResult?.experienceAuthenticity || "UNPROVEN";
+
+    // 5. BACKEND AUTHORITY: Authorize or reject follow-up based on Knowledge Depth
+    // - Explicit gap / skipped -> never follow up
+    // - Depth already established -> never follow up (move forward)
+    // - Respect topic follow-up ceiling (max 3 per topic)
+    // - Respect global follow-up ceiling
+    // - Time remaining > 120s
+    // - Introduction turn -> never follow up
     let followUpAllowed = false;
-    const maxFollowUpsPerQ = plan?.maxFollowUpsPerQuestion ?? 1;
+    const maxFollowUpsPerQ = plan?.maxFollowUpsPerQuestion ?? 3;
+    const maxFollowUpsPerTopic = plan?.maxFollowUpsPerTopic ?? 3;
     const maxGlobalFollowUps = plan?.maxGlobalFollowUps ?? 3;
     const isAlreadyFollowUp = Boolean(turn.parentTurnId || (turn.followUp && maxFollowUpsPerQ <= 1));
+    const topicFollowUps = session.topicFollowUpCount || 0;
 
     const isIntro =
       turn.turnNumber === 1 ||
@@ -242,15 +316,25 @@ export class AnswerAnalysisService {
 
     const isQualityCandidateForFollowUp =
       finalStatus === AnswerStatus.PARTIAL ||
-      (finalStatus === AnswerStatus.ACCURATE && (depthLevel === "SHALLOW" || completeness < 75 || aiFollowUpRecommended));
+      contradictionDetected ||
+      misconceptions.length > 0 ||
+      (Array.isArray(conceptsMissing) && conceptsMissing.length > 0) ||
+      (finalStatus === AnswerStatus.ACCURATE &&
+        (depthLevel === "SHALLOW" ||
+          depthLevel === "ADEQUATE" ||
+          !depthEstablished ||
+          completeness < 75 ||
+          aiFollowUpRecommended));
 
     if (
       !isIntro &&
       !isAlreadyFollowUp &&
       !isExplicitGap &&
+      !isNoResponse &&
+      !depthEstablished &&
       isQualityCandidateForFollowUp &&
-      aiFollowUpRecommended &&
       (session.followUpCount || 0) < maxFollowUpsPerQ &&
+      topicFollowUps < maxFollowUpsPerTopic &&
       (session.globalFollowUpCount || 0) < maxGlobalFollowUps &&
       session.timeRemaining > 120 &&
       (session.candidatePerformance?.consecutiveKnowledgeGapsInTopic || 0) < 2
@@ -260,20 +344,30 @@ export class AnswerAnalysisService {
       followUpAllowed = false;
     }
 
-    // 6. Update the existing InterviewTurn
+    // 6. Update the existing InterviewTurn with full Knowledge State
     turn.answerStatus = finalStatus;
     turn.relevanceScore = relevance;
     turn.correctnessScore = correctness;
     turn.completenessScore = completeness;
     turn.confidence = confidence;
     turn.depthLevel = depthLevel;
+    turn.knowledgeLevel = knowledgeLevel;
+    turn.knowledgeConfidence = knowledgeConfidence;
+    turn.depthEstablished = depthEstablished;
+    turn.evidenceLevel = evidenceLevel;
+    turn.contradictionDetected = contradictionDetected;
+    turn.contradictionDetails = contradictionDetails;
+    turn.misconceptions = misconceptions;
+    turn.experienceAuthenticity = experienceAuthenticity;
+    turn.practicalUnderstanding = practicalUnderstanding;
+    turn.followUpType = followUpType;
     turn.conceptsDemonstrated = conceptsDemonstrated;
     turn.conceptsMissing = conceptsMissing;
     turn.feedbackSummary = feedbackSummary;
     turn.followUpRecommended = aiFollowUpRecommended;
     turn.followUpAllowed = followUpAllowed;
     if (turn.parentTurnId) {
-      turn.followUp = true; // Preserve that this turn was a follow-up question
+      turn.followUp = true; // Preserve follow-up marker
     }
     turn.difficultyRecommendation = difficultyRec;
     turn.topicContinuationRecommended = topicContinuation;
@@ -282,7 +376,7 @@ export class AnswerAnalysisService {
 
     await turn.save();
 
-    // 7. Update Session Topic Coverage State
+    // 7. Update Session Topic State (Coverage & Knowledge State)
     if (Array.isArray(session.coverageState)) {
       const topicIndex = session.coverageState.findIndex(
         (c) => c.topic.toUpperCase() === turn.topic.toUpperCase()
@@ -297,18 +391,194 @@ export class AnswerAnalysisService {
           item.knowledgeGaps = (item.knowledgeGaps || 0) + 1;
         }
 
-        // Calculate knowledge level based on correctness score
-        if (correctness >= 80) item.knowledgeLevel = "ADVANCED";
-        else if (correctness >= 55) item.knowledgeLevel = "MEDIUM";
-        else if (correctness >= 30) item.knowledgeLevel = "BASIC";
-        else item.knowledgeLevel = "NONE";
+        if (turn.parentTurnId || turn.followUp) {
+          item.followupsAsked = (item.followupsAsked || 0) + 1;
+        }
+
+        item.bestScore = Math.max(item.bestScore || 0, correctness);
+
+        // Aggregate concepts
+        const currentTested = new Set(item.conceptsTested || []);
+        if (turn.concept) currentTested.add(turn.concept);
+        conceptsDemonstrated.forEach((c) => currentTested.add(c));
+        conceptsMissing.forEach((c) => currentTested.add(c));
+        item.conceptsTested = Array.from(currentTested);
+
+        const currentKnown = new Set(item.conceptsKnown || []);
+        conceptsDemonstrated.forEach((c) => currentKnown.add(c));
+        item.conceptsKnown = Array.from(currentKnown);
+
+        const currentMissing = new Set(item.conceptsMissing || []);
+        conceptsMissing.forEach((c) => currentMissing.add(c));
+        item.conceptsMissing = Array.from(currentMissing);
+
+        // Calculate average score across turns for this topic
+        const pastTopicTurns = await InterviewTurn.find({
+          sessionId: session._id,
+          topic: turn.topic,
+          correctnessScore: { $ne: null },
+        }).select("correctnessScore difficulty followUpType parentTurnId depthLevel").lean();
+
+        if (pastTopicTurns.length > 0) {
+          const sum = pastTopicTurns.reduce((acc, t) => acc + (t.correctnessScore || 0), 0);
+          item.averageScore = Math.round(sum / pastTopicTurns.length);
+        } else {
+          item.averageScore = correctness;
+        }
+
+        // Establish topic knowledge level (NONE | BASIC | INTERMEDIATE | STRONG | STRONG_FOUNDATION | EXCELLENT)
+        // and distinguish fundamental mastery vs advanced depth
+        let fundamentalKnowledge = null;
+        let advancedDepth = null;
+        let knowledgeSummary = null;
+
+        if (pastTopicTurns.length > 1) {
+          const hardTurns = pastTopicTurns.filter(
+            (t) => t.difficulty === "HARD" || t.followUpType === "PRACTICAL" || t.followUpType === "VALIDATION"
+          );
+          const basicTurns = pastTopicTurns.filter(
+            (t) => t.difficulty !== "HARD" && t.followUpType !== "PRACTICAL" && t.followUpType !== "VALIDATION"
+          );
+
+          const basicScore = basicTurns.length > 0
+            ? Math.round(basicTurns.reduce((s, t) => s + (t.correctnessScore || 0), 0) / basicTurns.length)
+            : item.bestScore;
+
+          const advScore = hardTurns.length > 0
+            ? Math.round(hardTurns.reduce((s, t) => s + (t.correctnessScore || 0), 0) / hardTurns.length)
+            : null;
+
+          if (basicScore >= 90) fundamentalKnowledge = "EXCELLENT";
+          else if (basicScore >= 75) fundamentalKnowledge = "STRONG";
+          else if (basicScore >= 50) fundamentalKnowledge = "INTERMEDIATE";
+          else fundamentalKnowledge = "WEAK";
+
+          if (advScore != null) {
+            if (advScore >= 80) advancedDepth = "EXCELLENT";
+            else if (advScore >= 65) advancedDepth = "STRONG";
+            else if (advScore >= 50) advancedDepth = "INTERMEDIATE";
+            else advancedDepth = "WEAK";
+          } else {
+            advancedDepth = item.depthLevel === "DEEP" ? "STRONG" : "UNPROVEN";
+          }
+
+          if ((fundamentalKnowledge === "EXCELLENT" || fundamentalKnowledge === "STRONG") && advancedDepth === "WEAK") {
+            item.knowledgeLevel = "STRONG_FOUNDATION";
+            knowledgeSummary = "Strong foundation / incomplete depth";
+          } else if (item.bestScore >= 90 && advancedDepth !== "WEAK") {
+            item.knowledgeLevel = "EXCELLENT";
+            knowledgeSummary = "Comprehensive mastery across fundamentals and advanced topics";
+          } else if (item.bestScore >= 75 && advancedDepth !== "WEAK") {
+            item.knowledgeLevel = "STRONG";
+            knowledgeSummary = "Solid understanding with adequate depth";
+          } else if (item.bestScore >= 55) {
+            item.knowledgeLevel = "INTERMEDIATE";
+            knowledgeSummary = "Moderate working knowledge";
+          } else if (item.bestScore >= 30) {
+            item.knowledgeLevel = "BASIC";
+            knowledgeSummary = "Foundational surface knowledge";
+          } else {
+            item.knowledgeLevel = "NONE";
+            knowledgeSummary = "Foundational knowledge gap identified";
+          }
+        } else {
+          // Single turn
+          if (item.bestScore >= 90) {
+            item.knowledgeLevel = "EXCELLENT";
+            fundamentalKnowledge = "EXCELLENT";
+            advancedDepth = item.depthLevel === "DEEP" ? "EXCELLENT" : "UNPROVEN";
+          } else if (item.bestScore >= 75) {
+            item.knowledgeLevel = "STRONG";
+            fundamentalKnowledge = "STRONG";
+            advancedDepth = item.depthLevel === "DEEP" ? "STRONG" : "UNPROVEN";
+          } else if (item.bestScore >= 55) {
+            item.knowledgeLevel = "INTERMEDIATE";
+            fundamentalKnowledge = "INTERMEDIATE";
+            advancedDepth = "WEAK";
+          } else if (item.bestScore >= 30) {
+            item.knowledgeLevel = "BASIC";
+            fundamentalKnowledge = "BASIC";
+            advancedDepth = "WEAK";
+          } else {
+            item.knowledgeLevel = "NONE";
+            fundamentalKnowledge = "WEAK";
+            advancedDepth = "WEAK";
+          }
+        }
+
+        item.fundamentalKnowledge = fundamentalKnowledge;
+        item.advancedDepth = advancedDepth;
+        item.knowledgeSummary = knowledgeSummary;
+
+        // Breadth Level (based on distinct verified concepts)
+        const knownCount = item.conceptsKnown?.length || 0;
+        if (knownCount >= 4) {
+          item.breadthLevel = "HIGH";
+        } else if (knownCount >= 2) {
+          item.breadthLevel = "MEDIUM";
+        } else {
+          item.breadthLevel = "LOW";
+        }
+
+        // Depth Level (highest demonstrated depth)
+        if (depthLevel === "DEEP" || item.depthLevel === "DEEP") {
+          item.depthLevel = "DEEP";
+        } else if (depthLevel === "ADEQUATE" || item.depthLevel === "ADEQUATE") {
+          item.depthLevel = "ADEQUATE";
+        } else {
+          item.depthLevel = "SHALLOW";
+        }
+
+        // Evidence Level
+        const totalTurnsOnTopic = (item.questionsAsked || 1) + (item.followupsAsked || 0);
+        if (totalTurnsOnTopic >= 3 && item.bestScore >= 75 && item.depthLevel !== "SHALLOW") {
+          item.evidenceLevel = "HIGH";
+        } else if (totalTurnsOnTopic >= 2 || item.depthLevel === "DEEP") {
+          item.evidenceLevel = "MEDIUM";
+        } else {
+          item.evidenceLevel = "LOW";
+        }
+
+        // Misconceptions & Contradictions
+        const allMisconceptions = new Set(item.misconceptions || []);
+        misconceptions.forEach((m) => allMisconceptions.add(m));
+        item.misconceptions = Array.from(allMisconceptions);
+
+        const allContradictions = new Set(item.contradictions || []);
+        if (contradictionDetected && contradictionDetails) {
+          allContradictions.add(contradictionDetails);
+        }
+        item.contradictions = Array.from(allContradictions);
+
+        // Experience Authenticity
+        if (experienceAuthenticity === "PRODUCTION_VERIFIED" || item.experienceAuthenticity === "PRODUCTION_VERIFIED") {
+          item.experienceAuthenticity = "PRODUCTION_VERIFIED";
+        } else if (experienceAuthenticity === "THEORETICAL_TEXTBOOK" || item.experienceAuthenticity === "THEORETICAL_TEXTBOOK") {
+          item.experienceAuthenticity = "THEORETICAL_TEXTBOOK";
+        } else if (experienceAuthenticity === "SURFACE_FAMILIARITY") {
+          item.experienceAuthenticity = "SURFACE_FAMILIARITY";
+        }
+
+        // Depth Established (Evidence-based: requires deep understanding or successful follow-up probe)
+        const isTurnDepthProven =
+          (depthEstablished === true && depthLevel !== "SHALLOW") ||
+          (depthLevel === "DEEP" && practicalUnderstanding === "DEEP") ||
+          (Boolean(turn.parentTurnId || turn.isFollowUp) && correctness >= 75 && depthLevel !== "SHALLOW");
+
+        item.depthEstablished = Boolean(item.depthEstablished || isTurnDepthProven);
+        item.topicState = item.depthEstablished ? "ESTABLISHED" : "EXPLORING";
 
         // Coverage formula: proportion of target questions asked
-        const targetQ = plan?.maxQuestionsPerTopic || 3;
+        const targetQ = plan?.maxQuestionsPerTopic || 4;
         item.coveragePercentage = Math.min(
           100,
           Math.round(((item.questionsAsked || 1) / targetQ) * 100)
         );
+
+        item.shouldContinue =
+          !item.depthEstablished &&
+          (item.questionsAsked || 0) < targetQ &&
+          (item.followupsAsked || 0) < maxFollowUpsPerTopic;
 
         session.coverageState[topicIndex] = item;
       }

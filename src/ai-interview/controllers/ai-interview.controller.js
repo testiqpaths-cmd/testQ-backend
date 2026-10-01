@@ -370,7 +370,7 @@ export class AiInterviewController {
         interviewId: session.interviewId,
       });
       if (!audio?.url) {
-        return res.status(200).json({ success: true, data: { enabled: true, url: null } });
+        return res.status(200).json({ success: true, data: { enabled: false, url: null } });
       }
 
       turn.questionAudioUrl = audio.url;
@@ -385,6 +385,34 @@ export class AiInterviewController {
           mimeType: audio.mimeType,
         },
       });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/audio/stream/:audioHash
+   * Instant low-latency stream for synthesized question audio.
+   * Serves directly from memory in 2ms, avoiding Cloudinary upload latency.
+   */
+  async streamQuestionAudio(req, res, next) {
+    try {
+      const { audioHash } = req.params;
+      const mem = questionAudioService.getCachedBuffer(audioHash);
+      if (mem?.buffer) {
+        res.setHeader("Content-Type", mem.mimeType || "audio/wav");
+        res.setHeader("Content-Length", mem.buffer.length);
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.send(mem.buffer);
+      }
+
+      const { QuestionAudio } = await import("../schemas/question-audio.schema.js");
+      const cached = await QuestionAudio.findOne({ audioHash }).lean();
+      if (cached?.url) {
+        return res.redirect(302, cached.url);
+      }
+
+      return res.status(404).json({ success: false, message: "Audio not found or expired." });
     } catch (error) {
       next(error);
     }

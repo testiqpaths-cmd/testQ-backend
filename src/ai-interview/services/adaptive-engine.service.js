@@ -25,6 +25,12 @@ export class AdaptiveEngineService {
       return {
         action: InterviewAction.COMPLETE_INTERVIEW,
         reason: "Interview session is already marked as completed.",
+        decisionAudit: {
+          decision: "COMPLETE_INTERVIEW",
+          reason: "SESSION_ALREADY_COMPLETED",
+          trigger: "SESSION_COMPLETED",
+          decisionConfidence: 1.0,
+        },
       };
     }
 
@@ -35,6 +41,12 @@ export class AdaptiveEngineService {
       return {
         action: InterviewAction.COMPLETE_INTERVIEW,
         reason: "Interview duration has expired.",
+        decisionAudit: {
+          decision: "COMPLETE_INTERVIEW",
+          reason: "DURATION_EXPIRED",
+          trigger: "DURATION_EXPIRED",
+          decisionConfidence: 1.0,
+        },
       };
     }
 
@@ -46,6 +58,12 @@ export class AdaptiveEngineService {
       return {
         action: InterviewAction.COMPLETE_INTERVIEW,
         reason: "Insufficient time remaining to ask another question.",
+        decisionAudit: {
+          decision: "COMPLETE_INTERVIEW",
+          reason: "INSUFFICIENT_TIME_REMAINING",
+          trigger: "DURATION_EXPIRED",
+          decisionConfidence: 0.98,
+        },
       };
     }
 
@@ -58,6 +76,12 @@ export class AdaptiveEngineService {
       return {
         action: InterviewAction.COMPLETE_INTERVIEW,
         reason: `Global question limit of ${globalLimit} questions reached.`,
+        decisionAudit: {
+          decision: "COMPLETE_INTERVIEW",
+          reason: "GLOBAL_QUESTION_LIMIT_REACHED",
+          trigger: "GLOBAL_LIMIT_REACHED",
+          decisionConfidence: 1.0,
+        },
       };
     }
 
@@ -98,43 +122,123 @@ export class AdaptiveEngineService {
         nextTopic,
         difficulty: nextDifficulty,
         reason: `Introduction completed; transitioning to first interview topic: ${nextTopic}.`,
+        decisionAudit: {
+          decision: "SWITCH_TOPIC",
+          reason: "INTRODUCTION_COMPLETED",
+          trigger: "INTRODUCTION_TRANSITION",
+          targetTopic: nextTopic,
+          decisionConfidence: 1.0,
+        },
       };
     }
 
-    // 5. Follow-Up Authorization Gate
-    // Rules for FOLLOW_UP:
-    // - Answer must be PARTIAL or shallow ACCURATE (not KNOWLEDGE_GAP, not INCORRECT)
-    // - Follow-up must be authorized (turn.followUp === true or turn.followUpAllowed === true)
-    // - Follow-up count on current question < maxFollowUpsPerQuestion (strict 1)
+    // 5. Depth Established Gate (Knowledge-Depth Early Exit)
+    // If the candidate has proven deep understanding or established their depth,
+    // we advance to the next topic immediately rather than asking redundant questions.
+    const topicCoverage = Array.isArray(session.coverageState)
+      ? session.coverageState.find(
+          (c) => c.topic?.toUpperCase() === (session.currentTopic || "").toUpperCase()
+        )
+      : null;
+
+    const isShallow = lastTurn?.depthLevel === "SHALLOW";
+    const isDepthEstablished =
+      !isShallow &&
+      (Boolean(lastTurn?.depthEstablished) ||
+        Boolean(topicCoverage?.depthEstablished) ||
+        (normStatus === AnswerStatus.ACCURATE &&
+          lastTurn?.depthLevel === "DEEP" &&
+          (lastTurn?.correctnessScore ?? 0) >= 85));
+
+    if (isDepthEstablished && !isIntro) {
+      const nextTopic = this.getNextTopic(session, plan);
+      if (nextTopic) {
+        logger.info(
+          `Session ${session.interviewId}: Knowledge depth established for topic ${session.currentTopic}. Transitioning to ${nextTopic}.`
+        );
+        return {
+          action: InterviewAction.SWITCH_TOPIC,
+          nextTopic,
+          difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+          reason: `Knowledge depth established for ${session.currentTopic}; advancing to next topic ${nextTopic}.`,
+          decisionAudit: {
+            decision: "SWITCH_TOPIC",
+            reason: "DEPTH_ESTABLISHED",
+            trigger: "DEPTH_PROVEN_EARLY_EXIT",
+            knowledgeLevel: lastTurn?.knowledgeLevel || topicCoverage?.knowledgeLevel || "STRONG",
+            depthLevel: lastTurn?.depthLevel || topicCoverage?.depthLevel || "DEEP",
+            evidenceLevel: lastTurn?.evidenceLevel || topicCoverage?.evidenceLevel || "MEDIUM",
+            experienceAuthenticity: lastTurn?.experienceAuthenticity || topicCoverage?.experienceAuthenticity || "PRODUCTION_VERIFIED",
+            targetTopic: nextTopic,
+            decisionConfidence: 0.96,
+          },
+        };
+      } else {
+        logger.info(
+          `Session ${session.interviewId}: Knowledge depth established across all topics. Concluding interview.`
+        );
+        return {
+          action: InterviewAction.COMPLETE_INTERVIEW,
+          reason: "Knowledge depth established across all planned interview topics.",
+          decisionAudit: {
+            decision: "COMPLETE_INTERVIEW",
+            reason: "ALL_TOPICS_COVERED",
+            trigger: "DEPTH_PROVEN_ALL_TOPICS",
+            decisionConfidence: 0.98,
+          },
+        };
+      }
+    }
+
+    // 6. Follow-Up Authorization Gate (Knowledge-Driven Probing)
+    // - Answer is PARTIAL or shallow ACCURATE (or unproven STRONG / EXCELLENT)
+    // - Follow-up must be authorized
+    // - Topic follow-up count < maxFollowUpsPerTopic (default 3)
+    // - Question follow-up count < maxFollowUpsPerQuestion (respecting plan limit)
     // - Global follow-up count < maxGlobalFollowUps (default 3)
     // - Time remaining > 120s
     // - Consecutive knowledge gaps in topic < 2
-    const maxFollowUpsPerQ = plan?.maxFollowUpsPerQuestion ?? 1;
+    const maxFollowUpsPerQ = plan?.maxFollowUpsPerQuestion ?? 3;
+    const maxFollowUpsPerTopic = plan?.maxFollowUpsPerTopic ?? 3;
     const maxGlobalFollowUps = plan?.maxGlobalFollowUps ?? 3;
+    const topicFollowUps =
+      session.topicFollowUpCount ?? (topicCoverage?.followupsAsked || 0);
     const consecutiveGaps =
       session.candidatePerformance?.consecutiveKnowledgeGapsInTopic || 0;
-    const isAlreadyFollowUp = Boolean(
-      lastTurn?.parentTurnId || lastTurn?.isFollowUp
-    );
+
+    // If maxFollowUpsPerQuestion is strictly set to 1, enforce 1 per parent question
+    const isAlreadyFollowUp =
+      maxFollowUpsPerQ <= 1 &&
+      Boolean(lastTurn?.parentTurnId || lastTurn?.isFollowUp);
 
     const followUpApproved =
       lastTurn?.followUpAllowed !== undefined
         ? Boolean(lastTurn.followUpAllowed)
         : Boolean(lastTurn?.followUp);
 
+    const hasMisconception =
+      Boolean(lastTurn?.contradictionDetected) ||
+      (Array.isArray(lastTurn?.misconceptions) && lastTurn.misconceptions.length > 0);
+
     const isQualityCandidateForFollowUp =
+      hasMisconception ||
       normStatus === AnswerStatus.PARTIAL ||
+      (Array.isArray(lastTurn?.conceptsMissing) && lastTurn.conceptsMissing.length > 0) ||
       (normStatus === AnswerStatus.ACCURATE &&
         (lastTurn?.depthLevel === "SHALLOW" ||
+          lastTurn?.depthLevel === "ADEQUATE" ||
+          !lastTurn?.depthEstablished ||
           (lastTurn?.completenessScore != null && lastTurn.completenessScore < 75) ||
           Boolean(lastTurn?.followUpRecommended)));
 
     const canFollowUp =
       !isAlreadyFollowUp &&
       !isKnowledgeGap &&
+      !isDepthEstablished &&
       isQualityCandidateForFollowUp &&
       followUpApproved &&
       (session.followUpCount || 0) < maxFollowUpsPerQ &&
+      topicFollowUps < maxFollowUpsPerTopic &&
       (session.globalFollowUpCount || 0) < maxGlobalFollowUps &&
       timeRemaining > 120 &&
       consecutiveGaps < 2;
@@ -143,19 +247,86 @@ export class AdaptiveEngineService {
       logger.info(
         `Session ${session.interviewId}: Follow-up authorized for turn ${session.questionCount} on topic ${session.currentTopic}.`
       );
-      const reason =
-        lastTurn?.answerStatus === AnswerStatus.PARTIAL
-          ? "Candidate demonstrated partial understanding; probing missing concepts with follow-up."
-          : "Candidate provided accurate but high-level explanation; probing deeper implementation details.";
+
+      // Determine follow-up difficulty and type based on candidate's knowledge estimate & misconceptions
+      let followUpDifficulty = lastTurn?.difficulty || Difficulty.EASY;
+      let followUpType = lastTurn?.followUpType || "DEPTH_PROBE";
+      let reason = "Candidate demonstrated partial understanding; probing missing concepts with follow-up.";
+      let trigger = "DEPTH_NOT_ESTABLISHED";
+      let decisionConfidence = 0.85;
+
+      const turnScore = lastTurn?.correctnessScore ?? 50;
+      if (hasMisconception) {
+        followUpType = "DEPTH_PROBE";
+        followUpDifficulty = Difficulty.MEDIUM;
+        trigger = "MISCONCEPTION_FLAGGED";
+        reason = "Candidate demonstrated a contradiction or misconception; asking targeted probe.";
+        decisionConfidence = 0.93;
+      } else if (lastTurn?.knowledgeLevel === "BASIC" || turnScore <= 50) {
+        followUpType = "CLARIFICATION";
+        followUpDifficulty = Difficulty.EASY;
+        trigger = "WEAK_BASIC_ANSWER";
+        reason = "Candidate demonstrated basic understanding; asking clarification follow-up.";
+        decisionConfidence = 0.82;
+      } else if (lastTurn?.knowledgeLevel === "INTERMEDIATE" || turnScore <= 75) {
+        followUpType = "DEPTH_PROBE";
+        followUpDifficulty = Difficulty.MEDIUM;
+        trigger = "INTERMEDIATE_DEPTH_PROBE";
+        reason = "Candidate demonstrated intermediate grasp; probing deeper implementation details.";
+        decisionConfidence = 0.86;
+      } else if (lastTurn?.knowledgeLevel === "STRONG" || turnScore <= 90) {
+        followUpType = "PRACTICAL";
+        followUpDifficulty = Difficulty.HARD;
+        trigger = "STRONG_PRACTICAL_PROBE";
+        reason = "Candidate demonstrated strong understanding; probing practical trade-offs.";
+        decisionConfidence = 0.88;
+      } else {
+        followUpType = "VALIDATION";
+        followUpDifficulty = Difficulty.HARD;
+        trigger = "SHALLOW_HIGH_SCORE";
+        reason = "Validating practical hands-on depth with validation follow-up.";
+        decisionConfidence = 0.89;
+      }
+
+      // If the answer was partial without specific missing concepts, confidence is lower
+      if (normStatus === AnswerStatus.PARTIAL && (!lastTurn?.conceptsMissing || lastTurn.conceptsMissing.length === 0)) {
+        decisionConfidence = 0.65;
+      }
+
+      const targetConcept =
+        (lastTurn?.misconceptions?.length ? lastTurn.misconceptions[0] : null) ||
+        (lastTurn?.conceptsMissing?.length ? lastTurn.conceptsMissing[0] : null) ||
+        lastTurn?.concept ||
+        session.currentTopic;
+
+      const decisionAudit = {
+        decision: "FOLLOW_UP",
+        reason: hasMisconception
+          ? "MISCONCEPTION_CORRECTION"
+          : isShallow
+          ? "DEPTH_NOT_ESTABLISHED"
+          : "KNOWLEDGE_DEPTH_PROBE",
+        trigger,
+        knowledgeLevel: lastTurn?.knowledgeLevel || "INTERMEDIATE",
+        depthLevel: lastTurn?.depthLevel || "SHALLOW",
+        evidenceLevel: lastTurn?.evidenceLevel || topicCoverage?.evidenceLevel || "LOW",
+        experienceAuthenticity: lastTurn?.experienceAuthenticity || "UNPROVEN",
+        targetConcept,
+        followUpType,
+        decisionConfidence,
+      };
+
       return {
         action: InterviewAction.FOLLOW_UP,
         topic: session.currentTopic,
-        difficulty: lastTurn?.difficulty || Difficulty.EASY,
+        difficulty: followUpDifficulty,
+        followUpType,
         reason,
+        decisionAudit,
       };
     }
 
-    // 5b. Phase Gate
+    // 7. Phase Gate
     // If the current phase has used its question budget (or covered all
     // its topics), advance to the next phase even when the current topic's
     // own per-topic budget isn't met.
@@ -171,11 +342,18 @@ export class AdaptiveEngineService {
             session,
             nextTopic
           )} phase (topic ${nextTopic}).`,
+          decisionAudit: {
+            decision: "SWITCH_TOPIC",
+            reason: "PHASE_BUDGET_MET",
+            trigger: "PHASE_EXHAUSTED",
+            targetTopic: nextTopic,
+            decisionConfidence: 0.95,
+          },
         };
       }
     }
 
-    // 6. Topic Switch Gates
+    // 8. Topic Switch Gates
     // Reason A: Consecutive knowledge gaps in topic (candidate has gap in this area, switch to avoid frustration)
     if (consecutiveGaps >= 2) {
       const nextTopic = this.getNextTopic(session, plan);
@@ -188,6 +366,13 @@ export class AdaptiveEngineService {
           nextTopic,
           difficulty: this.determineNextDifficulty(session, plan, lastTurn),
           reason: `Repeated knowledge gaps in ${session.currentTopic}; switching to ${nextTopic} to assess candidate in other areas.`,
+          decisionAudit: {
+            decision: "SWITCH_TOPIC",
+            reason: "CONSECUTIVE_KNOWLEDGE_GAPS",
+            trigger: "CONSECUTIVE_GAPS_EXIT",
+            targetTopic: nextTopic,
+            decisionConfidence: 0.97,
+          },
         };
       } else {
         // No remaining topics available
@@ -197,28 +382,41 @@ export class AdaptiveEngineService {
         return {
           action: InterviewAction.COMPLETE_INTERVIEW,
           reason: "All planned interview topics have been assessed.",
+          decisionAudit: {
+            decision: "COMPLETE_INTERVIEW",
+            reason: "ALL_TOPICS_COVERED",
+            trigger: "CONSECUTIVE_GAPS_EXIT_ALL_DONE",
+            decisionConfidence: 0.98,
+          },
         };
       }
     }
 
-    // Reason B: Topic Question Budget Met
+    // Reason B: Topic Question Budget Ceiling Met
     const targetQuestionsForTopic = this.getTargetQuestionsForTopic(
       session.currentTopic,
       plan
     );
     const topicCount = session.topicQuestionCount || 0;
 
-    if (topicCount >= targetQuestionsForTopic) {
+    if (topicCount >= targetQuestionsForTopic || topicFollowUps >= maxFollowUpsPerTopic) {
       const nextTopic = this.getNextTopic(session, plan);
       if (nextTopic) {
         logger.info(
-          `Session ${session.interviewId}: Topic budget met for ${session.currentTopic} (${topicCount}/${targetQuestionsForTopic}). Switching to ${nextTopic}.`
+          `Session ${session.interviewId}: Topic ceiling reached for ${session.currentTopic} (${topicCount}/${targetQuestionsForTopic}). Switching to ${nextTopic}.`
         );
         return {
           action: InterviewAction.SWITCH_TOPIC,
           nextTopic,
           difficulty: this.determineNextDifficulty(session, plan, lastTurn),
-          reason: `Target question budget met for topic ${session.currentTopic}; advancing to ${nextTopic}.`,
+          reason: `Target question ceiling reached for topic ${session.currentTopic}; advancing to ${nextTopic}.`,
+          decisionAudit: {
+            decision: "SWITCH_TOPIC",
+            reason: "TOPIC_CEILING_REACHED",
+            trigger: "TOPIC_CEILING_MET",
+            targetTopic: nextTopic,
+            decisionConfidence: 0.95,
+          },
         };
       } else {
         // All planned topics have completed their budget
@@ -228,17 +426,61 @@ export class AdaptiveEngineService {
         return {
           action: InterviewAction.COMPLETE_INTERVIEW,
           reason: "All planned interview topics have been thoroughly covered.",
+          decisionAudit: {
+            decision: "COMPLETE_INTERVIEW",
+            reason: "ALL_TOPICS_COVERED",
+            trigger: "TOPIC_CEILING_ALL_DONE",
+            decisionConfidence: 0.98,
+          },
         };
       }
     }
 
-    // 7. Normal Next Question within current topic (ASK_QUESTION)
+    // 9. Normal Next Question within current topic (ASK_QUESTION)
     const nextDifficulty = this.determineNextDifficulty(session, plan, lastTurn);
+
+    if (isKnowledgeGap) {
+      const targetConcept =
+        lastTurn?.concept ||
+        (Array.isArray(lastTurn?.conceptsMissing) && lastTurn.conceptsMissing[0]) ||
+        session.currentTopic;
+
+      return {
+        action: InterviewAction.ASK_QUESTION,
+        topic: session.currentTopic,
+        difficulty: nextDifficulty,
+        reason: `Explicit knowledge gap acknowledged; pivoting to alternative concept on ${session.currentTopic}.`,
+        decisionAudit: {
+          decision: "ASK_QUESTION",
+          reason: "KNOWLEDGE_GAP",
+          trigger: "GAP_EXPLORE_ALTERNATIVE_CONCEPT",
+          followUpType: "NONE",
+          targetConcept,
+          targetTopic: session.currentTopic,
+          knowledgeLevel: topicCoverage?.knowledgeLevel || "NONE",
+          depthLevel: topicCoverage?.depthLevel || "SHALLOW",
+          evidenceLevel: topicCoverage?.evidenceLevel || "LOW",
+          decisionConfidence: 0.99,
+        },
+      };
+    }
+
     return {
       action: InterviewAction.ASK_QUESTION,
       topic: session.currentTopic,
       difficulty: nextDifficulty,
       reason: `Continuing current topic ${session.currentTopic} at ${nextDifficulty} difficulty.`,
+      decisionAudit: {
+        decision: "ASK_QUESTION",
+        reason: "TOPIC_QUESTION_PROGRESSION",
+        trigger: "NORMAL_QUESTION_PROGRESSION",
+        followUpType: "NONE",
+        targetTopic: session.currentTopic,
+        knowledgeLevel: topicCoverage?.knowledgeLevel || "NONE",
+        depthLevel: topicCoverage?.depthLevel || "SHALLOW",
+        evidenceLevel: topicCoverage?.evidenceLevel || "LOW",
+        decisionConfidence: 0.85,
+      },
     };
   }
 
@@ -346,11 +588,16 @@ export class AdaptiveEngineService {
     const currentDiff = (lastTurn?.difficulty || Difficulty.EASY).toUpperCase();
     const streakCorrect = session.candidatePerformance?.streakCorrect || 0;
     const answerStatus = lastTurn?.answerStatus;
+    const knowledgeLevel = lastTurn?.knowledgeLevel;
 
-    // 1. Strong Performance: Candidate answers accurately
-    if (answerStatus === AnswerStatus.ACCURATE) {
-      // Step up difficulty only after sustained correct answers (streak >= 2)
-      if (streakCorrect >= 2) {
+    // 1. Strong Performance: Candidate answers accurately or demonstrates STRONG/DEEP knowledge
+    if (
+      answerStatus === AnswerStatus.ACCURATE ||
+      knowledgeLevel === "STRONG" ||
+      knowledgeLevel === "DEEP"
+    ) {
+      // Step up difficulty after sustained correct answers (streak >= 2) or proven strong knowledge
+      if (streakCorrect >= 2 || knowledgeLevel === "STRONG" || knowledgeLevel === "DEEP") {
         if (currentDiff === Difficulty.EASY) return Difficulty.MEDIUM;
         if (currentDiff === Difficulty.MEDIUM) return Difficulty.HARD;
         return Difficulty.HARD;
@@ -359,10 +606,11 @@ export class AdaptiveEngineService {
       return currentDiff;
     }
 
-    // 2. Struggling Performance: Knowledge gap or incorrect answer
+    // 2. Struggling Performance: Knowledge gap, incorrect answer, or NONE knowledge level
     if (
       answerStatus === AnswerStatus.KNOWLEDGE_GAP ||
-      answerStatus === AnswerStatus.INCORRECT
+      answerStatus === AnswerStatus.INCORRECT ||
+      knowledgeLevel === "NONE"
     ) {
       // Step down difficulty
       if (currentDiff === Difficulty.HARD) return Difficulty.MEDIUM;
@@ -370,8 +618,8 @@ export class AdaptiveEngineService {
       return Difficulty.EASY;
     }
 
-    // 3. Partial Performance: Maintain current difficulty
-    if (answerStatus === AnswerStatus.PARTIAL) {
+    // 3. Partial Performance / Intermediate: Maintain current difficulty
+    if (answerStatus === AnswerStatus.PARTIAL || knowledgeLevel === "INTERMEDIATE") {
       return currentDiff;
     }
 

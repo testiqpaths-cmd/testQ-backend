@@ -513,11 +513,43 @@ export class InterviewSessionService {
   async #submitAnswerImpl(sessionId, user, payload) {
     const session = await this.getSessionById(sessionId, user);
 
-    // 1. State Gate: Only accept answers when IN_PROGRESS or PROCESSING_ANSWER
+    // 1. State Gate: Accept answers when IN_PROGRESS or PROCESSING_ANSWER.
+    // If the session is already in WAITING_FOR_NEXT_QUESTION (e.g. from an earlier socket call,
+    // a network retry, or a recovered turn awaiting /next), return idempotent confirmation so
+    // the client proceeds directly to fetch the next question without a 400 rejection.
     if (
       session.interviewState !== InterviewState.IN_PROGRESS &&
       session.interviewState !== InterviewState.PROCESSING_ANSWER
     ) {
+      if (session.interviewState === InterviewState.WAITING_FOR_NEXT_QUESTION) {
+        let turn = null;
+        const targetQId = payload.questionId || payload.turnId || session.currentQuestion?.id || session.currentQuestion?.questionId;
+        if (targetQId) {
+          turn = await InterviewTurn.findById(targetQId);
+        }
+        if (!turn) {
+          turn = await InterviewTurn.findOne({ sessionId: session._id }).sort({ turnNumber: -1 });
+        }
+        if (turn) {
+          const answerText = (payload.answer || payload.transcript || "").trim();
+          if (answerText && turn.processingState !== "ANALYZED" && turn.processingState !== "EVALUATED") {
+            turn.candidateAnswer = answerText;
+            await turn.save();
+          }
+          logger.info(
+            `Session ${session.interviewId} is already WAITING_FOR_NEXT_QUESTION. Returning idempotent answer confirmation for turn ${turn.turnNumber}.`
+          );
+          return {
+            sessionId: session.interviewId,
+            turnId: turn._id.toString(),
+            turnNumber: turn.turnNumber,
+            interviewState: session.interviewState,
+            answerSaved: true,
+            questionId: turn._id.toString(),
+          };
+        }
+      }
+
       throw new ApiError(
         400,
         `Cannot submit answer: session is currently in state ${session.interviewState}.`
@@ -769,18 +801,25 @@ export class InterviewSessionService {
         message: decision.reason,
         totalQuestionsAsked: session.questionCount,
         coverageState: session.coverageState,
+        decisionAudit: decision.decisionAudit || null,
       };
     }
 
     if (decision.action === InterviewAction.FOLLOW_UP) {
       session.followUpCount = (session.followUpCount || 0) + 1;
+      session.topicFollowUpCount = (session.topicFollowUpCount || 0) + 1;
       session.globalFollowUpCount = (session.globalFollowUpCount || 0) + 1;
       session.interviewState = InterviewState.IN_PROGRESS;
 
       const newQuestion = await questionService.generateFollowUpQuestion(
         session,
         plan,
-        lastTurn
+        lastTurn,
+        {
+          difficulty: decision.difficulty,
+          followUpType: decision.followUpType || lastTurn?.followUpType,
+          decisionAudit: decision.decisionAudit || null,
+        }
       );
 
       await session.save();
@@ -792,10 +831,12 @@ export class InterviewSessionService {
         currentQuestion: newQuestion,
         isFollowUp: true,
         followUpCount: session.followUpCount,
+        topicFollowUpCount: session.topicFollowUpCount,
         globalFollowUpCount: session.globalFollowUpCount,
         timeRemaining: session.timeRemaining,
         topic: session.currentTopic,
         questionCount: session.questionCount,
+        decisionAudit: decision.decisionAudit || null,
       };
     }
 
@@ -807,6 +848,7 @@ export class InterviewSessionService {
         );
         if (prevIndex >= 0) {
           session.coverageState[prevIndex].status = "EVALUATED";
+          session.coverageState[prevIndex].shouldContinue = false;
         }
       }
 
@@ -814,6 +856,7 @@ export class InterviewSessionService {
       session.currentTopic = decision.nextTopic;
       session.topicQuestionCount = 1;
       session.followUpCount = 0;
+      session.topicFollowUpCount = 0;
       // Roll the phase forward if this topic belongs to a later phase.
       phaseService.enterPhaseForTopic(session, decision.nextTopic);
       if (session.candidatePerformance) {
@@ -824,6 +867,7 @@ export class InterviewSessionService {
       const newQuestion = await questionService.generateNextQuestion(session, plan, {
         topic: decision.nextTopic,
         difficulty: decision.difficulty,
+        decisionAudit: decision.decisionAudit || null,
       });
 
       phaseService.recordQuestion(session, session.currentTopic);
@@ -843,6 +887,7 @@ export class InterviewSessionService {
         questionCount: session.questionCount,
         phase: session.currentPhase,
         phaseProgress: phaseService.progress(session),
+        decisionAudit: decision.decisionAudit || null,
       };
     }
 
@@ -854,6 +899,7 @@ export class InterviewSessionService {
     const newQuestion = await questionService.generateNextQuestion(session, plan, {
       topic: decision.topic,
       difficulty: decision.difficulty,
+      decisionAudit: decision.decisionAudit || null,
     });
 
     phaseService.recordQuestion(session, session.currentTopic);
@@ -872,6 +918,7 @@ export class InterviewSessionService {
       questionCount: session.questionCount,
       phase: session.currentPhase,
       phaseProgress: phaseService.progress(session),
+      decisionAudit: decision.decisionAudit || null,
     };
   }
 

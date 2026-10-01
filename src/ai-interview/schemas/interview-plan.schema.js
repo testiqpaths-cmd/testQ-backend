@@ -31,15 +31,21 @@ const interviewPlanSchema = new Schema(
     },
     maxQuestionsPerTopic: {
       type: Number,
-      default: 5,
+      default: 4,
       min: 1,
+      max: 10,
+    },
+    maxFollowUpsPerTopic: {
+      type: Number,
+      default: 3,
+      min: 0,
       max: 10,
     },
     maxFollowUpsPerQuestion: {
       type: Number,
-      default: 1,
+      default: 3,
       min: 0,
-      max: 2,
+      max: 5,
     },
     maxGlobalFollowUps: {
       type: Number,

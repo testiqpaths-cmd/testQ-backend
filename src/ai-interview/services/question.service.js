@@ -205,7 +205,7 @@ export class QuestionService {
    * @param {string} params.difficulty - Target difficulty
    * @returns {Promise<Object>} Formatted question payload
    */
-  async generateNextQuestion(session, plan, { topic, difficulty }) {
+  async generateNextQuestion(session, plan, { topic, difficulty, decisionAudit = null }) {
     if (!session) {
       throw new ApiError(400, "Session is required for question generation.");
     }
@@ -284,6 +284,7 @@ export class QuestionService {
       questionBankId: aiOutput.questionBankId || null,
       questionTimestamp: new Date(),
       processingState: "QUESTION_GENERATED",
+      decisionAudit: decisionAudit || null,
     });
 
     await turn.save();
@@ -309,6 +310,7 @@ export class QuestionService {
       timestamp: turn.questionTimestamp,
       isFollowUp: false,
       subIndex: null,
+      decisionAudit: decisionAudit || null,
     };
 
     // Update topic coverage state
@@ -356,20 +358,22 @@ export class QuestionService {
       timestamp: turn.questionTimestamp,
       isFollowUp: false,
       subIndex: null,
+      decisionAudit: decisionAudit || null,
     };
   }
 
   /**
-   * Generates a follow-up question for a partial answer on an existing turn.
+   * Generates a follow-up question for a candidate answer on an existing turn.
    * Links to parent turn, persists new turn with followUp=true, updates session.
    * STRICT: Follow-ups do NOT consume primary questionCount or topicQuestionCount budgets.
    *
    * @param {Object} session - Mongoose InterviewSession
    * @param {Object} plan - Mongoose InterviewPlan
    * @param {Object} previousTurn - Mongoose InterviewTurn
+   * @param {Object} [options={}] - Optional overrides (difficulty, followUpType)
    * @returns {Promise<Object>} Formatted follow-up question payload
    */
-  async generateFollowUpQuestion(session, plan, previousTurn) {
+  async generateFollowUpQuestion(session, plan, previousTurn, options = {}) {
     if (!session || !previousTurn) {
       throw new ApiError(400, "Session and previous turn are required for follow-up.");
     }
@@ -384,24 +388,30 @@ export class QuestionService {
       // Non-fatal
     }
 
+    const targetDifficulty = options.difficulty || previousTurn.difficulty || Difficulty.EASY;
+    const targetFollowUpType = options.followUpType || previousTurn.followUpType || "DEPTH_PROBE";
+
     const aiOutput = await this.ai.generateFollowUpQuestion({
       role: session.role,
       experienceLevel: session.experienceLevel,
       topic: previousTurn.topic,
-      difficulty: previousTurn.difficulty,
+      difficulty: targetDifficulty,
       previousQuestion: previousTurn.question,
       previousQuestions,
       candidateAnswer: previousTurn.candidateAnswer || "",
       conceptsMissing: previousTurn.conceptsMissing || [],
       conceptsDemonstrated: previousTurn.conceptsDemonstrated || [],
+      misconceptions: previousTurn.misconceptions || [],
+      experienceAuthenticity: previousTurn.experienceAuthenticity || "UNPROVEN",
+      contradictionDetails: previousTurn.contradictionDetails || null,
+      followUpType: targetFollowUpType,
       interviewId: session.interviewId,
     });
 
     const finalQuestion = aiOutput.question.trim();
     const finalConcept = aiOutput.concept || previousTurn.concept || null;
 
-    // Embed for future dedup comparisons; follow-ups are inherently tied to
-    // the parent answer so we don't regenerate them, just record the vector.
+    // Embed for future dedup comparisons
     const questionEmbedding = await questionDedupService.embedQuestion(
       finalQuestion,
       session.interviewId
@@ -413,6 +423,11 @@ export class QuestionService {
       .select("turnNumber");
     const nextTurnNumber = (lastTurnDoc?.turnNumber || 0) + 1;
 
+    // Determine chain subIndex (Q1 -> b -> c -> d)
+    const prevSubIndex = previousTurn.subIndex || "a";
+    const nextSubIndex = String.fromCharCode(prevSubIndex.charCodeAt(0) + 1);
+    const rootParentId = previousTurn.parentTurnId || previousTurn._id;
+
     // Persist new InterviewTurn linked to parent turn
     const turn = new InterviewTurn({
       sessionId: session._id,
@@ -422,8 +437,8 @@ export class QuestionService {
       question: finalQuestion,
       concept: finalConcept,
       questionEmbedding: questionEmbedding || undefined,
-      questionType: aiOutput.questionType || "TECHNICAL",
-      difficulty: previousTurn.difficulty,
+      questionType: aiOutput.questionType || "DEPTH_PROBE",
+      difficulty: targetDifficulty,
       competency: aiOutput.competency || "Technical Knowledge",
       questionSource: aiOutput.questionSource || "ai_generated",
       questionBankId: aiOutput.questionBankId || null,
@@ -431,8 +446,9 @@ export class QuestionService {
       processingState: "QUESTION_GENERATED",
       followUp: true,
       isFollowUp: true,
-      subIndex: "b",
-      parentTurnId: previousTurn._id,
+      subIndex: nextSubIndex,
+      parentTurnId: rootParentId,
+      decisionAudit: options?.decisionAudit || null,
     });
 
     await turn.save();
@@ -454,8 +470,9 @@ export class QuestionService {
       concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
       isFollowUp: true,
-      subIndex: "b",
-      parentTurnId: previousTurn._id.toString(),
+      subIndex: nextSubIndex,
+      parentTurnId: rootParentId.toString(),
+      decisionAudit: options?.decisionAudit || null,
     };
 
     logger.info(
@@ -474,8 +491,9 @@ export class QuestionService {
       concept: turn.concept || null,
       timestamp: turn.questionTimestamp,
       isFollowUp: true,
-      subIndex: "b",
-      parentTurnId: previousTurn._id.toString(),
+      subIndex: nextSubIndex,
+      parentTurnId: rootParentId.toString(),
+      decisionAudit: options?.decisionAudit || null,
     };
   }
 }

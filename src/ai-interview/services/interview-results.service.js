@@ -303,6 +303,34 @@ export class InterviewResultsService {
     // Descriptive proctoring counts only — never scored or turned into a verdict.
     const integritySignals = await integrityService.summaryForSession(session._id);
 
+    // Topic-level knowledge breakdown
+    const topicBreakdown = Array.isArray(session.coverageState)
+      ? session.coverageState.map((c) => ({
+          topic: c.topic,
+          topicName: titleCase(c.topic),
+          score: c.averageScore || c.bestScore || 0,
+          bestScore: c.bestScore || 0,
+          averageScore: c.averageScore || 0,
+          knowledgeLevel: c.knowledgeLevel || "NONE",
+          fundamentalKnowledge: c.fundamentalKnowledge || null,
+          advancedDepth: c.advancedDepth || null,
+          knowledgeSummary: c.knowledgeSummary || null,
+          depthEstablished: Boolean(c.depthEstablished),
+          evidenceLevel: c.evidenceLevel || "LOW",
+          breadthLevel: c.breadthLevel || "LOW",
+          depthLevel: c.depthLevel || "SHALLOW",
+          experienceAuthenticity: c.experienceAuthenticity || "UNPROVEN",
+          misconceptions: c.misconceptions || [],
+          contradictions: c.contradictions || [],
+          questionsAsked: c.questionsAsked || 0,
+          followupsAsked: c.followupsAsked || 0,
+          conceptsTested: c.conceptsTested || [],
+          conceptsKnown: c.conceptsKnown || [],
+          conceptsMissing: c.conceptsMissing || [],
+          status: c.status || "PENDING",
+        }))
+      : [];
+
     return {
       id: session.interviewId,
       role: session.role,
@@ -323,6 +351,7 @@ export class InterviewResultsService {
       weaknesses,
       overallFeedback: feedback.overallFeedback,
       questions,
+      topicBreakdown,
       recommendedPractice: recommendedPractice.slice(0, 5),
       integritySignals,
       phasePlan: Array.isArray(session.phasePlan)

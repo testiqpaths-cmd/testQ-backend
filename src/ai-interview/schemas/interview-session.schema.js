@@ -8,12 +8,62 @@ const topicCoverageItemSchema = new Schema(
   {
     topic: { type: String, required: true },
     questionsAsked: { type: Number, default: 0 },
+    followupsAsked: { type: Number, default: 0 },
     knowledgeGaps: { type: Number, default: 0 },
     coveragePercentage: { type: Number, default: 0 },
+    bestScore: { type: Number, default: 0 },
+    averageScore: { type: Number, default: 0 },
     knowledgeLevel: {
       type: String,
-      enum: ["NONE", "BASIC", "MEDIUM", "ADVANCED"],
+      enum: ["NONE", "BASIC", "INTERMEDIATE", "STRONG", "STRONG_FOUNDATION", "EXCELLENT", "DEEP", "MEDIUM", "ADVANCED"],
       default: "NONE",
+    },
+    fundamentalKnowledge: {
+      type: String,
+      enum: ["WEAK", "BASIC", "INTERMEDIATE", "STRONG", "EXCELLENT", null],
+      default: null,
+    },
+    advancedDepth: {
+      type: String,
+      enum: ["WEAK", "BASIC", "INTERMEDIATE", "STRONG", "EXCELLENT", "UNPROVEN", null],
+      default: null,
+    },
+    knowledgeSummary: {
+      type: String,
+      default: null,
+    },
+    knowledgeConfidence: { type: Number, default: 0 },
+    depthEstablished: { type: Boolean, default: false },
+    evidenceLevel: {
+      type: String,
+      enum: ["LOW", "MEDIUM", "HIGH"],
+      default: "LOW",
+    },
+    breadthLevel: {
+      type: String,
+      enum: ["LOW", "MEDIUM", "HIGH"],
+      default: "LOW",
+    },
+    depthLevel: {
+      type: String,
+      enum: ["SHALLOW", "ADEQUATE", "DEEP"],
+      default: "SHALLOW",
+    },
+    misconceptions: { type: [String], default: [] },
+    contradictions: { type: [String], default: [] },
+    experienceAuthenticity: {
+      type: String,
+      enum: ["THEORETICAL_TEXTBOOK", "SURFACE_FAMILIARITY", "PRODUCTION_VERIFIED", "UNPROVEN"],
+      default: "UNPROVEN",
+    },
+    conceptsTested: { type: [String], default: [] },
+    conceptsKnown: { type: [String], default: [] },
+    conceptsMissing: { type: [String], default: [] },
+    shouldContinue: { type: Boolean, default: true },
+    topicState: {
+      type: String,
+      enum: ["UNKNOWN", "EXPLORING", "ESTABLISHED"],
+      default: "UNKNOWN",
     },
     status: {
       type: String,
@@ -110,6 +160,10 @@ const interviewSessionSchema = new Schema(
       default: 0,
     },
     followUpCount: {
+      type: Number,
+      default: 0,
+    },
+    topicFollowUpCount: {
       type: Number,
       default: 0,
     },

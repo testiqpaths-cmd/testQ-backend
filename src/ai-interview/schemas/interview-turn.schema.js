@@ -41,7 +41,20 @@ const interviewTurnSchema = new Schema(
     },
     questionType: {
       type: String,
-      enum: ["TECHNICAL", "CONCEPTUAL", "PROBLEM_SOLVING", "BEHAVIORAL", "PROJECT", "HR"],
+      enum: [
+        "TECHNICAL",
+        "CONCEPTUAL",
+        "PROBLEM_SOLVING",
+        "BEHAVIORAL",
+        "PROJECT",
+        "HR",
+        "INITIAL",
+        "CLARIFICATION",
+        "DEPTH_PROBE",
+        "PRACTICAL",
+        "SCENARIO",
+        "VALIDATION",
+      ],
       default: "TECHNICAL",
     },
     difficulty: {
@@ -171,7 +184,60 @@ const interviewTurnSchema = new Schema(
     },
     knowledgeLevel: {
       type: String,
-      enum: ["NONE", "BASIC", "MEDIUM", "ADVANCED", null],
+      enum: ["NONE", "BASIC", "INTERMEDIATE", "STRONG", "EXCELLENT", "DEEP", "MEDIUM", "ADVANCED", null],
+      default: null,
+    },
+    knowledgeConfidence: {
+      type: Number,
+      min: 0,
+      max: 100,
+      default: null,
+    },
+    depthEstablished: {
+      type: Boolean,
+      default: false,
+    },
+    evidenceLevel: {
+      type: String,
+      enum: ["LOW", "MEDIUM", "HIGH", null],
+      default: "LOW",
+    },
+    contradictionDetected: {
+      type: Boolean,
+      default: false,
+    },
+    contradictionDetails: {
+      type: String,
+      default: null,
+    },
+    misconceptions: {
+      type: [String],
+      default: [],
+    },
+    experienceAuthenticity: {
+      type: String,
+      enum: ["THEORETICAL_TEXTBOOK", "SURFACE_FAMILIARITY", "PRODUCTION_VERIFIED", "UNPROVEN", null],
+      default: "UNPROVEN",
+    },
+    practicalUnderstanding: {
+      type: String,
+      enum: ["NONE", "BASIC", "ADEQUATE", "DEEP", null],
+      default: null,
+    },
+    followUpType: {
+      type: String,
+      enum: [
+        "EASY",
+        "MEDIUM",
+        "HARD",
+        "SCENARIO",
+        "VALIDATION",
+        "CLARIFICATION",
+        "DEPTH_PROBE",
+        "PRACTICAL",
+        "NONE",
+        null,
+      ],
       default: null,
     },
     topicCoverage: {
@@ -211,6 +277,10 @@ const interviewTurnSchema = new Schema(
     },
     subIndex: {
       type: String,
+      default: null,
+    },
+    decisionAudit: {
+      type: Schema.Types.Mixed,
       default: null,
     },
   },

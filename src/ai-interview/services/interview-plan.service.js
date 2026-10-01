@@ -44,13 +44,13 @@ export class InterviewPlanService {
       Math.max(2, Math.ceil(globalQuestionLimit / topics.length) + 1)
     );
 
-    // Strict follow-up caps enforced by backend:
-    // - Never more than 1 follow-up on a single question
-    // - Global follow-up cap proportional to length
-    const maxFollowUpsPerQuestion = 1;
+    // Follow-up limits:
+    // - Up to 2 follow-ups per primary question to probe depth
+    // - Global follow-up cap proportional to length (e.g. 4-6 for 10-question interview)
+    const maxFollowUpsPerQuestion = 2;
     const maxGlobalFollowUps = Math.min(
-      5,
-      Math.max(1, Math.floor(globalQuestionLimit / 4))
+      6,
+      Math.max(3, Math.ceil(globalQuestionLimit / 2))
     );
 
     // Allocate time & question budgets across topics

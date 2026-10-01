@@ -58,55 +58,76 @@ export class SttProviderService {
     this.googleCloudLanguageCode = process.env.GOOGLE_CLOUD_STT_LANGUAGE || "en-US";
   }
 
+  #hasValidKey(key) {
+    return Boolean(key && String(key).trim() && !String(key).toLowerCase().includes("your-key-here"));
+  }
+
+  getEffectiveProvider() {
+    if (this.provider === "gemini" && this.#hasValidKey(this.geminiApiKey)) return "gemini";
+    if (this.provider === "openai" && this.#hasValidKey(this.openaiApiKey)) return "openai";
+    if (this.provider === "deepgram" && this.#hasValidKey(this.deepgramApiKey)) return "deepgram";
+    if ((this.provider === "google-cloud" || this.provider === "google") && this.#hasValidKey(this.googleCloudApiKey)) {
+      return "google-cloud";
+    }
+    // Fall back to Gemini if configured provider key is missing/placeholder
+    if (this.#hasValidKey(this.geminiApiKey)) return "gemini";
+    return null;
+  }
+
   isEnabled() {
     if (this.killed) return false;
-    if (this.provider === "gemini") return Boolean(this.geminiApiKey);
-    if (this.provider === "openai") return Boolean(this.openaiApiKey);
-    if (this.provider === "deepgram") return Boolean(this.deepgramApiKey);
-    if (this.provider === "google-cloud" || this.provider === "google") {
-      return Boolean(this.googleCloudApiKey);
-    }
-    return false;
+    return Boolean(this.getEffectiveProvider());
   }
 
   model() {
-    if (this.provider === "openai") return this.openaiModel;
-    if (this.provider === "deepgram") return this.deepgramModel;
-    if (this.provider === "google-cloud" || this.provider === "google") return "google-cloud-speech-v1";
+    const eff = this.getEffectiveProvider() || this.provider;
+    if (eff === "openai") return this.openaiModel;
+    if (eff === "deepgram") return this.deepgramModel;
+    if (eff === "google-cloud" || eff === "google") return "google-cloud-speech-v1";
     return this.geminiModel;
   }
 
   async transcribe(buffer, mimeType, { interviewId = null } = {}) {
     if (!this.isEnabled() || !buffer?.length) return null;
+    const effProvider = this.getEffectiveProvider();
     const start = Date.now();
     try {
       let text = null;
-      if (this.provider === "openai") text = await this.callOpenAI(buffer, mimeType);
-      else if (this.provider === "deepgram") text = await this.callDeepgram(buffer, mimeType);
-      else if (this.provider === "google-cloud" || this.provider === "google") {
-        text = await this.callGoogleCloud(buffer, mimeType);
-      } else text = await this.callGemini(buffer, mimeType);
+      try {
+        if (effProvider === "openai") text = await this.callOpenAI(buffer, mimeType);
+        else if (effProvider === "deepgram") text = await this.callDeepgram(buffer, mimeType);
+        else if (effProvider === "google-cloud" || effProvider === "google") {
+          text = await this.callGoogleCloud(buffer, mimeType);
+        } else text = await this.callGemini(buffer, mimeType);
+      } catch (err) {
+        if (effProvider !== "gemini" && this.#hasValidKey(this.geminiApiKey)) {
+          logger.warn(`STT (${effProvider}) failed: ${err.message}. Retrying with Gemini STT fallback.`);
+          text = await this.callGemini(buffer, mimeType);
+        } else {
+          throw err;
+        }
+      }
 
       text = (text || "").trim();
       await logCall({
         interviewId,
-        provider: this.provider,
+        provider: effProvider,
         model: this.model(),
         latencyMs: Date.now() - start,
         status: text ? "success" : "error",
       });
-      return text ? { text, provider: this.provider, model: this.model() } : null;
+      return text ? { text, provider: effProvider, model: this.model() } : null;
     } catch (err) {
       await logCall({
         interviewId,
-        provider: this.provider,
+        provider: effProvider,
         model: this.model(),
         latencyMs: Date.now() - start,
         status: err.response?.status === 429 ? "rate_limited" : "error",
         httpStatus: err.response?.status ?? null,
         errorMessage: (err.message || "").slice(0, 300),
       });
-      logger.warn(`STT (${this.provider}) failed (non-fatal): ${err.message}`);
+      logger.warn(`STT (${effProvider}) failed (non-fatal): ${err.message}`);
       return null;
     }
   }

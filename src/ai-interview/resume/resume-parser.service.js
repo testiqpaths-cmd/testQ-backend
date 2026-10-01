@@ -1,10 +1,22 @@
 import { createRequire } from "module";
-import mammoth from "mammoth";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
 const require = createRequire(import.meta.url);
-const pdfPkg = require("pdf-parse");
+
+let pdfPkg = null;
+try {
+  pdfPkg = require("pdf-parse");
+} catch {
+  // Handled dynamically on first pdf parse
+}
+
+let mammothPkg = null;
+try {
+  mammothPkg = require("mammoth");
+} catch {
+  // Handled dynamically on first docx parse
+}
 
 export class ResumeParserService {
   /**
@@ -27,7 +39,14 @@ export class ResumeParserService {
 
     try {
       if (mimetype === "application/pdf" || extension === "pdf") {
-        if (pdfPkg.PDFParse) {
+        if (!pdfPkg) {
+          try {
+            pdfPkg = require("pdf-parse");
+          } catch (e) {
+            throw new ApiError(500, `PDF parser unavailable in this environment: ${e.message}`);
+          }
+        }
+        if (pdfPkg?.PDFParse) {
           const parser = new pdfPkg.PDFParse({ data: buffer });
           const textResult = await parser.getText();
           rawText = typeof textResult === "string" ? textResult : textResult?.text || "";
@@ -41,7 +60,14 @@ export class ResumeParserService {
           "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
         extension === "docx"
       ) {
-        const result = await mammoth.extractRawText({ buffer });
+        if (!mammothPkg) {
+          try {
+            mammothPkg = (await import("mammoth")).default || (await import("mammoth"));
+          } catch {
+            throw new ApiError(500, "DOCX parser (mammoth) is not available.");
+          }
+        }
+        const result = await mammothPkg.extractRawText({ buffer });
         rawText = result.value || "";
       } else if (
         mimetype === "text/plain" ||

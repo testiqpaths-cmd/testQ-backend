@@ -77,35 +77,47 @@ export class TtsProviderService {
     this.googleCloudLanguageCode = process.env.GOOGLE_CLOUD_TTS_LANGUAGE || "en-US";
   }
 
+  #hasValidKey(key) {
+    return Boolean(key && String(key).trim() && !String(key).toLowerCase().includes("your-key-here"));
+  }
+
+  getEffectiveProvider() {
+    if (this.provider === "gemini" && this.#hasValidKey(this.geminiApiKey)) return "gemini";
+    if (this.provider === "elevenlabs" && this.#hasValidKey(this.elevenApiKey)) return "elevenlabs";
+    if (this.provider === "openai" && this.#hasValidKey(this.openaiApiKey)) return "openai";
+    if ((this.provider === "google-cloud" || this.provider === "google") && this.#hasValidKey(this.googleCloudApiKey)) {
+      return "google-cloud";
+    }
+    // Fall back to Gemini if the configured provider lacks a valid key
+    if (this.#hasValidKey(this.geminiApiKey)) return "gemini";
+    return null;
+  }
+
   isEnabled() {
     if (!this.enabled) return false;
-    if (this.provider === "gemini") return Boolean(this.geminiApiKey);
-    if (this.provider === "elevenlabs") return Boolean(this.elevenApiKey);
-    if (this.provider === "openai") return Boolean(this.openaiApiKey);
-    if (this.provider === "google-cloud" || this.provider === "google") {
-      return Boolean(this.googleCloudApiKey);
-    }
-    return false;
+    return Boolean(this.getEffectiveProvider());
   }
 
   /** @returns {{voice:string, model:string, provider:string}} for cache keys */
   descriptor() {
-    if (this.provider === "elevenlabs") {
+    const eff = this.getEffectiveProvider() || this.provider;
+    if (eff === "elevenlabs") {
       return { provider: "elevenlabs", model: this.elevenModel, voice: this.elevenVoiceId };
     }
-    if (this.provider === "openai") {
+    if (eff === "openai") {
       return { provider: "openai", model: this.openaiTtsModel, voice: this.openaiVoice };
     }
-    if (this.provider === "google-cloud" || this.provider === "google") {
+    if (eff === "google-cloud" || eff === "google") {
       return { provider: "google-cloud", model: this.googleCloudVoice, voice: this.googleCloudVoice };
     }
     return { provider: "gemini", model: this.geminiModel, voice: this.geminiVoice };
   }
 
-  async #dispatch(text) {
-    if (this.provider === "elevenlabs") return this.callElevenLabs(text);
-    if (this.provider === "openai") return this.callOpenAI(text);
-    if (this.provider === "google-cloud" || this.provider === "google") {
+  async #dispatch(text, provider = null) {
+    const target = provider || this.getEffectiveProvider() || this.provider;
+    if (target === "elevenlabs") return this.callElevenLabs(text);
+    if (target === "openai") return this.callOpenAI(text);
+    if (target === "google-cloud" || target === "google") {
       return this.callGoogleCloud(text);
     }
     return this.callGemini(text);
@@ -113,20 +125,31 @@ export class TtsProviderService {
 
   async synthesize(text, { interviewId = null } = {}) {
     if (!this.isEnabled() || !text || !String(text).trim()) return null;
+    const effProvider = this.getEffectiveProvider();
     const start = Date.now();
     try {
       let out = null;
       try {
-        out = await this.#dispatch(text);
+        out = await this.#dispatch(text, effProvider);
       } catch (err) {
-        const retryable = err.code === "ECONNABORTED" || /timeout/i.test(err.message || "") || err.response?.status === 503;
-        if (!retryable) throw err;
-        out = await this.#dispatch(text); // one retry for a transient hang
+        if (effProvider !== "gemini" && this.#hasValidKey(this.geminiApiKey)) {
+          logger.warn(`TTS (${effProvider}) failed: ${err.message}. Retrying with Gemini TTS fallback.`);
+          try {
+            out = await this.callGemini(text);
+          } catch (fallbackErr) {
+            logger.warn(`Gemini TTS fallback also failed: ${fallbackErr.message}`);
+            throw err;
+          }
+        } else {
+          const retryable = err.code === "ECONNABORTED" || /timeout/i.test(err.message || "") || err.response?.status === 503;
+          if (!retryable) throw err;
+          out = await this.#dispatch(text, effProvider); // one retry for a transient hang
+        }
       }
 
       await logCall({
         interviewId,
-        provider: this.provider,
+        provider: effProvider,
         model: this.descriptor().model,
         latencyMs: Date.now() - start,
         status: out ? "success" : "error",
@@ -135,14 +158,14 @@ export class TtsProviderService {
     } catch (err) {
       await logCall({
         interviewId,
-        provider: this.provider,
+        provider: effProvider,
         model: this.descriptor().model,
         latencyMs: Date.now() - start,
         status: err.response?.status === 429 ? "rate_limited" : "error",
         httpStatus: err.response?.status ?? null,
         errorMessage: (err.message || "").slice(0, 300),
       });
-      logger.warn(`TTS (${this.provider}) failed (non-fatal): ${err.message}`);
+      logger.warn(`TTS (${effProvider}) failed (non-fatal): ${err.message}`);
       return null;
     }
   }
@@ -196,7 +219,27 @@ export class TtsProviderService {
 
   /** Google Cloud Text-to-Speech (GA, not a preview model) — Neural2 voice. */
   async callGoogleCloud(text) {
-    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${this.googleCloudApiKey}`;
+    let url = "https://texttospeech.googleapis.com/v1/text:synthesize";
+    const headers = { "Content-Type": "application/json" };
+
+    if (this.googleCloudApiKey && !this.googleCloudApiKey.includes("your-key-here")) {
+      url += `?key=${this.googleCloudApiKey}`;
+    } else {
+      try {
+        const { GoogleAuth } = await import("google-auth-library");
+        const auth = new GoogleAuth({
+          scopes: ["https://www.googleapis.com/auth/cloud-platform"],
+        });
+        const client = await auth.getClient();
+        const token = await client.getAccessToken();
+        if (token?.token) {
+          headers["Authorization"] = `Bearer ${token.token}`;
+        }
+      } catch (authErr) {
+        logger.warn(`GoogleAuth token retrieval failed: ${authErr.message}`);
+      }
+    }
+
     const res = await axios.post(
       url,
       {
@@ -204,7 +247,7 @@ export class TtsProviderService {
         voice: { languageCode: this.googleCloudLanguageCode, name: this.googleCloudVoice },
         audioConfig: { audioEncoding: "MP3" },
       },
-      { timeout: this.timeoutMs, headers: { "Content-Type": "application/json" } }
+      { timeout: this.timeoutMs, headers }
     );
     const b64 = res.data?.audioContent;
     if (!b64) return null;
