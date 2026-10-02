@@ -44,7 +44,7 @@ app.use(requestLogger);
 
 // Routes
 app.use("/api", routes);
-
+app.use("/api", phoneDetectionRoutes);
 
 // Default route
 app.get("/", (req, res) => {
@@ -53,8 +53,6 @@ app.get("/", (req, res) => {
 
 // Error middleware (after routes)
 app.use(errorMiddleware);
-
-app.use("/api", phoneDetectionRoutes);
 
 
 

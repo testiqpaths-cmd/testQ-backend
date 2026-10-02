@@ -13,17 +13,26 @@ router.post(
   upload.single("file"),
   async (req, res) => {
     try {
-      if (!req.file) {
+      let imageBuffer = req.file?.buffer;
+      let filename = req.file?.originalname || "frame.jpg";
+      let mimetype = req.file?.mimetype || "image/jpeg";
+
+      if (!imageBuffer && req.body?.image) {
+        const base64Data = req.body.image.replace(/^data:image\/\w+;base64,/, "");
+        imageBuffer = Buffer.from(base64Data, "base64");
+      }
+
+      if (!imageBuffer) {
         return res.status(400).json({
           success: false,
-          message: "Image file is required",
+          message: "Image is required (file or base64)",
         });
       }
 
       const result = await detectPhone(
-        req.file.buffer,
-        req.file.originalname,
-        req.file.mimetype
+        imageBuffer,
+        filename,
+        mimetype
       );
 
       return res.status(200).json({
