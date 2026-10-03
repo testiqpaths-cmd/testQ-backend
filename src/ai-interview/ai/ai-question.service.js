@@ -163,6 +163,8 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
       previousQuestions = [],
       conceptsDemonstrated = [],
       conceptsMissing = [],
+      misconceptions = [],
+      experienceAuthenticity = null,
       followUpType = "DEPTH_PROBE",
       interviewId = null,
     } = context;
@@ -184,12 +186,12 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
         : "practical implementation details, trade-offs, and depth";
 
     const misconceptionsStr =
-      Array.isArray(options?.misconceptions) && options.misconceptions.length > 0
-        ? `\n- Identified Misconceptions to probe: ${options.misconceptions.join(", ")}`
+      Array.isArray(misconceptions) && misconceptions.length > 0
+        ? `\n- Identified Misconceptions to probe: ${misconceptions.join(", ")}`
         : "";
 
     const authenticityStr =
-      options?.experienceAuthenticity === "THEORETICAL_TEXTBOOK"
+      experienceAuthenticity === "THEORETICAL_TEXTBOOK"
         ? "\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario to test genuine project experience."
         : "";
 
