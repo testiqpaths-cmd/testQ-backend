@@ -10,9 +10,17 @@ export const requestLogger = (req, res, next) => {
   
   // Log headers (exclude sensitive ones)
 
-  // Log body
-  if (Object.keys(body || {}).length > 0) {
-    logger.info(`Body: ${JSON.stringify(body, null, 2)}`);
+  // Log body (omit large base64/image payloads to prevent CPU event-loop lockup and disk exhaustion)
+  if (body && typeof body === "object" && Object.keys(body).length > 0) {
+    if (url.includes("detect-phone") || body.image) {
+      const sanitized = { ...body };
+      if (sanitized.image) {
+        sanitized.image = `[Base64 Image Omitted - ${Math.round(String(body.image).length / 1024)} KB]`;
+      }
+      logger.info(`Body: ${JSON.stringify(sanitized, null, 2)}`);
+    } else {
+      logger.info(`Body: ${JSON.stringify(body, null, 2)}`);
+    }
   }
 
   // Log params

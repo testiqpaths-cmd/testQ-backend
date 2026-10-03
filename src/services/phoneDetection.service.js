@@ -3,6 +3,9 @@ import { fileURLToPath } from "url";
 import * as ort from "onnxruntime-node";
 import { Jimp } from "jimp";
 
+import axios from "axios";
+import FormData from "form-data";
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
@@ -17,15 +20,18 @@ const IOU_THRESHOLD = 0.45;
 const PHONE_CLASS_NAME = "phone";
 
 let session = null;
+let isProcessingInference = false;
 
 /**
- * Lazily loads the ONNX session once and caches it in memory.
+ * Lazily loads the ONNX session once with strict CPU thread limits to prevent multi-core lockup.
  */
 async function getSession() {
   if (!session) {
     session = await ort.InferenceSession.create(MODEL_PATH, {
       executionProviders: ["cpu"],
-      graphOptimizationLevel: "all",
+      intraOpNumThreads: 1, // Cap to 1 thread so OpenMP doesn't pin all CPU cores at 600%+
+      interOpNumThreads: 1,
+      graphOptimizationLevel: "basic",
     });
   }
   return session;
@@ -130,6 +136,48 @@ export const detectPhone = async (
   filename = "frame.jpg",
   mimetype = "image/jpeg"
 ) => {
+  // 1. If an external Python ML microservice is configured, forward the request to it
+  if (process.env.EXTERNAL_PHONE_DETECTOR_URL) {
+    try {
+      const formData = new FormData();
+      formData.append("file", imageBuffer, {
+        filename,
+        contentType: mimetype,
+      });
+
+      const response = await axios.post(
+        process.env.EXTERNAL_PHONE_DETECTOR_URL,
+        formData,
+        {
+          headers: { ...formData.getHeaders() },
+          timeout: 4000,
+        }
+      );
+
+      return response.data;
+    } catch (err) {
+      console.warn("External phone detection service error:", err.message);
+      return {
+        phone_detected: false,
+        confidence: null,
+        count: 0,
+        detections: [],
+      };
+    }
+  }
+
+  // 2. Concurrency throttle: never allow multiple in-process ONNX inferences to run concurrently
+  if (isProcessingInference) {
+    return {
+      phone_detected: false,
+      confidence: null,
+      count: 0,
+      detections: [],
+      dropped: true,
+    };
+  }
+
+  isProcessingInference = true;
   try {
     const ortSession = await getSession();
     const { tensor, scale, padX, padY, origWidth, origHeight } =
@@ -192,7 +240,6 @@ export const detectPhone = async (
       console.log(`📱 [PHONE DETECTED] Count: ${phoneDetections.length} | Confidence: ${(highestConfidence * 100).toFixed(1)}%`);
     }
 
-    // Match exact response structure expected by frontend
     return {
       phone_detected: phoneDetected,
       confidence: highestConfidence,
@@ -202,5 +249,7 @@ export const detectPhone = async (
   } catch (error) {
     console.error("ONNX Phone detection service error:", error);
     throw new Error("Phone detection service unavailable");
+  } finally {
+    isProcessingInference = false;
   }
 };
