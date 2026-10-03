@@ -17,9 +17,22 @@ const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
   : defaultOrigins;
 
 export const corsOptions = {
-  origin: allowedOrigins,
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps, curl, server-to-server)
+    if (!origin) return callback(null, true);
+
+    // Exact match with configured origins
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    // Allow all Vercel preview deployments for this project
+    if (/^https:\/\/test-q-frontend.*\.vercel\.app$/.test(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(new Error("Blocked by CORS policy"));
+  },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"],
   exposedHeaders: ["Authorization"],
-}
+};
