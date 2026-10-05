@@ -262,6 +262,12 @@ export class AdaptiveEngineService {
         trigger = "MISCONCEPTION_FLAGGED";
         reason = "Candidate demonstrated a contradiction or misconception; asking targeted probe.";
         decisionConfidence = 0.93;
+      } else if (lastTurn?.followUpType === "SCENARIO") {
+        followUpType = "SCENARIO";
+        followUpDifficulty = lastTurn?.difficulty || Difficulty.MEDIUM;
+        trigger = "SCENARIO_PROBE";
+        reason = "Probing real-world application with a practical technical scenario.";
+        decisionConfidence = 0.88;
       } else if (lastTurn?.knowledgeLevel === "BASIC" || turnScore <= 50) {
         followUpType = "CLARIFICATION";
         followUpDifficulty = Difficulty.EASY;
@@ -274,6 +280,12 @@ export class AdaptiveEngineService {
         trigger = "INTERMEDIATE_DEPTH_PROBE";
         reason = "Candidate demonstrated intermediate grasp; probing deeper implementation details.";
         decisionConfidence = 0.86;
+      } else if (lastTurn?.followUpType === "VALIDATION") {
+        followUpType = "VALIDATION";
+        followUpDifficulty = Difficulty.HARD;
+        trigger = "SHALLOW_HIGH_SCORE";
+        reason = "Validating practical hands-on depth with validation follow-up.";
+        decisionConfidence = 0.89;
       } else if (lastTurn?.knowledgeLevel === "STRONG" || turnScore <= 90) {
         followUpType = "PRACTICAL";
         followUpDifficulty = Difficulty.HARD;

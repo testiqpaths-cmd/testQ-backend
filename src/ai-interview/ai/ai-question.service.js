@@ -152,7 +152,7 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
    * @param {string[]} [context.conceptsMissing=[]] - Missing or shallow concepts detected
    * @returns {Promise<{ question: string, concept?: string, topic: string, difficulty: string, questionType: string, competency: string }>}
    */
-  async generateFollowUpQuestion(context) {
+  async generateFollowUpQuestion(context = {}) {
     const {
       role = "Software Engineer",
       experienceLevel = "1-3 Years",
@@ -163,9 +163,13 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
       previousQuestions = [],
       conceptsDemonstrated = [],
       conceptsMissing = [],
+      misconceptions = [],
+      experienceAuthenticity = "UNPROVEN",
+      contradictionDetails = null,
       followUpType = "DEPTH_PROBE",
+      resumeSkills = [],
       interviewId = null,
-    } = context;
+    } = context || {};
 
     let targetQuestionType = "DEPTH_PROBE";
     if (followUpType === "CLARIFICATION" || followUpType === "EASY") {
@@ -184,13 +188,22 @@ Candidate skills: ${resumeSkills.join(", ") || "Standard role skills"}.`;
         : "practical implementation details, trade-offs, and depth";
 
     const misconceptionsStr =
-      Array.isArray(options?.misconceptions) && options.misconceptions.length > 0
-        ? `\n- Identified Misconceptions to probe: ${options.misconceptions.join(", ")}`
+      Array.isArray(misconceptions) && misconceptions.length > 0
+        ? `\n- Identified Misconceptions to probe: ${misconceptions.join(", ")}`
         : "";
 
     const authenticityStr =
-      options?.experienceAuthenticity === "THEORETICAL_TEXTBOOK"
+      experienceAuthenticity === "THEORETICAL_TEXTBOOK"
         ? "\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario to test genuine project experience."
+        : "";
+
+    const contradictionStr = contradictionDetails
+      ? `\n- Candidate contradiction noted: ${contradictionDetails}`
+      : "";
+
+    const resumeSkillsStr =
+      Array.isArray(resumeSkills) && resumeSkills.length > 0
+        ? `\n- Candidate Resume Skills: ${resumeSkills.join(", ")}`
         : "";
 
     const systemPrompt = `You are a professional technical interviewer for TestQ conducting an interview for the role of ${role} (${experienceLevel}).
@@ -198,7 +211,7 @@ The candidate was asked: "${previousQuestion}"
 The candidate provided this answer: "${candidateAnswer}"
 Evaluation Notes:
 - Concepts demonstrated: ${conceptsDemonstrated.join(", ") || "Basic explanation"}
-- Missing or shallow aspects: ${missingStr}${misconceptionsStr}${authenticityStr}
+- Missing or shallow aspects: ${missingStr}${misconceptionsStr}${authenticityStr}${contradictionStr}${resumeSkillsStr}
 - Probe type requested: ${targetQuestionType} (${difficulty})
 
 Your task is to generate ONE single focused follow-up question.
@@ -274,10 +287,27 @@ ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (No
     });
     if (bankQ) return { ...bankQ, questionSource: "bank" };
 
-    // 2nd fallback: deterministic follow-up grounded in candidate answer.
-    const focusArea = conceptsMissing[0] || "its practical application";
+    // 2nd fallback: deterministic follow-up grounded in candidate answer and topic.
+    const focusArea =
+      conceptsMissing[0] ||
+      (conceptsDemonstrated[0] ? `applying ${conceptsDemonstrated[0]}` : null) ||
+      `${topic.toLowerCase()} production trade-offs and implementation details`;
+
+    let fallbackQuestion;
+    if (targetQuestionType === "CLARIFICATION") {
+      fallbackQuestion = `Could you clarify how you would handle ${focusArea} in a real-world scenario?`;
+    } else if (targetQuestionType === "DEPTH_PROBE") {
+      fallbackQuestion = `How does ${topic} handle ${focusArea} under the hood, and what are the main architectural trade-offs?`;
+    } else if (targetQuestionType === "PRACTICAL") {
+      fallbackQuestion = `In a production environment, how have you configured, tested, or optimized ${focusArea}?`;
+    } else if (targetQuestionType === "SCENARIO" || targetQuestionType === "VALIDATION") {
+      fallbackQuestion = `Could you walk through a concrete technical problem you encountered with ${focusArea} and how you resolved it?`;
+    } else {
+      fallbackQuestion = `Could you elaborate on ${focusArea} and provide a concrete example from your hands-on experience?`;
+    }
+
     return {
-      question: `Could you elaborate more on ${focusArea} and give a concrete example from your experience?`,
+      question: fallbackQuestion,
       concept: `${topic.toLowerCase()} practical application`,
       topic: topic.toUpperCase(),
       difficulty: difficulty.toUpperCase(),

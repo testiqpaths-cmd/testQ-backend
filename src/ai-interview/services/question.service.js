@@ -405,6 +405,7 @@ export class QuestionService {
       experienceAuthenticity: previousTurn.experienceAuthenticity || "UNPROVEN",
       contradictionDetails: previousTurn.contradictionDetails || null,
       followUpType: targetFollowUpType,
+      resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
       interviewId: session.interviewId,
     });
 

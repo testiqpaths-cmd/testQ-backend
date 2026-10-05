@@ -10,6 +10,8 @@ import { AnswerAnalysisService } from "../src/ai-interview/services/answer-analy
 import { QuestionService } from "../src/ai-interview/services/question.service.js";
 import { InterviewResultsService } from "../src/ai-interview/services/interview-results.service.js";
 import { InterviewTurn } from "../src/ai-interview/schemas/interview-turn.schema.js";
+import { AiQuestionService } from "../src/ai-interview/ai/ai-question.service.js";
+import { questionBankService } from "../src/ai-interview/services/question-bank.service.js";
 
 test("Knowledge-Depth Interviewer Behavior", async (t) => {
   const engine = new AdaptiveEngineService();
@@ -234,6 +236,106 @@ test("Knowledge-Depth Interviewer Behavior", async (t) => {
       InterviewTurn.find = origFind;
       InterviewTurn.findOne = origFindOne;
       InterviewTurn.prototype.save = origSave;
+    }
+  });
+
+  await t.test("7. AiQuestionService: generates follow-up without 'options is not defined' reference errors", async () => {
+    const origSave = questionBankService.saveGeneratedQuestion;
+    const origGet = questionBankService.getBankQuestion;
+    questionBankService.saveGeneratedQuestion = async () => null;
+    questionBankService.getBankQuestion = async () => null;
+
+    try {
+      let capturedSystemPrompt = "";
+      const mockLlm = {
+        generateStructuredJson: async ({ systemPrompt }) => {
+          capturedSystemPrompt = systemPrompt;
+          return {
+            question: "Can you walk through what happens when an unhandled Promise rejection occurs in Node.js?",
+            concept: "event loop rejections",
+            topic: "NODE.JS",
+            difficulty: "MEDIUM",
+            questionType: "DEPTH_PROBE",
+            competency: "Technical Knowledge",
+          };
+        },
+      };
+
+      const aiQuestionService = new AiQuestionService(mockLlm);
+      const result = await aiQuestionService.generateFollowUpQuestion({
+        role: "Backend Engineer",
+        experienceLevel: "1-3 Years",
+        topic: "NODE.JS",
+        difficulty: "MEDIUM",
+        previousQuestion: "Explain the difference between CommonJS and ES Modules.",
+        candidateAnswer: "CommonJS uses require while ES Modules uses import.",
+        conceptsDemonstrated: ["require", "import"],
+        conceptsMissing: ["asynchronous loading", "top-level await"],
+        misconceptions: ["Modules are executed synchronously in ESM"],
+        experienceAuthenticity: "THEORETICAL_TEXTBOOK",
+        contradictionDetails: "Earlier stated CommonJS is always asynchronous",
+        followUpType: "DEPTH_PROBE",
+      });
+
+      assert.ok(result.question);
+      assert.equal(result.topic, "NODE.JS");
+      assert.equal(result.difficulty, "MEDIUM");
+      assert.ok(capturedSystemPrompt.includes("Modules are executed synchronously in ESM"));
+      assert.ok(capturedSystemPrompt.includes("production/debugging scenario"));
+      assert.ok(capturedSystemPrompt.includes("Earlier stated CommonJS is always asynchronous"));
+    } finally {
+      questionBankService.saveGeneratedQuestion = origSave;
+      questionBankService.getBankQuestion = origGet;
+    }
+  });
+
+  await t.test("8. AiQuestionService: gracefully returns fallback follow-up when LLM throws", async () => {
+    const origGet = questionBankService.getBankQuestion;
+    questionBankService.getBankQuestion = async () => null;
+
+    try {
+      const mockFailingLlm = {
+        generateStructuredJson: async () => {
+          throw new Error("Gemini AI 503 Service Unavailable");
+        },
+      };
+
+      const aiQuestionService = new AiQuestionService(mockFailingLlm);
+      const result = await aiQuestionService.generateFollowUpQuestion({
+        topic: "NODE.JS",
+        difficulty: "EASY",
+        previousQuestion: "What is Node.js?",
+        candidateAnswer: "It is a JS runtime.",
+        conceptsMissing: ["V8 engine and Libuv"],
+        followUpType: "DEPTH_PROBE",
+      });
+
+      assert.ok(result.question);
+      assert.equal(result.topic, "NODE.JS");
+      assert.equal(result.questionSource, "fallback");
+      assert.ok(result.question.includes("V8 engine and Libuv"));
+    } finally {
+      questionBankService.getBankQuestion = origGet;
+    }
+  });
+
+  await t.test("9. AiQuestionService: handles empty or undefined context without throwing", async () => {
+    const origGet = questionBankService.getBankQuestion;
+    questionBankService.getBankQuestion = async () => null;
+
+    try {
+      const mockFailingLlm = {
+        generateStructuredJson: async () => {
+          throw new Error("LLM failure");
+        },
+      };
+
+      const aiQuestionService = new AiQuestionService(mockFailingLlm);
+      const result = await aiQuestionService.generateFollowUpQuestion();
+      assert.ok(result.question);
+      assert.equal(result.questionSource, "fallback");
+    } finally {
+      questionBankService.getBankQuestion = origGet;
     }
   });
 });

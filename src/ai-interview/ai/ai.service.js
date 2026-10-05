@@ -23,21 +23,38 @@ export class AiService {
   constructor() {
     this.geminiApiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || null;
     this.openaiApiKey = process.env.OPENAI_API_KEY || null;
-    // "gemini-flash-latest" tracks Google's current stable flash model, so
-    // this doesn't break again when a specific version is retired (as
-    // gemini-1.5-flash was). Pin a version via GEMINI_MODEL if needed.
-    this.geminiModel = process.env.GEMINI_MODEL || "gemini-flash-latest";
+    this.geminiModel = process.env.GEMINI_MODEL || "gemini-3.5-flash";
     this.openaiModel = process.env.OPENAI_MODEL || "gpt-4o-mini";
-    // Current-gen flash models routinely need >6s for a full structured-JSON
-    // response; 6s timed out almost every call. Override with AI_TIMEOUT_MS.
-    this.timeoutMs = Number(process.env.AI_TIMEOUT_MS) || 15000;
+    this.timeoutMs = Number(process.env.AI_TIMEOUT_MS) || 25000;
+  }
+
+  getApiKey() {
+    return this.geminiApiKey || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || null;
+  }
+
+  getOpenAiKey() {
+    return this.openaiApiKey || process.env.OPENAI_API_KEY || null;
+  }
+
+  getPrimaryModel() {
+    return this.geminiModel || process.env.GEMINI_MODEL || "gemini-3.5-flash";
+  }
+
+  getFallbackModels() {
+    const primary = this.getPrimaryModel();
+    return [
+      primary,
+      "gemini-3.5-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3-flash-preview",
+    ].filter((m, i, arr) => arr.indexOf(m) === i && Boolean(m));
   }
 
   /**
-   * Runs `fn(attempt)` with up to 2 retries (3 total attempts) on transient
-   * errors (503, 429, timeout) using exponential backoff with jitter.
+   * Runs `fn(attempt)` with up to 2 retries on transient errors (503, 429, timeout)
+   * using exponential backoff with jitter. Bails out immediately on hard quota limits.
    */
-  async withRetry(fn, maxAttempts = 3) {
+  async withRetry(fn, maxAttempts = 2) {
     let lastErr;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -45,12 +62,23 @@ export class AiService {
       } catch (err) {
         lastErr = err;
         const status = err.response?.status;
+        const errMsg = err.response?.data?.error?.message || err.message || "";
+        const isQuotaExhausted =
+          status === 429 &&
+          (err.response?.data?.error?.status === "RESOURCE_EXHAUSTED" ||
+            /quota exceeded|free_tier_requests/i.test(errMsg));
+
+        // When daily quota is exhausted on a model, retrying the same model is futile
+        if (isQuotaExhausted) {
+          throw err;
+        }
+
         const retryable =
-          status === 503 || status === 429 || err.code === "ECONNABORTED" || /timeout/i.test(err.message || "");
+          status === 503 || status === 429 || err.code === "ECONNABORTED" || /timeout/i.test(errMsg);
         if (!retryable || attempt === maxAttempts) {
           throw err;
         }
-        const backoffMs = 800 * attempt + Math.floor(Math.random() * 400);
+        const backoffMs = 600 * attempt + Math.floor(Math.random() * 300);
         logger.warn(`AI request transient error (${status || err.code}), retrying attempt ${attempt + 1}/${maxAttempts} after ${backoffMs}ms...`);
         await new Promise((r) => setTimeout(r, backoffMs));
       }
@@ -60,6 +88,7 @@ export class AiService {
 
   /**
    * Send a structured prompt to the LLM with strict JSON output.
+   * Automatically attempts alternative models if the primary model is unavailable.
    * Returns the parsed object, or null so the caller uses its fallback.
    *
    * @param {Object} params
@@ -69,18 +98,23 @@ export class AiService {
    */
   async generateStructuredJson({ systemPrompt, userPrompt, meta = {} }) {
     const { interviewId = null, purpose = "other" } = meta;
+    const geminiKey = this.getApiKey();
 
-    if (this.geminiApiKey) {
-      try {
-        return await this.withRetry((attempt) =>
-          this.callGemini({ systemPrompt, userPrompt, interviewId, purpose, attempt })
-        );
-      } catch (err) {
-        logger.warn(`Gemini AI call failed: ${err.message}. Triggering fallback.`);
+    if (geminiKey) {
+      for (const model of this.getFallbackModels()) {
+        try {
+          const result = await this.withRetry((attempt) =>
+            this.callGemini({ systemPrompt, userPrompt, interviewId, purpose, attempt, model })
+          );
+          if (result) return result;
+        } catch (err) {
+          logger.warn(`Gemini AI call with model '${model}' failed: ${err.message}. Trying next available fallback...`);
+        }
       }
     }
 
-    if (this.openaiApiKey) {
+    const openAiKey = this.getOpenAiKey();
+    if (openAiKey) {
       try {
         return await this.withRetry((attempt) =>
           this.callOpenAI({ systemPrompt, userPrompt, interviewId, purpose, attempt })
@@ -94,30 +128,57 @@ export class AiService {
   }
 
   /** Gemini generateContent with strict timeout + JSON response mode. */
-  async callGemini({ systemPrompt, userPrompt, interviewId, purpose, attempt = 1 }) {
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.geminiModel}:generateContent?key=${this.geminiApiKey}`;
+  async callGemini({ systemPrompt, userPrompt, interviewId, purpose, attempt = 1, model = null }) {
+    const key = this.getApiKey();
+    if (!key) throw new Error("GEMINI_API_KEY not configured");
+    const activeModel = model || this.getPrimaryModel();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${key}`;
+
+    const generationConfig = {
+      temperature: 0.3,
+      response_mime_type: "application/json",
+      max_output_tokens: 2048,
+    };
+
+    // Fast-path: models with reasoning enabled consume tokens from max_output_tokens.
+    // Disabling thinking budget on standard flash models ensures full JSON output without truncation.
+    if (!activeModel.includes("lite")) {
+      generationConfig.thinkingConfig = { thinkingBudget: 0 };
+    }
+
     const payload = {
       system_instruction: { parts: [{ text: systemPrompt }] },
       contents: [{ parts: [{ text: userPrompt }] }],
-      generationConfig: {
-        temperature: 0.3,
-        response_mime_type: "application/json",
-        max_output_tokens: 600,
-      },
+      generationConfig,
     };
 
     const start = Date.now();
     try {
-      const response = await axios.post(url, payload, {
-        timeout: this.timeoutMs,
-        headers: { "Content-Type": "application/json" },
-      });
+      let response;
+      try {
+        response = await axios.post(url, payload, {
+          timeout: this.timeoutMs,
+          headers: { "Content-Type": "application/json" },
+        });
+      } catch (postErr) {
+        // If 400 invalid argument occurs due to thinkingConfig, retry without it
+        if (postErr.response?.status === 400 && payload.generationConfig?.thinkingConfig) {
+          delete payload.generationConfig.thinkingConfig;
+          response = await axios.post(url, payload, {
+            timeout: this.timeoutMs,
+            headers: { "Content-Type": "application/json" },
+          });
+        } else {
+          throw postErr;
+        }
+      }
+
       const usage = response.data?.usageMetadata || {};
       await logCall({
         interviewId,
         purpose,
         provider: "gemini",
-        model: this.geminiModel,
+        model: activeModel,
         tokensIn: usage.promptTokenCount ?? null,
         tokensOut: usage.candidatesTokenCount ?? null,
         latencyMs: Date.now() - start,
@@ -131,7 +192,7 @@ export class AiService {
         interviewId,
         purpose,
         provider: "gemini",
-        model: this.geminiModel,
+        model: activeModel,
         latencyMs: Date.now() - start,
         attempt,
         status,
@@ -242,18 +303,26 @@ export class AiService {
     }
   }
 
-  /** Strip markdown fences and parse JSON; null on failure. */
+  /** Strip markdown fences and parse JSON; extracts valid JSON object if surrounded. */
   parseJsonSafe(raw) {
     if (!raw) return null;
-    let clean = raw.trim();
-    if (clean.startsWith("```json")) {
-      clean = clean.replace(/^```json\s*/, "").replace(/\s*```$/, "");
-    } else if (clean.startsWith("```")) {
-      clean = clean.replace(/^```\s*/, "").replace(/\s*```$/, "");
+    let clean = String(raw).trim();
+    const codeBlockMatch = clean.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+    if (codeBlockMatch) {
+      clean = codeBlockMatch[1].trim();
     }
     try {
       return JSON.parse(clean);
     } catch {
+      const firstBrace = clean.indexOf("{");
+      const lastBrace = clean.lastIndexOf("}");
+      if (firstBrace !== -1 && lastBrace > firstBrace) {
+        try {
+          return JSON.parse(clean.slice(firstBrace, lastBrace + 1));
+        } catch {
+          // ignore
+        }
+      }
       return null;
     }
   }
