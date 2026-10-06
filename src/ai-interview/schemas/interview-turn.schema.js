@@ -70,7 +70,7 @@ const interviewTurnSchema = new Schema(
     // QuestionBank, or the small hardcoded fallback set.
     questionSource: {
       type: String,
-      enum: ["ai_generated", "bank", "fallback", "predefined"],
+      enum: ["ai_generated", "bank", "fallback", "predefined", "prepared_pool", "prefetched_probe"],
       default: "ai_generated",
     },
     questionBankId: {
@@ -244,6 +244,30 @@ const interviewTurnSchema = new Schema(
       type: Number,
       default: null,
     },
+    evaluationSource: {
+      type: String,
+      enum: ["AI", "FALLBACK", "PREDEFINED", null],
+      default: "AI",
+    },
+    followUpReason: {
+      type: String,
+      enum: [
+        "MISSING_CONCEPT",
+        "SHALLOW_ANSWER",
+        "MISCONCEPTION",
+        "CONTRADICTION",
+        "PRACTICAL_DEPTH",
+        "CLARIFICATION",
+        "NONE",
+        null,
+      ],
+      default: null,
+    },
+    missingConcept: {
+      type: String,
+      default: null,
+      trim: true,
+    },
     evaluation: {
       type: Schema.Types.Mixed,
       default: null,
@@ -282,6 +306,18 @@ const interviewTurnSchema = new Schema(
     decisionAudit: {
       type: Schema.Types.Mixed,
       default: null,
+    },
+    latencyMetrics: {
+      turnTotalLatencyMs: { type: Number, default: null },
+      answerSaveMs: { type: Number, default: null },
+      answerAnalysisMs: { type: Number, default: null },
+      adaptiveDecisionMs: { type: Number, default: null },
+      questionSelectionMs: { type: Number, default: null },
+      questionGenerationMs: { type: Number, default: null },
+      embeddingMs: { type: Number, default: null },
+      dbMs: { type: Number, default: null },
+      candidateVisibleLatencyMs: { type: Number, default: null },
+      attribution: { type: Schema.Types.Mixed, default: null },
     },
   },
   {

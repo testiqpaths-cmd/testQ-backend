@@ -98,6 +98,18 @@ router.post(
   aiInterviewController.submitAnswer
 );
 
+// Fast Interaction Pipeline (Submit Answer + Process Next Action in single call)
+router.post(
+  "/sessions/:id/submit-and-next",
+  validate(submitAnswerSchema),
+  aiInterviewController.submitAnswerAndNext
+);
+router.post(
+  "/:id/submit-and-next",
+  validate(submitAnswerSchema),
+  aiInterviewController.submitAnswerAndNext
+);
+
 // Trigger answer analysis for active turn
 router.post("/sessions/:id/analyze-answer", aiInterviewController.analyzeAnswer);
 router.post("/:id/analyze-answer", aiInterviewController.analyzeAnswer);

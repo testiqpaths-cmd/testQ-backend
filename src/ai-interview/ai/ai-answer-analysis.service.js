@@ -2,6 +2,7 @@ import { z } from "zod";
 import { aiService } from "./ai.service.js";
 import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
+import { interviewStateBuilderService } from "../services/interview-state-builder.service.js";
 import logger from "../../config/logger.js";
 
 export const aiAnswerAnalysisSchema = z.object({
@@ -53,6 +54,7 @@ export const aiAnswerAnalysisSchema = z.object({
     .optional()
     .default(null),
   topicContinuationRecommended: z.boolean().default(true),
+  evaluationSource: z.enum(["AI", "FALLBACK"]).default("AI"),
 });
 
 export class AiAnswerAnalysisService {
@@ -71,6 +73,7 @@ export class AiAnswerAnalysisService {
    * @param {string} params.difficulty - Question difficulty (e.g. "EASY")
    * @param {string} [params.role="Software Engineer"]
    * @param {string} [params.experienceLevel="1-3 Years"]
+   * @param {Object} [params.interviewState=null] - Compact interview state from InterviewStateBuilder
    * @param {Array} [params.previousTurns=[]] - Previous Q&A turns in session for contradiction detection
    * @returns {Promise<Object>} Validated structured analysis
    */
@@ -81,6 +84,7 @@ export class AiAnswerAnalysisService {
     difficulty,
     role = "Software Engineer",
     experienceLevel = "1-3 Years",
+    interviewState = null,
     previousTurns = [],
     interviewId = null,
   }) {
@@ -119,45 +123,81 @@ STRICT JSON OUTPUT FORMAT:
 }
 
 CRITICAL INTERVIEWER RULES:
-1. SEPARATE KNOWLEDGE SCORE FROM DEPTH:
-   - A candidate reciting a textbook definition may score 90-95% on correctness, BUT depthLevel is "SHALLOW", experienceAuthenticity is "THEORETICAL_TEXTBOOK", and depthEstablished is FALSE!
-   - In that case, set followUpRecommended: true and followUpType: "VALIDATION" or "PRACTICAL" (e.g. ask for trade-offs, internal mechanics, or failure handling).
-   - depthEstablished is TRUE ONLY when:
-     * The candidate provides concrete deep technical mechanisms and trade-offs ("DEEP" depth), OR
-     * The candidate has successfully passed a targeted validation/practical follow-up probe.
-2. CONTRADICTION & MISCONCEPTION DETECTION:
-   - Compare with Previous Answers provided in the prompt.
-   - If candidate makes a claim contradicting an earlier answer (e.g., previously stated indexes improve queries, but now claims indexes have zero overhead on inserts/updates), set contradictionDetected: true and add the misconception to "misconceptions".
+1. COMPLETE & ACCURATE VS SHALLOW (100% accurate != automatically complete):
+   - Example shallow: Question: "How does Redis handle persistence?" -> Candidate: "Redis supports RDB and AOF persistence."
+     This is accurate, but shallow/incomplete (omits mechanics and trade-offs).
+     In that case: depthLevel: "SHALLOW", completenessScore: 50-65, followUpRecommended: true, followUpType: "VALIDATION" or "PRACTICAL".
+   - Example complete: Candidate explains RDB snapshots (point-in-time, fast restore, compact) vs AOF (append-only log, durability, fsync policies like always/everysec/no, performance vs durability trade-offs).
+     This answer is correct AND complete AND sufficiently detailed.
+     In that case: followUpRecommended: false, followUpType: "NONE", depthEstablished: true, depthLevel: "DEEP", completenessScore: >= 85.
+     DO NOT ask a cross-question just for the sake of asking one! Accept answer and advance.
+   - Cross-question depth should NEVER be triggered merely because the candidate answered correctly.
+
+2. RECOMMENDED DECISION LOGIC MATRIX:
+   - 90–100% + complete & detailed: followUpRecommended: false, followUpType: "NONE", depthEstablished: true. Accept answer and move to next topic/question.
+   - 80–90%: followUpRecommended: true, followUpType: "PRACTICAL" or "VALIDATION". Ask 1 meaningful cross-question to validate depth.
+   - 60–80%: followUpRecommended: true, followUpType: "DEPTH_PROBE" or "PRACTICAL". Ask follow-up/cross-question on missing details or mechanisms.
+   - 40–60%: followUpRecommended: true, followUpType: "CLARIFICATION". Clarify fundamentals before reassessing.
+   - <40% (or incorrect): followUpRecommended: false, followUpType: "NONE". Don't waste multiple cross-questions; move to another question.
+   - Correct but shallow: followUpRecommended: true, followUpType: "VALIDATION" or "PRACTICAL", depthEstablished: false.
+   - Correct but missing important detail: followUpRecommended: true, followUpType: "DEPTH_PROBE", populate conceptsMissing.
+
+3. CONTRADICTION & MISCONCEPTION DETECTION:
+   - Compare with Previous Answers or Structured Interview Evidence provided in the prompt.
+   - Cross-reference against Verified Concepts, Known Misconceptions, and Resume Claims.
+   - If candidate makes a claim contradicting an earlier answer or verified evidence (e.g., previously stated indexes improve queries, but now claims indexes have zero overhead on inserts/updates), set contradictionDetected: true and add the misconception to "misconceptions".
    - Set followUpRecommended: true, followUpType: "DEPTH_PROBE".
-3. EVIDENCE LEVEL:
+
+4. EVIDENCE LEVEL:
    - "LOW": 1 answer or high-level theoretical statement without deep verification.
-   - "MEDIUM": Demonstrated clear grasp across 2 questions or solid explanation.
+   - "MEDIUM": Demonstrated clear grasp across 2 questions or solid explanation with mechanisms.
    - "HIGH": Multiple turns showing deep practical understanding, internal mechanics, and real-world trade-offs.
-4. EXPERIENCE AUTHENTICITY:
+
+5. EXPERIENCE AUTHENTICITY:
    - "THEORETICAL_TEXTBOOK": Generic textbook or AI-generated definition without production battle-testing.
    - "SURFACE_FAMILIARITY": Buzzword awareness, but stumbles on how it actually works.
-   - "PRODUCTION_VERIFIED": Mentions real-world debugging, query plans, concurrency, failure cases, or operational trade-offs.
-5. FOLLOW-UP TYPES:
-   - "CLARIFICATION": Basic answer lacking clarity or missing foundational definition.
+   - "PRODUCTION_VERIFIED": Mentions real-world debugging, query plans, concurrency, failure cases, fsync, or operational trade-offs.
+
+6. FOLLOW-UP TYPES:
+   - "CLARIFICATION": Basic answer (40-60%) lacking clarity or missing foundational definition.
    - "DEPTH_PROBE": Missing internal mechanism or technical nuance (e.g. from conceptsMissing).
-   - "PRACTICAL": Testing real implementation code or query optimization.
+   - "PRACTICAL": Testing real implementation code, trade-offs, or optimization (80-90% or strong).
    - "SCENARIO": High-level trade-off or architectural dilemma.
-   - "VALIDATION": High score (>90) but textbook answer; ask a quick scenario to verify genuine hands-on depth.
-   - "NONE": When depthEstablished is true or knowledgeLevel is "NONE".
-6. Return ONLY valid JSON matching the format.`;
+   - "VALIDATION": High score (>90) but shallow textbook answer; ask a quick scenario to verify genuine hands-on depth.
+   - "NONE": When answer is correct AND complete, depthEstablished is true, or score < 40%.
+7. Return ONLY valid JSON matching the format.`;
 
     let userPrompt = `Question: "${question}"
 Topic: "${topic}"
 Difficulty: "${difficulty}"
 Candidate Answer: "${candidateAnswer}"`;
 
-    if (Array.isArray(previousTurns) && previousTurns.length > 0) {
-      const prevTurnsSummary = previousTurns
-        .filter((t) => t.question && t.candidateAnswer)
-        .map((t, idx) => `[Turn ${idx + 1}] Q: "${t.question}" -> A: "${t.candidateAnswer}"`)
-        .join("\n");
-      if (prevTurnsSummary) {
-        userPrompt += `\n\nPrevious Session Turns (check for contradictions):\n${prevTurnsSummary}`;
+    const compactEvaluatorEnabled = process.env.COMPACT_EVALUATOR_ENABLED !== "false";
+
+    if (compactEvaluatorEnabled) {
+      // Sprint 5 Compact Prompt Path
+      const stateToFormat =
+        interviewState ||
+        (Array.isArray(previousTurns) && previousTurns.length > 0
+          ? interviewStateBuilderService.buildState({}, previousTurns, { question, topic, difficulty })
+          : null);
+
+      if (stateToFormat && stateToFormat.totalTurnsCompleted > 0) {
+        const compactBlock = interviewStateBuilderService.formatStateForPrompt(stateToFormat);
+        if (compactBlock) {
+          userPrompt += `\n\n${compactBlock}`;
+        }
+      }
+    } else {
+      // Legacy Full History Path (Feature Flag Fallback)
+      if (Array.isArray(previousTurns) && previousTurns.length > 0) {
+        const prevTurnsSummary = previousTurns
+          .filter((t) => t.question && t.candidateAnswer)
+          .map((t, idx) => `[Turn ${idx + 1}] Q: "${t.question}" -> A: "${t.candidateAnswer}"`)
+          .join("\n");
+        if (prevTurnsSummary) {
+          userPrompt += `\n\nPrevious Session Turns (check for contradictions):\n${prevTurnsSummary}`;
+        }
       }
     }
 
@@ -199,104 +239,40 @@ Candidate Answer: "${candidateAnswer}"`;
   fallbackHeuristicAnalysis({ question, candidateAnswer, topic, difficulty }) {
     const text = (candidateAnswer || "").trim();
     const wordCount = text.split(/\s+/).filter(Boolean).length;
+    const isVeryEmpty = wordCount === 0;
 
-    let status = AnswerStatus.PARTIAL;
-    let correctness = 60;
-    let completeness = 50;
-    let relevance = 75;
-    let depth = "ADEQUATE";
-    let followUp = false;
-
-    if (wordCount < 4) {
-      status = AnswerStatus.INCORRECT;
-      correctness = 20;
-      completeness = 20;
-      relevance = 40;
-      depth = "SHALLOW";
-    } else if (wordCount >= 25) {
-      status = AnswerStatus.ACCURATE;
-      correctness = 80;
-      completeness = 75;
-      relevance = 85;
-      depth = "ADEQUATE";
-      followUp = true; // Foundational textbook answer: probe practical depth
-    } else {
-      // Moderate length answer (4-24 words)
-      status = AnswerStatus.PARTIAL;
-      correctness = 65;
-      completeness = 60;
-      depth = "SHALLOW";
-      followUp = true;
-    }
-
-    let knowledgeLevel = "INTERMEDIATE";
-    let depthEstablished = false;
-    let practicalUnderstanding = "ADEQUATE";
-    let followUpType = "NONE";
-
-    let evidenceLevel = "LOW";
-    let experienceAuthenticity = "UNPROVEN";
-
-    if (status === AnswerStatus.ACCURATE) {
-      if (depth === "DEEP") {
-        knowledgeLevel = "STRONG";
-        depthEstablished = true;
-        evidenceLevel = "MEDIUM";
-        practicalUnderstanding = "DEEP";
-        experienceAuthenticity = "PRODUCTION_VERIFIED";
-        followUpType = "NONE";
-      } else {
-        knowledgeLevel = "INTERMEDIATE";
-        depthEstablished = false;
-        evidenceLevel = "LOW";
-        practicalUnderstanding = "ADEQUATE";
-        experienceAuthenticity = "THEORETICAL_TEXTBOOK";
-        followUpType = "PRACTICAL";
-      }
-    } else if (status === AnswerStatus.PARTIAL) {
-      knowledgeLevel = "INTERMEDIATE";
-      depthEstablished = false;
-      evidenceLevel = "LOW";
-      practicalUnderstanding = "BASIC";
-      experienceAuthenticity = "SURFACE_FAMILIARITY";
-      followUpType = "DEPTH_PROBE";
-    } else if (status === AnswerStatus.INCORRECT) {
-      knowledgeLevel = "BASIC";
-      depthEstablished = false;
-      evidenceLevel = "LOW";
-      practicalUnderstanding = "NONE";
-      experienceAuthenticity = "UNPROVEN";
-      followUpType = "NONE";
-    }
-
+    // PRINCIPLED FALLBACK: When LLM evaluation is unavailable, do NOT pretend
+    // to know factual correctness based on superficial word count.
+    // Instead, assign a conservative baseline status with low confidence,
+    // explicitly tag evaluationSource as "FALLBACK", and avoid aggressive adaptive probes.
     return {
-      answerStatus: status,
-      relevanceScore: relevance,
-      correctnessScore: correctness,
-      completenessScore: completeness,
-      confidence: 70,
-      depthLevel: depth,
-      knowledgeLevel,
-      knowledgeConfidence: 70,
-      depthEstablished,
-      evidenceLevel,
+      answerStatus: isVeryEmpty ? AnswerStatus.SKIPPED : AnswerStatus.PARTIAL,
+      relevanceScore: isVeryEmpty ? 0 : 50,
+      correctnessScore: isVeryEmpty ? 0 : 50,
+      completenessScore: isVeryEmpty ? 0 : 50,
+      confidence: 20, // Low confidence: unverified heuristic
+      depthLevel: "ADEQUATE",
+      knowledgeLevel: "INTERMEDIATE",
+      knowledgeConfidence: 20,
+      depthEstablished: false,
+      evidenceLevel: "LOW",
       contradictionDetected: false,
       contradictionDetails: null,
       misconceptions: [],
-      experienceAuthenticity,
-      practicalUnderstanding,
+      experienceAuthenticity: "UNPROVEN",
+      practicalUnderstanding: "ADEQUATE",
       conceptsDemonstrated: [topic],
       conceptsMissing: [],
       isExplicitGap: false,
-      feedbackSummary:
-        status === AnswerStatus.ACCURATE
-          ? "Good explanation addressing the question."
-          : "Answer demonstrates basic understanding but lacks full depth.",
-      followUpRecommended: followUp,
-      followUpReason: followUp ? "Answer is concise; follow up for depth" : "Sufficient answer length",
-      followUpType,
+      feedbackSummary: isVeryEmpty
+        ? "No answer recorded before timeout."
+        : "Candidate answer recorded. System evaluated under conservative fallback mode; proceeding with interview plan.",
+      followUpRecommended: false, // Never make aggressive follow-up decisions when evaluation is uncertain
+      followUpReason: "FALLBACK_UNCERTAIN",
+      followUpType: "NONE",
       difficultyRecommendation: difficulty,
       topicContinuationRecommended: true,
+      evaluationSource: "FALLBACK",
     };
   }
 }

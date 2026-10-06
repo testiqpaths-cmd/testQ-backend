@@ -101,6 +101,27 @@ export class AiInterviewController {
   }
 
   /**
+   * POST /ai-interview/:id/submit-and-next & POST /ai-interview/sessions/:id/submit-and-next
+   * Fast Interaction Pipeline: Submits answer and executes next action in a single roundtrip
+   */
+  async submitAnswerAndNext(req, res, next) {
+    try {
+      const result = await interviewSessionService.submitAnswerAndNext(
+        req.params.id,
+        req.user,
+        req.body
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Answer processed and next action executed successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
    * POST /ai-interview/:id/analyze-answer & POST /ai-interview/sessions/:id/analyze-answer
    * Explicit endpoint to trigger answer analysis for active turn
    */

@@ -79,17 +79,18 @@ export const setupAiInterviewSocket = (io) => {
     socket.on("interview:answer", async (payload = {}, ack) => {
       const id = payload.sessionId || socket.sessionId;
       try {
-        await interviewSessionService.submitAnswer(id, user, {
+        socket.emit("interview:evaluating", { sessionId: id });
+
+        const next = await interviewSessionService.submitAnswerAndNext(id, user, {
           questionId: payload.questionId,
           answer: payload.answer,
           transcript: payload.transcript,
           timeTakenSeconds: payload.timeTakenSeconds,
           timedOut: payload.timedOut,
           reason: payload.reason,
+          clientSubmitTimestamp: payload.clientSubmitTimestamp || Date.now(),
         });
-        socket.emit("interview:evaluating", { sessionId: id });
 
-        const next = await interviewSessionService.processNextAction(id, user);
         const finished =
           next.interviewState === "COMPLETED" || next.nextAction === "COMPLETE_INTERVIEW";
         socket.emit(finished ? "interview:complete" : "interview:question", next);

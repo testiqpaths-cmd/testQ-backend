@@ -142,13 +142,18 @@ export class AdaptiveEngineService {
       : null;
 
     const isShallow = lastTurn?.depthLevel === "SHALLOW";
+    
+    const turnScore = lastTurn?.correctnessScore ?? 50;
+    const completeness = lastTurn?.completenessScore ?? (isShallow ? 50 : 85);
+    const isAccurate = normStatus === AnswerStatus.ACCURATE || turnScore >= 90;
+
     const isDepthEstablished =
       !isShallow &&
       (Boolean(lastTurn?.depthEstablished) ||
         Boolean(topicCoverage?.depthEstablished) ||
         (normStatus === AnswerStatus.ACCURATE &&
           lastTurn?.depthLevel === "DEEP" &&
-          (lastTurn?.correctnessScore ?? 0) >= 85));
+          turnScore >= 85));
 
     if (isDepthEstablished && !isIntro) {
       const nextTopic = this.getNextTopic(session, plan);
@@ -184,10 +189,88 @@ export class AdaptiveEngineService {
             decision: "COMPLETE_INTERVIEW",
             reason: "ALL_TOPICS_COVERED",
             trigger: "DEPTH_PROVEN_ALL_TOPICS",
+            followUpType: "NONE",
             decisionConfidence: 0.98,
           },
         };
       }
+    }
+
+    const hasMisconception =
+      Boolean(lastTurn?.contradictionDetected) ||
+      (Array.isArray(lastTurn?.misconceptions) && lastTurn.misconceptions.length > 0);
+    const hasMissingDetails =
+      Array.isArray(lastTurn?.conceptsMissing) && lastTurn.conceptsMissing.length > 0;
+
+    // 5b. Terminal Answer Hard Gate
+    // If: correctness >= 90, completeness >= 90, relevance >= 90, depth = DEEP,
+    // no misconceptions, no contradictions, no missing important concepts:
+    // -> ACCEPT
+    // -> NO FOLLOW-UP
+    // -> NEXT PRIMARY QUESTION (or next topic if topic question ceiling reached)
+    const isTerminalAnswer =
+      turnScore >= 90 &&
+      completeness >= 90 &&
+      (lastTurn?.relevanceScore ?? 90) >= 90 &&
+      lastTurn?.depthLevel === "DEEP" &&
+      !hasMisconception &&
+      (!lastTurn?.conceptsMissing || lastTurn.conceptsMissing.length === 0);
+
+    const maxQuestionsPerTopic = plan?.maxQuestionsPerTopic ?? 3;
+    const isTopicCeilingReached = (session.topicQuestionCount || 0) >= maxQuestionsPerTopic;
+
+    if (isTerminalAnswer) {
+      logger.info(
+        `Session ${session.interviewId}: Terminal answer hard-gate triggered for topic ${session.currentTopic}. No follow-up authorized; advancing.`
+      );
+
+      if (isTopicCeilingReached) {
+        const nextTopic = this.getNextTopic(session, plan);
+        if (nextTopic) {
+          return {
+            action: InterviewAction.SWITCH_TOPIC,
+            nextTopic,
+            difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+            reason: `Terminal answer accepted and question ceiling reached for ${session.currentTopic}; switching to ${nextTopic}.`,
+            decisionAudit: {
+              decision: "SWITCH_TOPIC",
+              reason: "TOPIC_CEILING_REACHED",
+              trigger: "TERMINAL_ANSWER_TOPIC_COMPLETE",
+              targetTopic: nextTopic,
+              decisionConfidence: 0.96,
+            },
+          };
+        } else {
+          return {
+            action: InterviewAction.COMPLETE_INTERVIEW,
+            reason: "Terminal answer accepted and all topics completed.",
+            decisionAudit: {
+              decision: "COMPLETE_INTERVIEW",
+              reason: "ALL_TOPICS_COVERED",
+              trigger: "TERMINAL_ANSWER_ALL_TOPICS_DONE",
+              decisionConfidence: 0.98,
+            },
+          };
+        }
+      }
+
+      return {
+        action: InterviewAction.ASK_QUESTION,
+        topic: session.currentTopic,
+        difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+        reason: `Candidate provided a complete, deep, and accurate terminal answer; accepting answer and advancing to next primary question on ${session.currentTopic}.`,
+        decisionAudit: {
+          decision: "ASK_QUESTION",
+          reason: "TERMINAL_ANSWER_ACCEPTED",
+          trigger: "TERMINAL_ANSWER_HARD_GATE",
+          followUpType: "NONE",
+          targetTopic: session.currentTopic,
+          knowledgeLevel: "STRONG",
+          depthLevel: "DEEP",
+          evidenceLevel: "MEDIUM",
+          decisionConfidence: 0.98,
+        },
+      };
     }
 
     // 6. Follow-Up Authorization Gate (Knowledge-Driven Probing)
@@ -216,26 +299,72 @@ export class AdaptiveEngineService {
         ? Boolean(lastTurn.followUpAllowed)
         : Boolean(lastTurn?.followUp);
 
-    const hasMisconception =
-      Boolean(lastTurn?.contradictionDetected) ||
-      (Array.isArray(lastTurn?.misconceptions) && lastTurn.misconceptions.length > 0);
+    const isFallbackEvaluation = lastTurn?.evaluationSource === "FALLBACK";
 
-    const isQualityCandidateForFollowUp =
-      hasMisconception ||
-      normStatus === AnswerStatus.PARTIAL ||
-      (Array.isArray(lastTurn?.conceptsMissing) && lastTurn.conceptsMissing.length > 0) ||
-      (normStatus === AnswerStatus.ACCURATE &&
-        (lastTurn?.depthLevel === "SHALLOW" ||
-          lastTurn?.depthLevel === "ADEQUATE" ||
-          !lastTurn?.depthEstablished ||
-          (lastTurn?.completenessScore != null && lastTurn.completenessScore < 75) ||
-          Boolean(lastTurn?.followUpRecommended)));
+    // Rule: IF answer is correct AND complete AND sufficiently detailed (90-100% + complete)
+    // -> Do NOT cross-question! Accept answer and move to next primary question/topic.
+    const isAccurate90Plus = (normStatus === AnswerStatus.ACCURATE || turnScore >= 90) && turnScore >= 90;
+    const isCorrectAndComplete =
+      isAccurate90Plus &&
+      !isShallow &&
+      completeness >= 80 &&
+      !hasMisconception &&
+      (!lastTurn?.conceptsMissing || lastTurn.conceptsMissing.length === 0) &&
+      !lastTurn?.followUpRecommended;
+
+    // Correct but shallow, missing important detail, or explicitly recommended
+    const isCorrectButShallowOrMissing =
+      (normStatus === AnswerStatus.ACCURATE || turnScore >= 80) &&
+      (isShallow || completeness < 75 || hasMissingDetails || Boolean(lastTurn?.followUpRecommended));
+
+    // Determine if candidate qualifies for a cross-question according to recommended tiers:
+    // 1. Misconception / contradiction -> targeted probe
+    // 2. Correct AND complete (90-100% + complete) -> Do NOT cross-question!
+    // 3. Correct but shallow / missing important detail -> cross-question to test practical/deeper understanding
+    // 4. 80-90% -> Ask 1 meaningful cross-question to validate depth
+    // 5. 60-80% -> Ask follow-up/cross-question
+    // 6. <40% -> Usually no; don't waste multiple cross-questions; only 1 clarification if useful
+    // 7. 40-60% -> Clarify fundamentals, then reassess
+    let isQualityCandidateForFollowUp = false;
+
+    if (isFallbackEvaluation) {
+      // Conservative handling: never make aggressive follow-up decisions on uncertain fallback
+      isQualityCandidateForFollowUp = false;
+    } else if (hasMisconception) {
+      isQualityCandidateForFollowUp = true;
+    } else if (isTerminalAnswer || isCorrectAndComplete) {
+      // 90-100% + complete: ❌ No cross-question!
+      isQualityCandidateForFollowUp = false;
+    } else if (isCorrectButShallowOrMissing) {
+      isQualityCandidateForFollowUp = true;
+    } else if (turnScore >= 80 && turnScore < 90) {
+      // 80-90%: ✅ Yes -> Ask 1 meaningful cross-question to validate depth
+      isQualityCandidateForFollowUp = true;
+    } else if (normStatus === AnswerStatus.PARTIAL || (turnScore >= 60 && turnScore < 80)) {
+      // 60-80%: ✅ Yes -> Ask follow-up/cross-question
+      isQualityCandidateForFollowUp = true;
+    } else if (turnScore < 40 || normStatus === AnswerStatus.INCORRECT) {
+      // <40%: ❌ Usually no -> Don't waste multiple cross-questions; move to another question
+      const alreadyProbed = (session.followUpCount || 0) >= 1 || Boolean(lastTurn?.isFollowUp);
+      isQualityCandidateForFollowUp = !alreadyProbed && Boolean(lastTurn?.followUpRecommended);
+    } else if ((turnScore >= 40 && turnScore < 60) || lastTurn?.knowledgeLevel === "BASIC") {
+      // 40-60%: ✅ Yes -> Clarify fundamentals, then reassess
+      isQualityCandidateForFollowUp = true;
+    }
+
+    // 80-90% rule: Ask at most 1 meaningful cross-question to validate depth
+    const isEightyToNinety = turnScore >= 80 && turnScore < 90 && !isShallow;
+    if (isEightyToNinety && (session.followUpCount || 0) >= 1) {
+      isQualityCandidateForFollowUp = false;
+    }
 
     const canFollowUp =
       !isAlreadyFollowUp &&
       !isKnowledgeGap &&
       !isDepthEstablished &&
-      isQualityCandidateForFollowUp &&
+      !isTerminalAnswer &&
+      !isFallbackEvaluation &&
+      (lastTurn?.followUpAllowed === true || isQualityCandidateForFollowUp) &&
       followUpApproved &&
       (session.followUpCount || 0) < maxFollowUpsPerQ &&
       topicFollowUps < maxFollowUpsPerTopic &&
@@ -255,7 +384,6 @@ export class AdaptiveEngineService {
       let trigger = "DEPTH_NOT_ESTABLISHED";
       let decisionConfidence = 0.85;
 
-      const turnScore = lastTurn?.correctnessScore ?? 50;
       if (hasMisconception) {
         followUpType = "DEPTH_PROBE";
         followUpDifficulty = Difficulty.MEDIUM;
@@ -272,7 +400,7 @@ export class AdaptiveEngineService {
         followUpType = "CLARIFICATION";
         followUpDifficulty = Difficulty.EASY;
         trigger = "WEAK_BASIC_ANSWER";
-        reason = "Candidate demonstrated basic understanding; asking clarification follow-up.";
+        reason = "Candidate demonstrated basic understanding; clarifying fundamentals then reassessing.";
         decisionConfidence = 0.82;
       } else if (lastTurn?.knowledgeLevel === "INTERMEDIATE" || turnScore <= 75) {
         followUpType = "DEPTH_PROBE";
@@ -290,7 +418,7 @@ export class AdaptiveEngineService {
         followUpType = "PRACTICAL";
         followUpDifficulty = Difficulty.HARD;
         trigger = "STRONG_PRACTICAL_PROBE";
-        reason = "Candidate demonstrated strong understanding; probing practical trade-offs.";
+        reason = "Candidate demonstrated strong understanding (80-90%); asking 1 meaningful cross-question to validate depth.";
         decisionConfidence = 0.88;
       } else {
         followUpType = "VALIDATION";
@@ -305,19 +433,40 @@ export class AdaptiveEngineService {
         decisionConfidence = 0.65;
       }
 
+      // Explicit internal follow-up reason enum
+      let internalFollowUpReason = "PRACTICAL_DEPTH";
+      const missingConcept =
+        lastTurn?.missingConcept ||
+        (Array.isArray(lastTurn?.conceptsMissing) && lastTurn.conceptsMissing[0]) ||
+        null;
+
+      if (Boolean(lastTurn?.contradictionDetected)) {
+        internalFollowUpReason = "CONTRADICTION";
+      } else if (hasMisconception) {
+        internalFollowUpReason = "MISCONCEPTION";
+      } else if (turnScore < 60 || lastTurn?.knowledgeLevel === "BASIC") {
+        internalFollowUpReason = "CLARIFICATION";
+      } else if (hasMissingDetails) {
+        internalFollowUpReason = "MISSING_CONCEPT";
+      } else if (isShallow) {
+        internalFollowUpReason = "SHALLOW_ANSWER";
+      } else if (turnScore >= 80 && turnScore <= 90) {
+        internalFollowUpReason = "PRACTICAL_DEPTH";
+      } else {
+        internalFollowUpReason = "PRACTICAL_DEPTH";
+      }
+
       const targetConcept =
         (lastTurn?.misconceptions?.length ? lastTurn.misconceptions[0] : null) ||
-        (lastTurn?.conceptsMissing?.length ? lastTurn.conceptsMissing[0] : null) ||
+        missingConcept ||
         lastTurn?.concept ||
         session.currentTopic;
 
       const decisionAudit = {
         decision: "FOLLOW_UP",
-        reason: hasMisconception
-          ? "MISCONCEPTION_CORRECTION"
-          : isShallow
-          ? "DEPTH_NOT_ESTABLISHED"
-          : "KNOWLEDGE_DEPTH_PROBE",
+        reason: internalFollowUpReason,
+        followUpReason: internalFollowUpReason,
+        missingConcept,
         trigger,
         knowledgeLevel: lastTurn?.knowledgeLevel || "INTERMEDIATE",
         depthLevel: lastTurn?.depthLevel || "SHALLOW",
@@ -333,6 +482,8 @@ export class AdaptiveEngineService {
         topic: session.currentTopic,
         difficulty: followUpDifficulty,
         followUpType,
+        followUpReason: internalFollowUpReason,
+        missingConcept,
         reason,
         decisionAudit,
       };
@@ -477,21 +628,31 @@ export class AdaptiveEngineService {
       };
     }
 
+    const isAnswerComplete =
+      isAccurate &&
+      !isShallow &&
+      turnScore >= 90 &&
+      completeness >= 80 &&
+      !lastTurn?.followUpRecommended &&
+      !hasMisconception;
+
     return {
       action: InterviewAction.ASK_QUESTION,
       topic: session.currentTopic,
       difficulty: nextDifficulty,
-      reason: `Continuing current topic ${session.currentTopic} at ${nextDifficulty} difficulty.`,
+      reason: isAnswerComplete
+        ? `Candidate answer was accurate and complete; accepting answer and moving to next primary question on ${session.currentTopic}.`
+        : `Continuing current topic ${session.currentTopic} at ${nextDifficulty} difficulty.`,
       decisionAudit: {
         decision: "ASK_QUESTION",
-        reason: "TOPIC_QUESTION_PROGRESSION",
-        trigger: "NORMAL_QUESTION_PROGRESSION",
+        reason: isAnswerComplete ? "COMPLETE_ANSWER_ACCEPTED" : "TOPIC_QUESTION_PROGRESSION",
+        trigger: isAnswerComplete ? "COMPLETE_ANSWER_NO_FOLLOWUP" : "NORMAL_QUESTION_PROGRESSION",
         followUpType: "NONE",
         targetTopic: session.currentTopic,
-        knowledgeLevel: topicCoverage?.knowledgeLevel || "NONE",
-        depthLevel: topicCoverage?.depthLevel || "SHALLOW",
-        evidenceLevel: topicCoverage?.evidenceLevel || "LOW",
-        decisionConfidence: 0.85,
+        knowledgeLevel: topicCoverage?.knowledgeLevel || (isAnswerComplete ? "STRONG" : "NONE"),
+        depthLevel: topicCoverage?.depthLevel || (isAnswerComplete ? "ADEQUATE" : "SHALLOW"),
+        evidenceLevel: topicCoverage?.evidenceLevel || (isAnswerComplete ? "MEDIUM" : "LOW"),
+        decisionConfidence: isAnswerComplete ? 0.95 : 0.85,
       },
     };
   }

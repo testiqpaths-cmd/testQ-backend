@@ -5,6 +5,7 @@ import { InterviewState } from "../enums/interview-state.enum.js";
 import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { aiAnswerAnalysisService } from "../ai/ai-answer-analysis.service.js";
+import { interviewStateBuilderService } from "./interview-state-builder.service.js";
 import { conceptHistoryService } from "./concept-history.service.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
@@ -89,6 +90,7 @@ export class AnswerAnalysisService {
    * @returns {Promise<Object>} Persisted analysis result with authorized next action recommendations
    */
   async analyzeTurnAnswer({ sessionId, user, turnId = null }) {
+    const tAnalysisStart = performance.now();
     if (!sessionId) {
       throw new ApiError(400, "Session ID is required for answer analysis.");
     }
@@ -230,6 +232,7 @@ export class AnswerAnalysisService {
       topicContinuation = false;
     } else {
       let previousSessionTurns = [];
+      let interviewState = null;
       try {
         previousSessionTurns = await InterviewTurn.find({
           sessionId: session._id,
@@ -237,10 +240,18 @@ export class AnswerAnalysisService {
           candidateAnswer: { $exists: true, $ne: null },
         })
           .sort({ turnNumber: 1 })
-          .select("turnNumber question candidateAnswer topic")
+          .select(
+            "turnNumber topic concept question candidateAnswer correctnessScore completenessScore depthLevel conceptsDemonstrated conceptsMissing misconceptions contradictionDetected contradictionDetails processingState"
+          )
           .lean();
-      } catch {
-        // Non-fatal
+
+        interviewState = interviewStateBuilderService.buildState(
+          session,
+          previousSessionTurns,
+          { question: turn.question, topic: turn.topic, difficulty: turn.difficulty }
+        );
+      } catch (err) {
+        logger.warn(`Failed to build compact interview state (non-fatal): ${err.message}`);
       }
 
       // Delegate to AI Analysis Layer
@@ -251,6 +262,7 @@ export class AnswerAnalysisService {
         difficulty: turn.difficulty,
         role: session.role,
         experienceLevel: session.experienceLevel,
+        interviewState,
         previousTurns: previousSessionTurns,
         interviewId: session.interviewId,
       });
@@ -295,13 +307,17 @@ export class AnswerAnalysisService {
     const misconceptions = Array.isArray(aiResult?.misconceptions) ? aiResult.misconceptions : [];
     const experienceAuthenticity = aiResult?.experienceAuthenticity || "UNPROVEN";
 
-    // 5. BACKEND AUTHORITY: Authorize or reject follow-up based on Knowledge Depth
+    // 5. BACKEND AUTHORITY: Authorize or reject follow-up based on Knowledge Depth & Recommended Logic
+    // Rules:
     // - Explicit gap / skipped -> never follow up
+    // - Correct AND complete AND sufficiently detailed (90-100% + complete) -> NEVER follow up (Accept answer)
     // - Depth already established -> never follow up (move forward)
     // - Respect topic follow-up ceiling (max 3 per topic)
     // - Respect global follow-up ceiling
     // - Time remaining > 120s
     // - Introduction turn -> never follow up
+    // - <40%: Don't waste multiple cross-questions; move to another question
+    // - 80-90%: Ask 1 meaningful cross-question to validate depth
     let followUpAllowed = false;
     const maxFollowUpsPerQ = plan?.maxFollowUpsPerQuestion ?? 3;
     const maxFollowUpsPerTopic = plan?.maxFollowUpsPerTopic ?? 3;
@@ -314,17 +330,99 @@ export class AnswerAnalysisService {
       (turn.topic && turn.topic.toUpperCase() === "INTRODUCTION") ||
       turn.concept === "Introduction";
 
-    const isQualityCandidateForFollowUp =
-      finalStatus === AnswerStatus.PARTIAL ||
-      contradictionDetected ||
-      misconceptions.length > 0 ||
-      (Array.isArray(conceptsMissing) && conceptsMissing.length > 0) ||
-      (finalStatus === AnswerStatus.ACCURATE &&
-        (depthLevel === "SHALLOW" ||
-          depthLevel === "ADEQUATE" ||
-          !depthEstablished ||
-          completeness < 75 ||
-          aiFollowUpRecommended));
+    const isShallow = depthLevel === "SHALLOW";
+    const hasMisconception = contradictionDetected || (misconceptions && misconceptions.length > 0);
+    const hasMissingDetails = Array.isArray(conceptsMissing) && conceptsMissing.length > 0;
+    const isAccurate = finalStatus === AnswerStatus.ACCURATE || correctness >= 90;
+
+    // Distinction: 100% accurate != automatically complete.
+    // IF answer is correct AND complete AND sufficiently detailed:
+    // DO NOT cross-question! Accept answer and advance.
+    const isCorrectAndComplete =
+      isAccurate &&
+      !isShallow &&
+      completeness >= 80 &&
+      !hasMisconception &&
+      !hasMissingDetails &&
+      !aiFollowUpRecommended;
+
+    if (isCorrectAndComplete) {
+      depthEstablished = true;
+    }
+
+    let isQualityCandidateForFollowUp = false;
+    if (hasMisconception) {
+      isQualityCandidateForFollowUp = true;
+    } else if (isCorrectAndComplete) {
+      // Rule: IF answer is correct AND complete AND sufficiently detailed -> Do NOT cross-question!
+      isQualityCandidateForFollowUp = false;
+    } else if (isAccurate && (isShallow || completeness < 75 || hasMissingDetails || aiFollowUpRecommended)) {
+      // Correct but shallow, missing important detail, or 80-90% validating depth
+      isQualityCandidateForFollowUp = true;
+    } else if (finalStatus === AnswerStatus.PARTIAL || (correctness >= 40 && correctness < 90)) {
+      // 40-60% clarify fundamentals, 60-80% depth probe
+      isQualityCandidateForFollowUp = true;
+    } else if (finalStatus === AnswerStatus.INCORRECT || correctness < 40) {
+      // <40%: Don't waste multiple cross-questions; move to another question.
+      // Only permit 1 single clarification if first attempt on question and specifically recommended.
+      const alreadyProbed = (session.followUpCount || 0) >= 1 || Boolean(turn.isFollowUp || turn.parentTurnId);
+      isQualityCandidateForFollowUp = !alreadyProbed && aiFollowUpRecommended;
+    }
+
+    // 80-90% rule: Ask 1 meaningful cross-question to validate depth
+    const isEightyToNinety = correctness >= 80 && correctness < 90 && !isShallow;
+    if (isEightyToNinety && (session.followUpCount || 0) >= 1) {
+      isQualityCandidateForFollowUp = false;
+    }
+
+    const evaluationSource = isNoResponse || isExplicitGap
+      ? "PREDEFINED"
+      : (aiResult?.evaluationSource || "AI");
+
+    // Explicit categorized follow-up reason
+    let followUpReason = "NONE";
+    const missingConcept = (Array.isArray(conceptsMissing) && conceptsMissing[0]) || null;
+    if (contradictionDetected) {
+      followUpReason = "CONTRADICTION";
+    } else if (hasMisconception) {
+      followUpReason = "MISCONCEPTION";
+    } else if (correctness < 60 || knowledgeLevel === "BASIC") {
+      followUpReason = "CLARIFICATION";
+    } else if (hasMissingDetails) {
+      followUpReason = "MISSING_CONCEPT";
+    } else if (isShallow) {
+      followUpReason = "SHALLOW_ANSWER";
+    } else if (correctness >= 80 && correctness <= 90) {
+      followUpReason = "PRACTICAL_DEPTH";
+    } else if (followUpAllowed) {
+      followUpReason = "PRACTICAL_DEPTH";
+    }
+
+    // TERMINAL ANSWER HARD GATE:
+    // If correctness >= 90, completeness >= 90, relevance >= 90, depth = DEEP,
+    // and no misconceptions, contradictions, or missing concepts:
+    // HARD STOP -> ACCEPT -> NEVER FOLLOW UP!
+    const isTerminalAnswer =
+      correctness >= 90 &&
+      completeness >= 90 &&
+      relevance >= 90 &&
+      depthLevel === "DEEP" &&
+      (!misconceptions || misconceptions.length === 0) &&
+      !contradictionDetected &&
+      (!conceptsMissing || conceptsMissing.length === 0);
+
+    if (isTerminalAnswer) {
+      depthEstablished = true;
+      followUpAllowed = false;
+      aiFollowUpRecommended = false;
+      followUpReason = "NONE";
+    }
+
+    if (evaluationSource === "FALLBACK") {
+      // Conservative handling: never make aggressive follow-up decisions on uncertain fallback
+      followUpAllowed = false;
+      followUpReason = "NONE";
+    }
 
     if (
       !isIntro &&
@@ -332,6 +430,8 @@ export class AnswerAnalysisService {
       !isExplicitGap &&
       !isNoResponse &&
       !depthEstablished &&
+      !isTerminalAnswer &&
+      evaluationSource !== "FALLBACK" &&
       isQualityCandidateForFollowUp &&
       (session.followUpCount || 0) < maxFollowUpsPerQ &&
       topicFollowUps < maxFollowUpsPerTopic &&
@@ -342,6 +442,9 @@ export class AnswerAnalysisService {
       followUpAllowed = true;
     } else {
       followUpAllowed = false;
+      if (!isQualityCandidateForFollowUp || isTerminalAnswer || depthEstablished) {
+        followUpReason = "NONE";
+      }
     }
 
     // 6. Update the existing InterviewTurn with full Knowledge State
@@ -361,6 +464,9 @@ export class AnswerAnalysisService {
     turn.experienceAuthenticity = experienceAuthenticity;
     turn.practicalUnderstanding = practicalUnderstanding;
     turn.followUpType = followUpType;
+    turn.followUpReason = followUpReason;
+    turn.missingConcept = missingConcept;
+    turn.evaluationSource = evaluationSource;
     turn.conceptsDemonstrated = conceptsDemonstrated;
     turn.conceptsMissing = conceptsMissing;
     turn.feedbackSummary = feedbackSummary;
@@ -373,6 +479,11 @@ export class AnswerAnalysisService {
     turn.topicContinuationRecommended = topicContinuation;
     turn.processingState = "ANALYZED";
     turn.analysisTimestamp = new Date();
+    const answerAnalysisMs = Math.round(performance.now() - tAnalysisStart);
+    turn.latencyMetrics = {
+      ...(turn.latencyMetrics || {}),
+      answerAnalysisMs,
+    };
 
     await turn.save();
 
@@ -559,10 +670,11 @@ export class AnswerAnalysisService {
           item.experienceAuthenticity = "SURFACE_FAMILIARITY";
         }
 
-        // Depth Established (Evidence-based: requires deep understanding or successful follow-up probe)
+        // Depth Established (Evidence-based: requires deep understanding, complete accurate answer, or successful follow-up probe)
         const isTurnDepthProven =
           (depthEstablished === true && depthLevel !== "SHALLOW") ||
           (depthLevel === "DEEP" && practicalUnderstanding === "DEEP") ||
+          (correctness >= 90 && completeness >= 85 && depthLevel !== "SHALLOW") ||
           (Boolean(turn.parentTurnId || turn.isFollowUp) && correctness >= 75 && depthLevel !== "SHALLOW");
 
         item.depthEstablished = Boolean(item.depthEstablished || isTurnDepthProven);
@@ -659,6 +771,7 @@ export class AnswerAnalysisService {
       followUpAllowed,
       feedbackSummary: turn.feedbackSummary,
       interviewState: session.interviewState,
+      latencyMetrics: turn.latencyMetrics,
     };
   }
 }

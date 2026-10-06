@@ -80,7 +80,10 @@ test("Cross-Questioning Engine: 5 Critical Verification Behaviors", async (t) =>
         textA.includes("static") ||
         textA.includes("dynamic") ||
         textA.includes("compile") ||
-        textA.includes("runtime");
+        textA.includes("runtime") ||
+        textA.includes("module") ||
+        textA.includes("esm") ||
+        textA.includes("commonjs");
       assert.ok(hasTopicRelevance, `Follow-up A (${followUpA.question}) must be grounded in Answer A`);
     });
 

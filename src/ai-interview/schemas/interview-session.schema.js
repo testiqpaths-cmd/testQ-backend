@@ -89,6 +89,88 @@ const phasePlanItemSchema = new Schema(
   { _id: false }
 );
 
+const preparedQuestionSchema = new Schema(
+  {
+    questionId: { type: String, required: true },
+    topic: { type: String, required: true, trim: true },
+    difficulty: {
+      type: String,
+      enum: ["EASY", "MEDIUM", "HARD", "ADAPTIVE"],
+      default: "MEDIUM",
+    },
+    questionType: { type: String, default: "TECHNICAL" },
+    competency: { type: String, default: "Technical Knowledge" },
+    question: { type: String, required: true, trim: true },
+    concept: { type: String, default: "", trim: true },
+    status: {
+      type: String,
+      enum: ["PENDING", "READY", "CLAIMED", "USED", "DISCARDED"],
+      default: "READY",
+    },
+    questionHash: { type: String, required: true },
+    createdAt: { type: Date, default: Date.now },
+    claimedAt: { type: Date, default: null },
+    claimOwner: { type: String, default: null },
+    claimExpiresAt: { type: Date, default: null },
+    usedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const prefetchedProbeSchema = new Schema(
+  {
+    probeId: { type: String, required: true },
+    parentQuestionId: { type: String, required: true },
+    parentTurnNumber: { type: Number, default: 1 },
+    topic: { type: String, required: true, trim: true },
+    difficulty: {
+      type: String,
+      enum: ["EASY", "MEDIUM", "HARD", "ADAPTIVE"],
+      default: "MEDIUM",
+    },
+    targetConcept: { type: String, default: "", trim: true },
+    probeType: {
+      type: String,
+      enum: [
+        "EASY",
+        "MEDIUM",
+        "HARD",
+        "SCENARIO",
+        "VALIDATION",
+        "CLARIFICATION",
+        "DEPTH_PROBE",
+        "PRACTICAL",
+        "NONE",
+      ],
+      default: "DEPTH_PROBE",
+    },
+    probeReason: {
+      type: String,
+      enum: [
+        "MISSING_CONCEPT",
+        "SHALLOW_ANSWER",
+        "MISCONCEPTION",
+        "CONTRADICTION",
+        "PRACTICAL_DEPTH",
+        "CLARIFICATION",
+        "VALIDATION",
+        "ADVANCED_TOPIC",
+        "GENERAL_FOLLOWUP",
+      ],
+      default: "MISSING_CONCEPT",
+    },
+    question: { type: String, required: true, trim: true },
+    status: {
+      type: String,
+      enum: ["PENDING", "READY", "CLAIMED", "USED", "DISCARDED"],
+      default: "READY",
+    },
+    createdAt: { type: Date, default: Date.now },
+    usedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
 const interviewSessionSchema = new Schema(
   {
     userId: {
@@ -226,6 +308,18 @@ const interviewSessionSchema = new Schema(
     resultsComputedAt: {
       type: Date,
       default: null,
+    },
+    preparedQuestions: {
+      type: [preparedQuestionSchema],
+      default: [],
+    },
+    prefetchedProbes: {
+      type: [prefetchedProbeSchema],
+      default: [],
+    },
+    poolGenerationLock: {
+      lockedUntil: { type: Date, default: null },
+      owner: { type: String, default: null },
     },
     // One-time shareable link to launch this interview. `shareToken` is a
     // URL-safe random string; the link is single-use (shareTokenUsedAt) and

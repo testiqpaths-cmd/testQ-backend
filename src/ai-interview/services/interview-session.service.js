@@ -12,6 +12,8 @@ import { adaptiveEngineService } from "./adaptive-engine.service.js";
 import { phaseService } from "./phase.service.js";
 import { answerAnalysisService } from "./answer-analysis.service.js";
 import { interviewResultsService } from "./interview-results.service.js";
+import { questionPlannerService } from "./interview-question-planner.service.js";
+import { followUpProbePlannerService } from "./follow-up-probe-planner.service.js";
 import { assertCanViewSession } from "../utils/authorize.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
@@ -166,6 +168,9 @@ export class InterviewSessionService {
     await plan.save();
 
     logger.info(`InterviewSession created: ${interviewId} for user ${userId}`);
+
+    // Sprint 2: Non-blocking background question pre-buffering
+    questionPlannerService.replenishPoolInBackground(session._id);
 
     return {
       sessionId: session.interviewId,
@@ -325,6 +330,9 @@ export class InterviewSessionService {
 
     logger.info(`Resume InterviewSession created: ${interviewId} for user ${userId}`);
 
+    // Sprint 2: Non-blocking background question pre-buffering
+    questionPlannerService.replenishPoolInBackground(session._id);
+
     return {
       sessionId: session.interviewId,
       _id: session._id,
@@ -482,6 +490,12 @@ export class InterviewSessionService {
 
     logger.info(`Interview started: ${session.interviewId} by user ${user._id}`);
 
+    // Sprint 2: Ensure background replenishment continues while candidate answers Q1
+    questionPlannerService.replenishPoolInBackground(session._id);
+
+    // Sprint 6: Prepare targeted follow-up probes for Q1 in background while candidate speaks
+    followUpProbePlannerService.prepareProbesForQuestion(session, firstQuestion);
+
     return {
       sessionId: session.interviewId,
       interviewId: session.interviewId,
@@ -634,6 +648,7 @@ export class InterviewSessionService {
       );
     }
 
+    const tSaveStart = performance.now();
     // 7. Update the existing InterviewTurn (Do NOT create a second turn)
     turn.candidateAnswer = answerText;
     turn.answerTimestamp = now;
@@ -642,14 +657,23 @@ export class InterviewSessionService {
     turn.endedReason = endedReason;
     turn.processingState = "SUBMITTED";
 
-    await turn.save();
-
     // 8. Deduct elapsed time and advance state to WAITING_FOR_NEXT_QUESTION
     if (timeTaken && session.timeRemaining > 0) {
       session.timeRemaining = Math.max(0, session.timeRemaining - timeTaken);
     }
     session.interviewState = InterviewState.WAITING_FOR_NEXT_QUESTION;
 
+    const answerSaveMs = Math.round(performance.now() - tSaveStart);
+    const nowWall = Date.now();
+    turn.latencyMetrics = {
+      ...(turn.latencyMetrics || {}),
+      answerSaveMs,
+      t0_candidateSubmit: payload?._t0 || payload?.clientSubmitTimestamp || null,
+      t1_requestReceived: payload?._t1 || (nowWall - answerSaveMs),
+      t2_answerPersisted: nowWall,
+    };
+
+    await turn.save();
     await session.save();
 
     logger.info(
@@ -663,7 +687,29 @@ export class InterviewSessionService {
       interviewState: session.interviewState,
       answerSaved: true,
       questionId: turn._id.toString(),
+      latencyMetrics: turn.latencyMetrics,
     };
+  }
+
+  /**
+   * Fast Interaction Pipeline:
+   * Atomically submits the active answer, analyzes it, executes adaptive decision,
+   * claims the next question from PREPARED_POOL, and returns the response in a
+   * single interaction roundtrip without intermediate client-server hops.
+   *
+   * @param {string} sessionId
+   * @param {Object} user
+   * @param {Object} payload - Answer submission payload
+   * @returns {Promise<Object>} Next question result payload
+   */
+  async submitAnswerAndNext(sessionId, user, payload = {}) {
+    const t0 = payload?.clientSubmitTimestamp || null;
+    const t1 = Date.now();
+    return this.#withSessionLock(sessionId, async () => {
+      await this.#submitAnswerImpl(sessionId, user, { ...payload, _t0: t0, _t1: t1 });
+      const t2 = Date.now();
+      return this.#processNextActionImpl(sessionId, user, { _t0: t0, _t1: t1, _t2: t2 });
+    });
   }
 
   /**
@@ -677,7 +723,17 @@ export class InterviewSessionService {
     return this.#withSessionLock(sessionId, () => this.#processNextActionImpl(sessionId, user));
   }
 
-  async #processNextActionImpl(sessionId, user) {
+  async #processNextActionImpl(sessionId, user, attributionCtx = {}) {
+    const totalTurnStart = performance.now();
+    const tTurnStartWall = Date.now();
+    let answerAnalysisMs = 0;
+    let adaptiveDecisionMs = 0;
+    let dbMs = 0;
+    let t3Wall = null;
+    let t4Wall = null;
+    let t5Wall = null;
+    let t6Wall = null;
+
     const session = await this.getSessionById(sessionId, user);
 
     // 1. Terminal / Inactive State Gate
@@ -754,12 +810,17 @@ export class InterviewSessionService {
       logger.info(
         `Auto-analyzing turn ${lastTurn.turnNumber} for session ${session.interviewId} before next action.`
       );
-      await answerAnalysisService.analyzeTurnAnswer({
+      t3Wall = Date.now();
+      const tAnalysisStart = performance.now();
+      const analysisRes = await answerAnalysisService.analyzeTurnAnswer({
         sessionId: session.interviewId,
         user,
         turnId: lastTurn._id,
       });
+      t4Wall = Date.now();
+      answerAnalysisMs = analysisRes?.latencyMetrics?.answerAnalysisMs || Math.round(performance.now() - tAnalysisStart);
       // Reload session and last turn to capture updated performance and analysis state
+      const tReloadStart = performance.now();
       const reloaded = await InterviewSession.findById(session._id);
       if (reloaded) {
         session.candidatePerformance = reloaded.candidatePerformance;
@@ -767,14 +828,93 @@ export class InterviewSessionService {
         session.interviewState = reloaded.interviewState;
       }
       lastTurn = await InterviewTurn.findById(lastTurn._id);
+      const stateReloadMs = Math.round(performance.now() - tReloadStart);
+      attributionCtx._stateReloadMs = stateReloadMs;
+    } else if (lastTurn?.latencyMetrics?.answerAnalysisMs) {
+      answerAnalysisMs = lastTurn.latencyMetrics.answerAnalysisMs;
+      t3Wall = lastTurn?.latencyMetrics?.t3_analysisStarted || tTurnStartWall;
+      t4Wall = lastTurn?.latencyMetrics?.t4_analysisCompleted || (tTurnStartWall + answerAnalysisMs);
     }
 
     // 5. Determine next action through Adaptive Engine (Backend Authority)
+    const tDecisionStart = performance.now();
     const decision = adaptiveEngineService.determineNextAction(session, plan, lastTurn);
+    adaptiveDecisionMs = Math.round(performance.now() - tDecisionStart);
+    t5Wall = Date.now();
 
     logger.info(
       `AdaptiveEngine decided '${decision.action}' for session ${session.interviewId} (reason: ${decision.reason})`
     );
+
+    const finalizeTurnMetrics = async (newQuestion = null) => {
+      const tDbStart = performance.now();
+      await session.save();
+      dbMs = Math.round(performance.now() - tDbStart);
+      const t7Wall = Date.now();
+
+      const turnTotalLatencyMs = Math.round(performance.now() - totalTurnStart);
+      const candidateVisibleLatencyMs = lastTurn?.answerTimestamp
+        ? Math.max(turnTotalLatencyMs, Date.now() - new Date(lastTurn.answerTimestamp).getTime())
+        : turnTotalLatencyMs;
+
+      const t0 = attributionCtx._t0 || lastTurn?.latencyMetrics?.t0_candidateSubmit || null;
+      const t1 = attributionCtx._t1 || lastTurn?.latencyMetrics?.t1_requestReceived || (tTurnStartWall - (lastTurn?.latencyMetrics?.answerSaveMs || 0));
+      const t2 = attributionCtx._t2 || lastTurn?.latencyMetrics?.t2_answerPersisted || (t3Wall || tTurnStartWall);
+      const t3 = t3Wall || tTurnStartWall;
+      const t4 = t4Wall || (t3 + answerAnalysisMs);
+      const stateReloadMs = attributionCtx._stateReloadMs || 0;
+      const t5 = t5Wall || (t4 + stateReloadMs + adaptiveDecisionMs);
+      const t6 = t6Wall || t5;
+      const t7 = t7Wall;
+
+      const attribution = {
+        timestamps: {
+          t0_candidateSubmit: t0,
+          t1_requestReceived: t1,
+          t2_answerPersisted: t2,
+          t3_analysisStarted: t3,
+          t4_analysisCompleted: t4,
+          t5_decisionCompleted: t5,
+          t6_questionAcquired: t6,
+          t7_responseSent: t7,
+        },
+        durations: {
+          uplinkMs: t0 ? Math.max(0, t1 - t0) : null,
+          answerSaveMs: t2 ? Math.max(0, t2 - t1) : (lastTurn?.latencyMetrics?.answerSaveMs || 0),
+          analysisWaitMs: t2 ? Math.max(0, t3 - t2) : 0,
+          answerAnalysisMs: Math.max(0, t4 - t3),
+          stateReloadMs,
+          adaptiveDecisionMs,
+          questionAcquisitionMs: Math.max(0, t6 - t5),
+          responseFinalizeMs: Math.max(0, t7 - t6),
+          backendTotalMs: Math.max(0, t7 - t1),
+        },
+        questionSource: newQuestion?.questionSource || (decision.action === InterviewAction.FOLLOW_UP ? "dynamic_followup" : (decision.action === InterviewAction.COMPLETE_INTERVIEW ? "none" : "prepared_pool")),
+      };
+
+      const metrics = {
+        turnTotalLatencyMs,
+        answerSaveMs: lastTurn?.latencyMetrics?.answerSaveMs || null,
+        answerAnalysisMs,
+        adaptiveDecisionMs,
+        questionSelectionMs: newQuestion?.latencyMetrics?.questionSelectionMs || 0,
+        questionGenerationMs: newQuestion?.latencyMetrics?.questionGenerationMs || 0,
+        embeddingMs: newQuestion?.latencyMetrics?.embeddingMs || 0,
+        dbMs,
+        candidateVisibleLatencyMs,
+        attribution,
+      };
+
+      if (lastTurn && lastTurn.processingState === "ANALYZED") {
+        lastTurn.latencyMetrics = {
+          ...(lastTurn.latencyMetrics || {}),
+          ...metrics,
+        };
+        await lastTurn.save().catch(() => {});
+      }
+
+      return metrics;
+    };
 
     // 6. Execute Determined Action
     if (decision.action === InterviewAction.COMPLETE_INTERVIEW) {
@@ -788,11 +928,16 @@ export class InterviewSessionService {
         });
       }
 
-      await session.save();
+      t6Wall = Date.now();
+      const turnMetrics = await finalizeTurnMetrics(null);
 
       // Eagerly compute+cache results now, so the details page and history
       // never hit a slow first-load lazy-compute path right after finishing.
-      await interviewResultsService.getInterviewResults(session.interviewId, user);
+      try {
+        await interviewResultsService.getInterviewResults(session.interviewId, user);
+      } catch (err) {
+        logger.warn(`Eager results calculation non-fatal error: ${err.message}`);
+      }
 
       return {
         sessionId: session.interviewId,
@@ -802,8 +947,12 @@ export class InterviewSessionService {
         totalQuestionsAsked: session.questionCount,
         coverageState: session.coverageState,
         decisionAudit: decision.decisionAudit || null,
+        latencyMetrics: turnMetrics,
+        questionSource: "none",
       };
     }
+
+    const activeQuestionId = lastTurn?._id?.toString() || lastTurn?.id || "q-active";
 
     if (decision.action === InterviewAction.FOLLOW_UP) {
       session.followUpCount = (session.followUpCount || 0) + 1;
@@ -811,18 +960,40 @@ export class InterviewSessionService {
       session.globalFollowUpCount = (session.globalFollowUpCount || 0) + 1;
       session.interviewState = InterviewState.IN_PROGRESS;
 
-      const newQuestion = await questionService.generateFollowUpQuestion(
+      // Sprint 6: Attempt claim on prefetched probe for parent question
+      let newQuestion = null;
+      const claimedProbe = await followUpProbePlannerService.claimMatchingProbe(
         session,
-        plan,
-        lastTurn,
-        {
-          difficulty: decision.difficulty,
-          followUpType: decision.followUpType || lastTurn?.followUpType,
-          decisionAudit: decision.decisionAudit || null,
-        }
+        activeQuestionId,
+        decision,
+        lastTurn
       );
 
-      await session.save();
+      if (claimedProbe) {
+        newQuestion = await questionService.createTurnFromPrefetchedProbe(
+          session,
+          lastTurn,
+          claimedProbe,
+          decision
+        );
+      } else {
+        newQuestion = await questionService.generateFollowUpQuestion(
+          session,
+          plan,
+          lastTurn,
+          {
+            difficulty: decision.difficulty,
+            followUpType: decision.followUpType || lastTurn?.followUpType,
+            followUpReason: decision.followUpReason || lastTurn?.followUpReason || null,
+            missingConcept: decision.missingConcept || lastTurn?.missingConcept || null,
+            decisionAudit: decision.decisionAudit || null,
+          }
+        );
+      }
+      t6Wall = Date.now();
+      followUpProbePlannerService.prepareProbesForQuestion(session, newQuestion);
+
+      const turnMetrics = await finalizeTurnMetrics(newQuestion);
 
       return {
         sessionId: session.interviewId,
@@ -833,10 +1004,14 @@ export class InterviewSessionService {
         followUpCount: session.followUpCount,
         topicFollowUpCount: session.topicFollowUpCount,
         globalFollowUpCount: session.globalFollowUpCount,
+        followUpReason: decision.followUpReason || lastTurn?.followUpReason || null,
+        missingConcept: decision.missingConcept || lastTurn?.missingConcept || null,
         timeRemaining: session.timeRemaining,
         topic: session.currentTopic,
         questionCount: session.questionCount,
         decisionAudit: decision.decisionAudit || null,
+        latencyMetrics: turnMetrics,
+        questionSource: newQuestion.questionSource || "ai_generated",
       };
     }
 
@@ -869,10 +1044,14 @@ export class InterviewSessionService {
         difficulty: decision.difficulty,
         decisionAudit: decision.decisionAudit || null,
       });
+      t6Wall = Date.now();
 
       phaseService.recordQuestion(session, session.currentTopic);
+      const turnMetrics = await finalizeTurnMetrics(newQuestion);
 
-      await session.save();
+      // Sprint 6: Clean up old parent probes and prefetch probes for the new question
+      followUpProbePlannerService.discardProbesForQuestion(session._id, activeQuestionId);
+      followUpProbePlannerService.prepareProbesForQuestion(session, newQuestion);
 
       return {
         sessionId: session.interviewId,
@@ -888,6 +1067,8 @@ export class InterviewSessionService {
         phase: session.currentPhase,
         phaseProgress: phaseService.progress(session),
         decisionAudit: decision.decisionAudit || null,
+        latencyMetrics: turnMetrics,
+        questionSource: newQuestion.questionSource || "ai_generated",
       };
     }
 
@@ -901,10 +1082,14 @@ export class InterviewSessionService {
       difficulty: decision.difficulty,
       decisionAudit: decision.decisionAudit || null,
     });
+    t6Wall = Date.now();
 
     phaseService.recordQuestion(session, session.currentTopic);
+    const turnMetrics = await finalizeTurnMetrics(newQuestion);
 
-    await session.save();
+    // Sprint 6: Clean up old parent probes and prefetch probes for the new question
+    followUpProbePlannerService.discardProbesForQuestion(session._id, activeQuestionId);
+    followUpProbePlannerService.prepareProbesForQuestion(session, newQuestion);
 
     return {
       sessionId: session.interviewId,
@@ -919,6 +1104,8 @@ export class InterviewSessionService {
       phase: session.currentPhase,
       phaseProgress: phaseService.progress(session),
       decisionAudit: decision.decisionAudit || null,
+      latencyMetrics: turnMetrics,
+      questionSource: newQuestion.questionSource || "ai_generated",
     };
   }
 
