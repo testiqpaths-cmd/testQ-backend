@@ -153,6 +153,8 @@ export class QuestionService {
       questionTimestamp: new Date(),
     });
 
+    const cachedAudioUrl1 = questionAudioService.getCachedStreamUrl(turn.question);
+    if (cachedAudioUrl1) turn.questionAudioUrl = cachedAudioUrl1;
     await turn.save();
 
     // Warm the question's narration now so it's ready when the room asks.
@@ -175,6 +177,7 @@ export class QuestionService {
       timestamp: turn.questionTimestamp,
       isFollowUp: false,
       subIndex: null,
+      questionAudioUrl: turn.questionAudioUrl || null,
     };
     session.questionCount = 1;
     session.topicQuestionCount = 1;
@@ -216,6 +219,7 @@ export class QuestionService {
       timestamp: turn.questionTimestamp,
       isFollowUp: false,
       subIndex: null,
+      questionAudioUrl: turn.questionAudioUrl || null,
     };
   }
 
@@ -294,6 +298,8 @@ export class QuestionService {
           },
         });
 
+        const cachedAudioUrlPool = questionAudioService.getCachedStreamUrl(turn.question);
+        if (cachedAudioUrlPool) turn.questionAudioUrl = cachedAudioUrlPool;
         await turn.save();
 
         questionAudioService.prewarmForTurn(turn._id, turn.question, {
@@ -317,6 +323,7 @@ export class QuestionService {
           isFollowUp: false,
           subIndex: null,
           decisionAudit: decisionAudit || null,
+          questionAudioUrl: turn.questionAudioUrl || null,
         };
 
         if (Array.isArray(session.coverageState)) {
@@ -368,6 +375,7 @@ export class QuestionService {
           subIndex: null,
           decisionAudit: decisionAudit || null,
           questionSource: "prepared_pool",
+          questionAudioUrl: turn.questionAudioUrl || null,
           latencyMetrics: turn.latencyMetrics,
         };
       } catch (claimErr) {
@@ -445,6 +453,8 @@ export class QuestionService {
       },
     });
 
+    const cachedAudioUrlDyn = questionAudioService.getCachedStreamUrl(turn.question);
+    if (cachedAudioUrlDyn) turn.questionAudioUrl = cachedAudioUrlDyn;
     await turn.save();
 
     questionAudioService.prewarmForTurn(turn._id, turn.question, {
@@ -469,6 +479,7 @@ export class QuestionService {
       isFollowUp: false,
       subIndex: null,
       decisionAudit: decisionAudit || null,
+      questionAudioUrl: turn.questionAudioUrl || null,
     };
 
     // Update topic coverage state
@@ -521,6 +532,7 @@ export class QuestionService {
       subIndex: null,
       decisionAudit: decisionAudit || null,
       questionSource: turn.questionSource,
+      questionAudioUrl: turn.questionAudioUrl || null,
       latencyMetrics: turn.latencyMetrics,
     };
   }
@@ -626,6 +638,8 @@ export class QuestionService {
       },
     });
 
+    const cachedAudioUrlFu = questionAudioService.getCachedStreamUrl(turn.question);
+    if (cachedAudioUrlFu) turn.questionAudioUrl = cachedAudioUrlFu;
     await turn.save();
 
     questionAudioService.prewarmForTurn(turn._id, turn.question, {
@@ -650,6 +664,7 @@ export class QuestionService {
       followUpReason: options?.followUpReason || previousTurn?.followUpReason || null,
       missingConcept: options?.missingConcept || previousTurn?.missingConcept || null,
       decisionAudit: options?.decisionAudit || null,
+      questionAudioUrl: turn.questionAudioUrl || null,
     };
 
     logger.info(
@@ -674,6 +689,7 @@ export class QuestionService {
       missingConcept: options?.missingConcept || previousTurn?.missingConcept || null,
       decisionAudit: options?.decisionAudit || null,
       questionSource: turn.questionSource,
+      questionAudioUrl: turn.questionAudioUrl || null,
       latencyMetrics: turn.latencyMetrics,
     };
   }
@@ -727,6 +743,8 @@ export class QuestionService {
       },
     });
 
+    const cachedAudioUrlProbe = questionAudioService.getCachedStreamUrl(turn.question);
+    if (cachedAudioUrlProbe) turn.questionAudioUrl = cachedAudioUrlProbe;
     await turn.save();
 
     // Async embedding in background without blocking response
@@ -758,6 +776,7 @@ export class QuestionService {
       followUpReason: decision?.followUpReason || previousTurn?.followUpReason || null,
       missingConcept: decision?.missingConcept || previousTurn?.missingConcept || null,
       decisionAudit: decision?.decisionAudit || null,
+      questionAudioUrl: turn.questionAudioUrl || null,
     };
 
     logger.info(
@@ -782,6 +801,7 @@ export class QuestionService {
       missingConcept: decision?.missingConcept || previousTurn?.missingConcept || null,
       decisionAudit: decision?.decisionAudit || null,
       questionSource: "prefetched_probe",
+      questionAudioUrl: turn.questionAudioUrl || null,
       latencyMetrics: turn.latencyMetrics,
     };
   }

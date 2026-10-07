@@ -391,7 +391,10 @@ export class AiInterviewController {
         interviewId: session.interviewId,
       });
       if (!audio?.url) {
-        return res.status(200).json({ success: true, data: { enabled: false, url: null } });
+        return res.status(200).json({
+          success: true,
+          data: { enabled: true, turnId: turn._id.toString(), url: null },
+        });
       }
 
       turn.questionAudioUrl = audio.url;

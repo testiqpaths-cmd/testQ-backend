@@ -66,6 +66,8 @@ export class TtsProviderService {
     this.openaiTtsModel = process.env.OPENAI_TTS_MODEL || "gpt-4o-mini-tts";
     this.openaiVoice = process.env.OPENAI_TTS_VOICE || "alloy";
 
+    this.edgeVoice = process.env.EDGE_TTS_VOICE || "en-US-JennyNeural";
+
     // Google Cloud's Text-to-Speech product — a separate, GA (non-preview)
     // API from the Gemini generateContent TTS above, with its own billing
     // and its own API key (a Gemini/AI-Studio key does NOT automatically
@@ -82,15 +84,17 @@ export class TtsProviderService {
   }
 
   getEffectiveProvider() {
+    if (this.provider === "edge" || this.provider === "msedge") return "edge";
+    if (this.provider === "google-translate") return "google-translate";
     if (this.provider === "gemini" && this.#hasValidKey(this.geminiApiKey)) return "gemini";
     if (this.provider === "elevenlabs" && this.#hasValidKey(this.elevenApiKey)) return "elevenlabs";
     if (this.provider === "openai" && this.#hasValidKey(this.openaiApiKey)) return "openai";
     if ((this.provider === "google-cloud" || this.provider === "google") && this.#hasValidKey(this.googleCloudApiKey)) {
       return "google-cloud";
     }
-    // Fall back to Gemini if the configured provider lacks a valid key
     if (this.#hasValidKey(this.geminiApiKey)) return "gemini";
-    return null;
+    // Default reliable zero-key provider
+    return "edge";
   }
 
   isEnabled() {
@@ -101,6 +105,12 @@ export class TtsProviderService {
   /** @returns {{voice:string, model:string, provider:string}} for cache keys */
   descriptor() {
     const eff = this.getEffectiveProvider() || this.provider;
+    if (eff === "edge" || eff === "msedge") {
+      return { provider: "edge", model: "azure-neural", voice: this.edgeVoice };
+    }
+    if (eff === "google-translate") {
+      return { provider: "google-translate", model: "tw-ob", voice: "en" };
+    }
     if (eff === "elevenlabs") {
       return { provider: "elevenlabs", model: this.elevenModel, voice: this.elevenVoiceId };
     }
@@ -115,6 +125,8 @@ export class TtsProviderService {
 
   async #dispatch(text, provider = null) {
     const target = provider || this.getEffectiveProvider() || this.provider;
+    if (target === "edge" || target === "msedge") return this.callEdge(text);
+    if (target === "google-translate") return this.callGoogleTranslate(text);
     if (target === "elevenlabs") return this.callElevenLabs(text);
     if (target === "openai") return this.callOpenAI(text);
     if (target === "google-cloud" || target === "google") {
@@ -132,18 +144,26 @@ export class TtsProviderService {
       try {
         out = await this.#dispatch(text, effProvider);
       } catch (err) {
-        if (effProvider !== "gemini" && this.#hasValidKey(this.geminiApiKey)) {
-          logger.warn(`TTS (${effProvider}) failed: ${err.message}. Retrying with Gemini TTS fallback.`);
+        logger.warn(`TTS (${effProvider}) primary call failed: ${err.message}. Engaging resilient fallback cascade...`);
+        if (effProvider !== "edge") {
           try {
-            out = await this.callGemini(text);
-          } catch (fallbackErr) {
-            logger.warn(`Gemini TTS fallback also failed: ${fallbackErr.message}`);
-            throw err;
+            out = await this.callEdge(text);
+          } catch (edgeErr) {
+            logger.warn(`Edge TTS fallback also failed: ${edgeErr.message}. Trying Google Translate TTS...`);
+            try {
+              out = await this.callGoogleTranslate(text);
+            } catch (gtErr) {
+              logger.warn(`Google Translate TTS fallback failed: ${gtErr.message}`);
+              throw err;
+            }
           }
         } else {
-          const retryable = err.code === "ECONNABORTED" || /timeout/i.test(err.message || "") || err.response?.status === 503;
-          if (!retryable) throw err;
-          out = await this.#dispatch(text, effProvider); // one retry for a transient hang
+          try {
+            out = await this.callGoogleTranslate(text);
+          } catch (gtErr) {
+            logger.warn(`Google Translate TTS fallback failed: ${gtErr.message}`);
+            throw err;
+          }
         }
       }
 
@@ -252,6 +272,66 @@ export class TtsProviderService {
     const b64 = res.data?.audioContent;
     if (!b64) return null;
     return { buffer: Buffer.from(b64, "base64"), mimeType: "audio/mpeg", ext: "mp3" };
+  }
+
+  /** Microsoft Azure Neural TTS via Read Aloud API (Free, high-fidelity neural voice, no key required). */
+  async callEdge(text) {
+    const { MsEdgeTTS, OUTPUT_FORMAT } = await import("msedge-tts");
+    return new Promise((resolve, reject) => {
+      const tts = new MsEdgeTTS();
+      const timer = setTimeout(() => {
+        try {
+          tts.close();
+        } catch {}
+        reject(new Error("Edge TTS timed out"));
+      }, this.timeoutMs || 12000);
+
+      tts
+        .setMetadata(this.edgeVoice, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3)
+        .then(() => {
+          const { audioStream } = tts.toStream(text);
+          const chunks = [];
+          audioStream.on("data", (chunk) => chunks.push(chunk));
+          audioStream.on("end", () => {
+            clearTimeout(timer);
+            try {
+              tts.close();
+            } catch {}
+            const buffer = Buffer.concat(chunks);
+            if (!buffer.length) {
+              reject(new Error("Edge TTS returned empty buffer"));
+              return;
+            }
+            resolve({ buffer, mimeType: "audio/mpeg", ext: "mp3" });
+          });
+          audioStream.on("error", (err) => {
+            clearTimeout(timer);
+            try {
+              tts.close();
+            } catch {}
+            reject(err);
+          });
+        })
+        .catch((err) => {
+          clearTimeout(timer);
+          try {
+            tts.close();
+          } catch {}
+          reject(err);
+        });
+    });
+  }
+
+  /** Fast fallback via Google Translate TTS (Zero config, immediate ~200ms audio/mpeg). */
+  async callGoogleTranslate(text) {
+    const cleanText = String(text || "").slice(0, 250);
+    const url = `https://translate.google.com/translate_tts?ie=UTF-8&tl=en&client=tw-ob&q=${encodeURIComponent(cleanText)}`;
+    const res = await axios.get(url, {
+      responseType: "arraybuffer",
+      headers: { "User-Agent": "Mozilla/5.0" },
+      timeout: 6000,
+    });
+    return { buffer: Buffer.from(res.data), mimeType: "audio/mpeg", ext: "mp3" };
   }
 }
 

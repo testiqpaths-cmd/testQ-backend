@@ -4,6 +4,7 @@ import { InterviewTurn } from "../schemas/interview-turn.schema.js";
 import { InterviewPlan } from "../schemas/interview-plan.schema.js";
 import { aiQuestionService } from "../ai/ai-question.service.js";
 import { questionBankService } from "./question-bank.service.js";
+import { questionAudioService } from "../tts/question-audio.service.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import logger from "../../config/logger.js";
 
@@ -449,6 +450,11 @@ export class InterviewQuestionPlannerService {
               experienceLevel: session.experienceLevel,
             })
             .catch(() => {});
+
+          // Pre-warm audio in background so candidate gets instant voice narration on claim
+          questionAudioService.prewarm(preparedItem.question, {
+            interviewId: session.interviewId,
+          });
         } catch (genErr) {
           logger.warn(`[QuestionPlanner] Single question generation failed: ${genErr.message}`);
         }

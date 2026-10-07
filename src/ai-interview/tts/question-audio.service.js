@@ -63,6 +63,17 @@ export class QuestionAudioService {
     return null;
   }
 
+  getCachedStreamUrl(text) {
+    if (!this.isEnabled() || !normalize(text)) return null;
+    const desc = ttsProviderService.descriptor();
+    const audioHash = this.hashFor(text, desc);
+    const mem = this.getCachedBuffer(audioHash);
+    if (mem) {
+      return `/api/ai-interview/audio/stream/${audioHash}`;
+    }
+    return null;
+  }
+
   setCachedBuffer(audioHash, buffer, mimeType) {
     if (this._bufferCache.size > 60) {
       const firstKey = this._bufferCache.keys().next().value;
