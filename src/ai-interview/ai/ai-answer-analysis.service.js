@@ -238,8 +238,9 @@ Candidate Answer: "${candidateAnswer}"`;
    */
   fallbackHeuristicAnalysis({ question, candidateAnswer, topic, difficulty }) {
     const text = (candidateAnswer || "").trim();
-    const wordCount = text.split(/\s+/).filter(Boolean).length;
-    const isVeryEmpty = wordCount === 0;
+    const isVeryEmpty =
+      wordCount === 0 ||
+      /^(?:\(?skipped\)?|skip|pass|no\s+idea|don'?t\s+know|n\/?a)$/i.test(text);
 
     // PRINCIPLED FALLBACK: When LLM evaluation is unavailable, do NOT pretend
     // to know factual correctness based on superficial word count.
