@@ -28,6 +28,7 @@ export class AnswerAnalysisService {
 
     // Direct hard admissions of not knowing or wishing to skip
     const HARD_GAP_PATTERNS = [
+      /^\(?skipped\)?$/i,
       /^(?:sorry,?\s*)?(?:i\s+)?(?:don'?t|do\s+not)\s+know$/i,
       /^(?:sorry,?\s*)?(?:i'?m|i\s+am)\s+not\s+(?:really\s+)?sure$/i,
       /^(?:sorry,?\s*)?not\s+really\s+sure(?:\s+about\s+this)?$/i,
@@ -214,10 +215,10 @@ export class AnswerAnalysisService {
         `Explicit knowledge gap detected for session ${session.interviewId} (turn ${turn.turnNumber}). Strict no-followup enforced.`
       );
       finalStatus = AnswerStatus.KNOWLEDGE_GAP;
-      relevance = 100; // Directly addressed the question by stating gap
+      relevance = 0;
       correctness = 0;
       completeness = 0;
-      confidence = 100; // Certain in not knowing
+      confidence = 0;
       depthLevel = "SHALLOW";
       knowledgeLevel = "NONE";
       knowledgeConfidence = 100;
