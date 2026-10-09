@@ -258,6 +258,7 @@ Candidate Answer: "${candidateAnswer}"`;
    */
   fallbackHeuristicAnalysis({ question, candidateAnswer, topic, difficulty }) {
     const text = (candidateAnswer || "").trim();
+    const wordCount = text ? text.split(/\s+/).filter(Boolean).length : 0;
     const isVeryEmpty =
       wordCount === 0 ||
       /^(?:\(?skipped\)?|skip|pass|no\s+idea|don'?t\s+know|n\/?a)$/i.test(text);
