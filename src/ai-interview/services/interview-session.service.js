@@ -71,23 +71,20 @@ export class InterviewSessionService {
     const difficulty = (payload.difficulty || Difficulty.ADAPTIVE).toUpperCase();
     const company = (payload.company || "").trim();
     const experienceLevel = payload.experienceLevel || payload.experience || "1-3 Years";
-    const interviewTypes = Array.isArray(payload.interviewTypes) && payload.interviewTypes.length
+    const interviewTypes = (Array.isArray(payload.interviewTypes) && payload.interviewTypes.length
       ? payload.interviewTypes
       : payload.interviewType
       ? [payload.interviewType]
-      : ["technical"];
+      : ["technical"]).map((t) => String(t || "").toLowerCase().trim()).filter(Boolean);
 
-    // Determine scoped topics from selected tech or role
-    let topics = [];
-    if (techStack.length > 0) {
-      topics = techStack.map((t) => String(t).toUpperCase());
-    } else {
-      topics = resumeTopicService.selectInterviewTopics({
-        role,
-        duration,
-        experienceLevel,
-      });
-    }
+    // Determine scoped topics from selected tech, role, and interviewTypes
+    let topics = resumeTopicService.selectInterviewTopics({
+      role,
+      candidateSkills: techStack,
+      duration,
+      experienceLevel,
+      interviewTypes,
+    });
 
     // Always ensure at least 1 topic
     if (topics.length === 0) {
@@ -205,6 +202,11 @@ export class InterviewSessionService {
       "Software Engineer";
     const company = (payload.company || "").trim();
     const experienceLevel = payload.experienceLevel || payload.experience || "1-3 Years";
+    const interviewTypes = (Array.isArray(payload.interviewTypes) && payload.interviewTypes.length
+      ? payload.interviewTypes
+      : payload.interviewType
+      ? [payload.interviewType]
+      : ["technical"]).map((t) => String(t || "").toLowerCase().trim()).filter(Boolean);
 
     let resumeData = null;
     let scopedTopics = [];
@@ -215,6 +217,7 @@ export class InterviewSessionService {
         role,
         duration,
         experienceLevel,
+        interviewTypes,
       });
 
       resumeData = {
@@ -240,6 +243,7 @@ export class InterviewSessionService {
         candidateSkills: saved.extracted?.skills || [],
         duration,
         experienceLevel,
+        interviewTypes,
       });
     } else if (payload.resumeData) {
       // Direct structured resume data provided
@@ -249,6 +253,7 @@ export class InterviewSessionService {
         candidateSkills: payload.resumeData.skills || [],
         duration,
         experienceLevel,
+        interviewTypes,
       });
     } else {
       throw new ApiError(400, "Please upload a resume file (PDF or DOCX).");
@@ -295,7 +300,7 @@ export class InterviewSessionService {
       experienceLevel,
       company,
       techStack: resumeData?.extracted?.skills || [],
-      interviewTypes: ["technical"],
+      interviewTypes,
       duration,
       difficulty,
       timeRemaining: duration * 60,
@@ -450,6 +455,7 @@ export class InterviewSessionService {
         role: session.role,
         company: session.company,
         interviewType: session.interviewTypes?.[0] || "technical",
+        interviewTypes: session.interviewTypes || ["technical"],
       };
     }
 
@@ -509,6 +515,7 @@ export class InterviewSessionService {
       role: session.role,
       company: session.company,
       interviewType: session.interviewTypes?.[0] || "technical",
+      interviewTypes: session.interviewTypes || ["technical"],
       phase: session.currentPhase,
       phaseProgress: phaseService.progress(session),
     };

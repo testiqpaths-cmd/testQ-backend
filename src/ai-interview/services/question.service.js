@@ -2,6 +2,7 @@ import { InterviewTurn } from "../schemas/interview-turn.schema.js";
 import { InterviewPlan } from "../schemas/interview-plan.schema.js";
 import { InterviewState } from "../enums/interview-state.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
+import { resolveInterviewTypeForTopic } from "../constants/interview-types.js";
 import { aiQuestionService } from "../ai/ai-question.service.js";
 import { conceptHistoryService } from "./concept-history.service.js";
 import { questionDedupService } from "./question-dedup.service.js";
@@ -400,6 +401,8 @@ export class QuestionService {
     }
     const questionSelectionMs = Math.round(performance.now() - tSelectStart);
 
+    const qInterviewType = resolveInterviewTypeForTopic(activeTopic, session.interviewTypes);
+
     // Generate question via AI layer (with automatic fallback +
     // cross-interview semantic dedup)
     const { aiOutput, questionEmbedding, questionGenerationMs, embeddingMs } = await this.generateWithDedup(
@@ -412,7 +415,7 @@ export class QuestionService {
           previousQuestions: [...previousQuestions, ...exclude],
           conceptsAlreadyTested,
           resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
-          interviewType: session.interviewTypes?.[0] || "technical",
+          interviewType: qInterviewType,
           interviewId: session.interviewId,
         }),
       { userId: session.userId, interviewId: session.interviewId, topic: activeTopic, sessionQuestions: previousQuestions }
@@ -438,9 +441,9 @@ export class QuestionService {
       question: finalQuestion,
       concept: finalConcept,
       questionEmbedding: questionEmbedding || undefined,
-      questionType: aiOutput.questionType || "TECHNICAL",
+      questionType: aiOutput.questionType || (qInterviewType === "hr" ? "HR" : qInterviewType === "behavioral" ? "BEHAVIORAL" : "TECHNICAL"),
       difficulty: finalDifficulty,
-      competency: aiOutput.competency || "Technical Knowledge",
+      competency: aiOutput.competency || (qInterviewType === "hr" ? "Culture & Professionalism" : qInterviewType === "behavioral" ? "Behavioral & Leadership" : "Technical Knowledge"),
       questionSource: aiOutput.questionSource || "ai_generated",
       questionBankId: aiOutput.questionBankId || null,
       questionTimestamp: new Date(),
@@ -566,6 +569,7 @@ export class QuestionService {
     const targetDifficulty = options.difficulty || previousTurn.difficulty || Difficulty.EASY;
     const targetFollowUpType = options.followUpType || previousTurn.followUpType || "DEPTH_PROBE";
 
+    const qFollowUpType = resolveInterviewTypeForTopic(previousTurn.topic, session.interviewTypes);
     const tGenStart = performance.now();
     const aiOutput = await this.ai.generateFollowUpQuestion({
       role: session.role,
@@ -582,6 +586,7 @@ export class QuestionService {
       contradictionDetails: previousTurn.contradictionDetails || null,
       followUpType: targetFollowUpType,
       resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
+      interviewType: qFollowUpType,
       interviewId: session.interviewId,
     });
     const questionGenerationMs = Math.round(performance.now() - tGenStart);
@@ -619,7 +624,7 @@ export class QuestionService {
       questionEmbedding: questionEmbedding || undefined,
       questionType: aiOutput.questionType || "DEPTH_PROBE",
       difficulty: targetDifficulty,
-      competency: aiOutput.competency || "Technical Knowledge",
+      competency: aiOutput.competency || (qFollowUpType === "hr" ? "Culture & Professionalism" : qFollowUpType === "behavioral" ? "Behavioral & Leadership" : "Technical Knowledge"),
       questionSource: aiOutput.questionSource || "ai_generated",
       questionBankId: aiOutput.questionBankId || null,
       questionTimestamp: new Date(),

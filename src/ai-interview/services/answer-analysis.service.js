@@ -4,6 +4,7 @@ import { InterviewPlan } from "../schemas/interview-plan.schema.js";
 import { InterviewState } from "../enums/interview-state.enum.js";
 import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
+import { resolveInterviewTypeForTopic } from "../constants/interview-types.js";
 import { aiAnswerAnalysisService } from "../ai/ai-answer-analysis.service.js";
 import { interviewStateBuilderService } from "./interview-state-builder.service.js";
 import { conceptHistoryService } from "./concept-history.service.js";
@@ -254,6 +255,8 @@ export class AnswerAnalysisService {
         logger.warn(`Failed to build compact interview state (non-fatal): ${err.message}`);
       }
 
+      const qInterviewType = resolveInterviewTypeForTopic(turn.topic, session.interviewTypes);
+
       // Delegate to AI Analysis Layer
       aiResult = await this.ai.analyzeCandidateAnswer({
         question: turn.question,
@@ -262,6 +265,7 @@ export class AnswerAnalysisService {
         difficulty: turn.difficulty,
         role: session.role,
         experienceLevel: session.experienceLevel,
+        interviewType: qInterviewType,
         interviewState,
         previousTurns: previousSessionTurns,
         interviewId: session.interviewId,

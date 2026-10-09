@@ -1,3 +1,5 @@
+import { resolveInterviewTypeForTopic, INTERVIEW_TYPES } from "../constants/interview-types.js";
+
 /**
  * Predefined fallback questions bank mapped by topic and difficulty level.
  * Used whenever external AI generation fails, times out, or returns invalid schema.
@@ -98,14 +100,13 @@ export const FALLBACK_QUESTION_BANK = {
     ],
     MEDIUM: [
       "How do indexes work in MongoDB and how do you choose between single-field and compound indexes?",
-      "Can you explain how MongoDB aggregation pipelines work with stages like $match, $group, and $lookup?",
-      "How do you model one-to-many relationships in MongoDB: embedding vs referencing?",
-      "What is the difference between an embedded index and a multikey index in MongoDB?",
+      "What is the aggregation framework in MongoDB and what are common pipeline stages like $match and $group?",
+      "How does MongoDB handle data replication using replica sets?",
+      "What is the difference between embedding documents and referencing documents in data modeling?",
     ],
     HARD: [
-      "How does MongoDB handle write concerns and read preferences in a replica set?",
-      "How would you design a sharded cluster schema to prevent hotspots in high-write workloads?",
-      "How do multi-document ACID transactions work in MongoDB replica sets and what are their performance impacts?",
+      "How does MongoDB sharding work to horizontally scale collections across clusters?",
+      "How do write concern and read concern work in MongoDB to ensure consistency across distributed nodes?",
     ],
   },
   SQL: {
@@ -211,6 +212,93 @@ export const FALLBACK_QUESTION_BANK = {
       "How would you design a caching strategy using Redis to prevent cache stampede and the thundering herd problem?",
     ],
   },
+  HIGH_LEVEL_ARCHITECTURE: {
+    EASY: [
+      "What is horizontal scaling vs vertical scaling, and what are their architectural trade-offs?",
+      "What is the role of a reverse proxy like NGINX in web infrastructure?",
+      "What is a 3-tier architecture and what role does each tier play?",
+    ],
+    MEDIUM: [
+      "How would you design a URL shortener service like Bitly that scales to millions of requests?",
+      "What is the difference between monolithic and microservice architectures, and when should you transition?",
+      "How does an API gateway centralize routing, authentication, and rate limiting in modern architectures?",
+    ],
+    HARD: [
+      "How would you design a distributed real-time messaging system like WhatsApp or Slack?",
+      "How do you design a high-throughput notification system that reliably handles millions of push alerts and emails?",
+    ],
+  },
+  SCALABILITY: {
+    EASY: [
+      "What is a Content Delivery Network (CDN) and how does it reduce server load and latency?",
+      "What is load balancing and how does Round Robin differ from Least Connections?",
+    ],
+    MEDIUM: [
+      "How do you implement rate limiting in a distributed system to protect public APIs from abuse?",
+      "What caching patterns (write-through, write-back, cache-aside) do you use to scale read-heavy applications?",
+      "How do database read replicas help scale high-traffic web applications?",
+    ],
+    HARD: [
+      "How do you prevent cache stampede and the thundering herd problem in high-throughput systems?",
+      "How would you design auto-scaling policies to handle massive sudden traffic spikes without over-provisioning?",
+    ],
+  },
+  DATABASE_DESIGN: {
+    EASY: [
+      "What are the primary differences between SQL relational databases and NoSQL document databases?",
+      "What are primary keys, foreign keys, and unique constraints in database modeling?",
+    ],
+    MEDIUM: [
+      "What are database indexes, and how do B-Trees enable efficient range and point queries?",
+      "What are ACID properties and how do transaction isolation levels prevent race conditions?",
+      "What is the difference between database normalization (3NF) and intentional denormalization?",
+    ],
+    HARD: [
+      "How would you design database table partitioning and sharding for tables storing hundreds of millions of records?",
+      "How do distributed databases manage consensus and replication lag across multi-region deployments?",
+    ],
+  },
+  CACHING_STRATEGIES: {
+    EASY: [
+      "What is the primary benefit of caching in a web application and where can caches reside?",
+      "What is the difference between client-side caching and server-side caching?",
+    ],
+    MEDIUM: [
+      "How do cache eviction policies like LRU (Least Recently Used) and LFU (Least Frequently Used) work?",
+      "What are the differences between cache-aside, read-through, and write-through caching patterns?",
+    ],
+    HARD: [
+      "How do you maintain cache consistency across multiple distributed application nodes?",
+      "How do you handle cache penetration, cache breakdown, and cache avalanche in production?",
+    ],
+  },
+  MICROSERVICES: {
+    EASY: [
+      "What are the key benefits and trade-offs of decomposing a monolith into microservices?",
+      "What is service discovery in a microservices ecosystem?",
+    ],
+    MEDIUM: [
+      "How do microservices communicate reliably using asynchronous message queues like Kafka or RabbitMQ?",
+      "What is the circuit breaker pattern and how does it prevent cascading failures across services?",
+    ],
+    HARD: [
+      "How do you maintain distributed transaction integrity across microservices using the Saga pattern?",
+      "How do you implement distributed tracing and observability using OpenTelemetry across microservices?",
+    ],
+  },
+  FAULT_TOLERANCE: {
+    EASY: [
+      "What does high availability mean in software systems and how is uptime measured?",
+      "What is the role of health checks in distributed systems?",
+    ],
+    MEDIUM: [
+      "How do retry mechanisms with exponential backoff and jitter prevent overwhelming struggling services?",
+      "What is the difference between active-passive and active-active failover strategies?",
+    ],
+    HARD: [
+      "How do you design a disaster recovery plan with near-zero RPO (Recovery Point Objective) and RTO (Recovery Time Objective)?",
+    ],
+  },
   DEV_OPS: {
     EASY: [
       "What is Continuous Integration and Continuous Deployment (CI/CD) and why is it essential?",
@@ -243,6 +331,52 @@ export const FALLBACK_QUESTION_BANK = {
       "How would you design a distributed locking mechanism using Redis or Zookeeper?",
       "Can you explain the Raft consensus algorithm and how leader election works in distributed systems?",
       "How does TCP three-way handshake and four-way termination work, and how does TCP handle congestion control?",
+    ],
+  },
+  DATA_STRUCTURES: {
+    EASY: [
+      "What is the difference between an Array and a Linked List in memory allocation and access time?",
+      "How does a Hash Map work under the hood and how does it handle hash collisions?",
+      "What is the difference between a Stack (LIFO) and a Queue (FIFO)?",
+    ],
+    MEDIUM: [
+      "What is a Binary Search Tree (BST) and what are its worst-case vs average-case time complexities?",
+      "How does a Min-Heap or Max-Heap work, and what are common real-world use cases like priority queues?",
+      "How are graphs represented in code (adjacency matrix vs adjacency list), and what are the trade-offs?",
+    ],
+    HARD: [
+      "How would you implement an LRU (Least Recently Used) cache with O(1) get and put time complexity?",
+      "Can you explain Trie (Prefix Tree) data structures and how they power search autocomplete engines?",
+    ],
+  },
+  ALGORITHMS: {
+    EASY: [
+      "How would you find the maximum and minimum elements in an unsorted array?",
+      "How do you determine if two strings are anagrams of each other?",
+      "How would you reverse the words in a sentence without using built-in reverse helpers?",
+    ],
+    MEDIUM: [
+      "How does Binary Search work and what preconditions must be met before applying it?",
+      "What are the differences between Breadth-First Search (BFS) and Depth-First Search (DFS)?",
+      "How do you find the first non-repeating character in a stream of characters?",
+    ],
+    HARD: [
+      "How would you detect a cycle in a directed graph using topological sorting or DFS?",
+      "How do you solve the longest substring without repeating characters in O(n) time?",
+      "How would you solve the median of two sorted arrays problem with logarithmic time complexity?",
+    ],
+  },
+  TIME_COMPLEXITY: {
+    EASY: [
+      "What is Big-O notation and why is it important for evaluating software performance?",
+      "What is the difference between O(1) constant time and O(n) linear time complexity?",
+    ],
+    MEDIUM: [
+      "Why is O(n log n) considered the optimal comparison-based sorting complexity (e.g. Merge Sort)?",
+      "What is space complexity and how does recursion affect call stack memory?",
+    ],
+    HARD: [
+      "How do you analyze the amortized time complexity of dynamic array resizing or hash table operations?",
     ],
   },
   PROBLEM_SOLVING: {
@@ -280,6 +414,65 @@ export const FALLBACK_QUESTION_BANK = {
       "Tell me about a time you had to make a significant technical trade-off between architectural purity and speed of delivery.",
     ],
   },
+  LEADERSHIP: {
+    EASY: [
+      "What does good leadership mean to you, whether in a formal lead role or as an individual contributor?",
+      "Can you share an example of a time you took initiative on a task or project without being prompted?",
+    ],
+    MEDIUM: [
+      "Tell me about a time you guided teammates or mentored a colleague through an ambiguous technical challenge.",
+      "How do you maintain team morale and motivation when a project faces roadblocks or missed targets?",
+    ],
+    HARD: [
+      "Describe a time you had to make an unpopular decision for the long-term benefit of a project or team. How did you manage it?",
+    ],
+  },
+  COLLABORATION: {
+    EASY: [
+      "How do you establish trust and effective working relationships when joining a new engineering team?",
+      "What tools and communication habits do you rely on for smooth day-to-day team collaboration?",
+    ],
+    MEDIUM: [
+      "Describe a time you collaborated with another department or team that had competing priorities. How did you align?",
+    ],
+    HARD: [
+      "Tell me about a time cross-functional misalignment threatened project delivery. How did you bring stakeholders together?",
+    ],
+  },
+  ADAPTABILITY: {
+    EASY: [
+      "How do you handle unexpected changes in project requirements or priorities?",
+      "Describe your approach to getting up to speed on an unfamiliar codebase or toolchain quickly.",
+    ],
+    MEDIUM: [
+      "Tell me about a time a project's technical direction changed completely midway through. How did you adjust?",
+    ],
+    HARD: [
+      "Walk me through an urgent production crisis where you had to make quick decisions with incomplete information.",
+    ],
+  },
+  OVERCOMING_CHALLENGES: {
+    EASY: [
+      "Tell me about a difficult obstacle you encountered recently and how you broke it down to solve it.",
+    ],
+    MEDIUM: [
+      "Describe a project that did not go according to plan. What went wrong and what lessons did you take away?",
+    ],
+    HARD: [
+      "Tell me about a time you made a significant mistake at work. How did you handle the consequences and rectify it?",
+    ],
+  },
+  DECISION_MAKING: {
+    EASY: [
+      "What process or framework do you use when making important technical or workflow decisions under uncertainty?",
+    ],
+    MEDIUM: [
+      "Tell me about a time you had to make an engineering decision with incomplete data. How did you evaluate the risks?",
+    ],
+    HARD: [
+      "Describe a high-stakes decision you made where there was no clear right answer. What were the trade-offs and outcome?",
+    ],
+  },
   HR: {
     EASY: [
       "What motivated you to apply for this role and what are your immediate career goals?",
@@ -292,6 +485,180 @@ export const FALLBACK_QUESTION_BANK = {
     ],
     HARD: [
       "How do you balance high code quality with tight commercial deadlines in a fast-paced environment?",
+    ],
+  },
+  CULTURE_FIT: {
+    EASY: [
+      "What kind of team culture and work environment helps you perform at your best?",
+      "How do you align with a company's mission and core values in your daily work?",
+      "What do you value most in a relationship between team members and leadership?",
+    ],
+    MEDIUM: [
+      "Describe a time when you joined a new company or team. How did you integrate into their work culture?",
+      "How do you handle situations where company goals or organizational structures shift unexpectedly?",
+    ],
+    HARD: [
+      "Tell me about a time you noticed an issue in team morale or culture. What proactive steps did you take to help improve it?",
+    ],
+  },
+  CAREER_GOALS: {
+    EASY: [
+      "Where do you see yourself professionally over the next two to three years?",
+      "What specifically attracted you to this company and this role?",
+    ],
+    MEDIUM: [
+      "What skills or capabilities are you currently actively working to develop or improve?",
+      "How does this position fit into your overall long-term career aspirations?",
+    ],
+    HARD: [
+      "Describe a major career crossroad you faced. How did you evaluate your options and decide the best path forward?",
+    ],
+  },
+  WORK_ETHIC: {
+    EASY: [
+      "How do you organize, track, and prioritize your daily tasks and responsibilities?",
+      "What does taking personal ownership of your work look like in practice?",
+    ],
+    MEDIUM: [
+      "Tell me about a time when you had to deliver results under tight deadlines and pressure.",
+      "How do you maintain high quality and precision when handling repetitive or fast-moving tasks?",
+    ],
+    HARD: [
+      "Describe a situation where a critical project was slipping behind schedule. What steps did you take to turn it around?",
+    ],
+  },
+  TEAMWORK: {
+    EASY: [
+      "What qualities do you believe make someone an exceptional team player in an engineering organization?",
+      "How do you collaborate with teammates who have different working styles or backgrounds?",
+    ],
+    MEDIUM: [
+      "Describe a successful team project you contributed to. How did you ensure everyone stayed aligned and supported?",
+      "Tell me about a time you stepped in to help a colleague who was overwhelmed with their workload.",
+    ],
+    HARD: [
+      "How do you handle a situation where a team member is consistently underperforming or missing commitments?",
+    ],
+  },
+  COMMUNICATION_SKILLS: {
+    EASY: [
+      "How do you communicate complex technical concepts or trade-offs to non-technical stakeholders?",
+      "What is your approach to giving and receiving constructive feedback during code reviews?",
+    ],
+    MEDIUM: [
+      "Tell me about a time there was a miscommunication on your team. How did you clarify and resolve the issue?",
+      "How do you ensure clear and transparent communication when working in distributed or asynchronous teams?",
+    ],
+    HARD: [
+      "Describe a situation where you had to persuade senior decision-makers who initially opposed your proposal.",
+    ],
+  },
+  CONFLICT_RESOLUTION: {
+    EASY: [
+      "How do you typically react when a colleague disagrees with your technical perspective on a feature?",
+      "What steps do you take to prevent friction from turning into personal conflict in a team setting?",
+    ],
+    MEDIUM: [
+      "Tell me about a time you had a workplace disagreement with a coworker. How did you work through it professionally?",
+      "Describe a situation where you had to find a constructive compromise between two conflicting approaches.",
+    ],
+    HARD: [
+      "Walk me through an interpersonal conflict on a team that became tense. How did you de-escalate and resolve it?",
+    ],
+  },
+  TEAM_LEADERSHIP: {
+    EASY: [
+      "How do you support the professional growth and career progression of your team members?",
+      "What is your philosophy on delegating responsibilities versus maintaining direct oversight?",
+    ],
+    MEDIUM: [
+      "How do you balance sprint velocity with preventing burnout across an engineering team?",
+      "Tell me about a time you mentored an engineer and helped them overcome a performance plateaus.",
+    ],
+    HARD: [
+      "How do you handle performance management when an engineer continues to fall short of expectations after coaching?",
+    ],
+  },
+  PROJECT_DELIVERY: {
+    EASY: [
+      "How do you break down high-level business requirements into manageable engineering milestones and sprints?",
+    ],
+    MEDIUM: [
+      "How do you manage scope creep and unforeseen technical dependencies during an active release cycle?",
+    ],
+    HARD: [
+      "Describe a time when a critical release missed its target launch date. How did you conduct the post-mortem and course-correct?",
+    ],
+  },
+  STAKEHOLDER_COMMUNICATION: {
+    EASY: [
+      "How do you keep product managers and executive stakeholders updated on technical milestones and risks?",
+    ],
+    MEDIUM: [
+      "Tell me about a time you had to communicate delays or technical debt to business stakeholders. How did you frame it?",
+    ],
+    HARD: [
+      "How do you balance competing feature requests from product, sales, and engineering architecture?",
+    ],
+  },
+  PROJECT_ARCHITECTURE: {
+    EASY: [
+      "Can you give an architectural overview of the most impactful application or system you have built?",
+    ],
+    MEDIUM: [
+      "What were the key architectural trade-offs you made in your latest project, and what would you do differently today?",
+      "How did your project structure its API layer, database models, and authentication flow?",
+    ],
+    HARD: [
+      "Walk me through how your project architecture handles unexpected traffic spikes and database connection pooling under load.",
+    ],
+  },
+  TECHNICAL_CHALLENGES: {
+    EASY: [
+      "Tell me about a challenging technical hurdle you solved in a recent project and how you tackled it.",
+    ],
+    MEDIUM: [
+      "Describe the most difficult performance bottleneck or memory leak you diagnosed and resolved in production.",
+    ],
+    HARD: [
+      "Walk me through a critical production outage or data integrity bug you investigated. What was the root cause and fix?",
+    ],
+  },
+  DESIGN_PATTERNS: {
+    EASY: [
+      "What are software design patterns and why are patterns like Singleton or Factory used?",
+      "What is the Observer pattern and how is it used in modern event-driven architectures?",
+    ],
+    MEDIUM: [
+      "How do Dependency Injection and Inversion of Control (IoC) improve code maintainability and testability?",
+      "What is the Repository pattern and how does it decouple business logic from data access layers?",
+    ],
+    HARD: [
+      "Can you explain the CQRS (Command Query Responsibility Segregation) pattern and when it is appropriate to use?",
+    ],
+  },
+  PRODUCTION_ISSUES: {
+    EASY: [
+      "What logging and monitoring tools do you rely on to detect runtime errors in production?",
+    ],
+    MEDIUM: [
+      "How do you approach debugging an intermittent bug in production that cannot be reproduced locally?",
+      "What is your procedure for rolling back an unhealthy release while minimizing user disruption?",
+    ],
+    HARD: [
+      "Walk me through how you conduct an engineering incident post-mortem with root-cause analysis and action items.",
+    ],
+  },
+  OPTIMIZATION_AND_SCALE: {
+    EASY: [
+      "What is the first step you take before attempting to optimize code or system performance?",
+    ],
+    MEDIUM: [
+      "How do you optimize slow database queries and reduce unnecessary network payloads in an application?",
+      "What strategies do you use for asset optimization and bundle size reduction in frontend applications?",
+    ],
+    HARD: [
+      "How did you scale a system or API to handle an order of magnitude more traffic without exponentially increasing infrastructure cost?",
     ],
   },
 };
@@ -321,6 +688,15 @@ function deriveConcept(questionText, topic) {
   if (norm.includes("docker") || norm.includes("container")) return "Containerization";
   if (norm.includes("dns")) return "Networking & DNS";
   if (norm.includes("merge") || norm.includes("rebase")) return "Git Workflows";
+  if (norm.includes("star") || norm.includes("situation")) return "Behavioral Situation";
+  if (norm.includes("culture") || norm.includes("value")) return "Company Culture Alignment";
+  if (norm.includes("goal") || norm.includes("career")) return "Career Growth & Goals";
+  if (norm.includes("teamwork") || norm.includes("teammate")) return "Team Collaboration";
+  if (norm.includes("conflict") || norm.includes("disagree")) return "Conflict Resolution";
+  if (norm.includes("leadership") || norm.includes("lead")) return "Leadership & Initiative";
+  if (norm.includes("scale") || norm.includes("scaling")) return "System Scalability";
+  if (norm.includes("architecture")) return "Architecture & Design";
+  if (norm.includes("algorithm") || norm.includes("complexity")) return "Algorithmic Efficiency";
   return topic.replace(/_/g, " ");
 }
 
@@ -331,15 +707,18 @@ function deriveConcept(questionText, topic) {
  * @param {string} topic
  * @param {string} difficulty - "EASY" | "MEDIUM" | "HARD" | "ADAPTIVE"
  * @param {string[]} [excludeQuestions=[]] - Questions already asked in this session
+ * @param {string} [interviewType="technical"] - Interview type
  * @returns {{ question: string, concept: string, topic: string, difficulty: string, questionType: string, competency: string }}
  */
 export const getFallbackQuestion = (
   topic = "TECHNICAL_FUNDAMENTALS",
   difficulty = "EASY",
-  excludeQuestions = []
+  excludeQuestions = [],
+  interviewType = "technical"
 ) => {
-  const normTopic = String(topic).toUpperCase().replace(/\s+/g, "_");
-  const normDiff = difficulty === "ADAPTIVE" ? "EASY" : String(difficulty).toUpperCase();
+  const normTopic = String(topic || "TECHNICAL_FUNDAMENTALS").toUpperCase().replace(/\s+/g, "_");
+  const normDiff = difficulty === "ADAPTIVE" ? "EASY" : String(difficulty || "EASY").toUpperCase();
+  const normInterviewType = String(interviewType || "technical").toLowerCase();
 
   const isExcluded = (q) => {
     const nq = normalize(q);
@@ -349,16 +728,33 @@ export const getFallbackQuestion = (
     });
   };
 
-  // 1. Check matching topic bank
-  const topicBank =
-    FALLBACK_QUESTION_BANK[normTopic] ||
-    FALLBACK_QUESTION_BANK.TECHNICAL_FUNDAMENTALS;
+  // 1. Check matching topic bank directly
+  let topicBank = FALLBACK_QUESTION_BANK[normTopic];
+
+  // 2. If topic bank not found, pick appropriate default bank based on interviewType
+  if (!topicBank) {
+    if (normInterviewType === INTERVIEW_TYPES.HR) {
+      topicBank = FALLBACK_QUESTION_BANK.CULTURE_FIT || FALLBACK_QUESTION_BANK.HR;
+    } else if (normInterviewType === INTERVIEW_TYPES.BEHAVIORAL) {
+      topicBank = FALLBACK_QUESTION_BANK.BEHAVIORAL || FALLBACK_QUESTION_BANK.LEADERSHIP;
+    } else if (normInterviewType === INTERVIEW_TYPES.MANAGERIAL) {
+      topicBank = FALLBACK_QUESTION_BANK.TEAM_LEADERSHIP || FALLBACK_QUESTION_BANK.BEHAVIORAL;
+    } else if (normInterviewType === INTERVIEW_TYPES.SYSTEM_DESIGN) {
+      topicBank = FALLBACK_QUESTION_BANK.SYSTEM_DESIGN || FALLBACK_QUESTION_BANK.HIGH_LEVEL_ARCHITECTURE;
+    } else if (normInterviewType === INTERVIEW_TYPES.PROJECT_BASED) {
+      topicBank = FALLBACK_QUESTION_BANK.PROJECT_ARCHITECTURE || FALLBACK_QUESTION_BANK.TECHNICAL_CHALLENGES;
+    } else if (normInterviewType === INTERVIEW_TYPES.CODING) {
+      topicBank = FALLBACK_QUESTION_BANK.PROBLEM_SOLVING || FALLBACK_QUESTION_BANK.DATA_STRUCTURES;
+    } else {
+      topicBank = FALLBACK_QUESTION_BANK.TECHNICAL_FUNDAMENTALS;
+    }
+  }
 
   // Primary difficulty list
   const primaryList = topicBank[normDiff] || topicBank.EASY || [];
   let available = primaryList.filter((q) => !isExcluded(q));
 
-  // 2. If primary difficulty in topic is exhausted, search adjacent difficulties in same topic
+  // 3. If primary difficulty in topic is exhausted, search adjacent difficulties in same topic
   if (available.length === 0) {
     const diffLadder = ["EASY", "MEDIUM", "HARD"];
     for (const d of diffLadder) {
@@ -372,11 +768,21 @@ export const getFallbackQuestion = (
     }
   }
 
-  // 3. If whole topic is exhausted, search TECHNICAL_FUNDAMENTALS
-  if (available.length === 0 && normTopic !== "TECHNICAL_FUNDAMENTALS") {
-    const tfBank = FALLBACK_QUESTION_BANK.TECHNICAL_FUNDAMENTALS;
+  // 4. If whole topic is exhausted, search type-appropriate fallback bank
+  if (available.length === 0) {
+    const typeFallbackBank =
+      normInterviewType === INTERVIEW_TYPES.HR
+        ? FALLBACK_QUESTION_BANK.HR
+        : normInterviewType === INTERVIEW_TYPES.BEHAVIORAL || normInterviewType === INTERVIEW_TYPES.MANAGERIAL
+        ? FALLBACK_QUESTION_BANK.BEHAVIORAL
+        : normInterviewType === INTERVIEW_TYPES.SYSTEM_DESIGN
+        ? FALLBACK_QUESTION_BANK.SYSTEM_DESIGN
+        : normInterviewType === INTERVIEW_TYPES.CODING
+        ? FALLBACK_QUESTION_BANK.PROBLEM_SOLVING
+        : FALLBACK_QUESTION_BANK.TECHNICAL_FUNDAMENTALS;
+
     for (const d of [normDiff, "EASY", "MEDIUM", "HARD"]) {
-      const list = tfBank[d] || [];
+      const list = typeFallbackBank[d] || [];
       const unasked = list.filter((q) => !isExcluded(q));
       if (unasked.length > 0) {
         available = unasked;
@@ -385,30 +791,42 @@ export const getFallbackQuestion = (
     }
   }
 
-  // 4. If still exhausted, search PROBLEM_SOLVING
-  if (available.length === 0 && normTopic !== "PROBLEM_SOLVING") {
-    const psBank = FALLBACK_QUESTION_BANK.PROBLEM_SOLVING;
-    for (const d of [normDiff, "EASY", "MEDIUM", "HARD"]) {
-      const list = psBank[d] || [];
-      const unasked = list.filter((q) => !isExcluded(q));
-      if (unasked.length > 0) {
-        available = unasked;
-        break;
-      }
-    }
-  }
-
-  // 5. Ultimate fallback: pick from primaryList if all possible questions were somehow asked
-  const pool = available.length > 0 ? available : (primaryList.length > 0 ? primaryList : ["Can you explain the architectural overview of a project you built recently?"]);
+  // 5. Ultimate fallback
+  const pool = available.length > 0 ? available : (primaryList.length > 0 ? primaryList : ["Can you describe a key project you worked on recently and your primary contributions?"]);
   const selectedQuestion = pool[Math.floor(Math.random() * pool.length)];
+
+  // Resolve appropriate questionType and competency based on topic & interviewType
+  const resolvedType = resolveInterviewTypeForTopic(normTopic, [normInterviewType]);
+  let questionType = "TECHNICAL";
+  let competency = "Technical Knowledge";
+
+  if (resolvedType === INTERVIEW_TYPES.HR) {
+    questionType = "HR";
+    competency = "Culture & Professionalism";
+  } else if (resolvedType === INTERVIEW_TYPES.BEHAVIORAL) {
+    questionType = "BEHAVIORAL";
+    competency = "Behavioral & Leadership";
+  } else if (resolvedType === INTERVIEW_TYPES.MANAGERIAL) {
+    questionType = "BEHAVIORAL";
+    competency = "People & Project Leadership";
+  } else if (resolvedType === INTERVIEW_TYPES.SYSTEM_DESIGN) {
+    questionType = "SCENARIO";
+    competency = "System Architecture & Scalability";
+  } else if (resolvedType === INTERVIEW_TYPES.PROJECT_BASED) {
+    questionType = "PROJECT";
+    competency = "Project Execution & Architecture";
+  } else if (resolvedType === INTERVIEW_TYPES.CODING) {
+    questionType = "PROBLEM_SOLVING";
+    competency = "Problem Solving & Algorithms";
+  }
 
   return {
     question: selectedQuestion,
     concept: deriveConcept(selectedQuestion, normTopic),
     topic: normTopic,
     difficulty: normDiff,
-    questionType: normTopic === "BEHAVIORAL" ? "BEHAVIORAL" : normTopic === "HR" ? "HR" : "TECHNICAL",
-    competency: "Technical Knowledge",
+    questionType,
+    competency,
   };
 };
 

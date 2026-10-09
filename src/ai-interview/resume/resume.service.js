@@ -38,6 +38,7 @@ export class ResumeService {
       candidateSkills: parsed.extracted.skills,
       duration: options.duration || 30,
       experienceLevel: options.experienceLevel || "1-3 Years",
+      interviewTypes: options.interviewTypes || ["technical"],
     });
 
     return {

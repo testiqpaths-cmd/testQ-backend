@@ -3,6 +3,7 @@ import { aiService } from "./ai.service.js";
 import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { interviewStateBuilderService } from "../services/interview-state-builder.service.js";
+import { resolveInterviewTypeForTopic, getTypePersonaAndConfig, INTERVIEW_TYPES } from "../constants/interview-types.js";
 import logger from "../../config/logger.js";
 
 export const aiAnswerAnalysisSchema = z.object({
@@ -84,15 +85,33 @@ export class AiAnswerAnalysisService {
     difficulty,
     role = "Software Engineer",
     experienceLevel = "1-3 Years",
+    interviewType = "technical",
     interviewState = null,
     previousTurns = [],
     interviewId = null,
   }) {
-    const systemPrompt = `You are an expert technical interviewer for TestQ evaluating a candidate's answer for the role of ${role} (${experienceLevel}).
+    const resolvedType = resolveInterviewTypeForTopic(topic, [interviewType]);
+    const typeConfig = getTypePersonaAndConfig(resolvedType, role, experienceLevel);
 
+    let roleEvaluationCriteria = "technical correctness, relevance, completeness, depth, practical understanding, contradictions, misconceptions, and experience authenticity";
+    if (resolvedType === INTERVIEW_TYPES.HR) {
+      roleEvaluationCriteria = "cultural alignment, communication clarity, professional values, career motivation, teamwork, self-awareness, and sincerity";
+    } else if (resolvedType === INTERVIEW_TYPES.BEHAVIORAL) {
+      roleEvaluationCriteria = "STAR framework (Situation, Task, Action, Result), leadership initiative, personal ownership, problem-solving impact, conflict resolution, and accountability";
+    } else if (resolvedType === INTERVIEW_TYPES.SYSTEM_DESIGN) {
+      roleEvaluationCriteria = "architectural scalability, high-level component design, trade-off analysis, database and caching choices, bottleneck identification, and fault tolerance";
+    } else if (resolvedType === INTERVIEW_TYPES.MANAGERIAL) {
+      roleEvaluationCriteria = "people leadership, engineering project delivery, prioritization, stakeholder communication, team mentorship, and conflict handling";
+    } else if (resolvedType === INTERVIEW_TYPES.PROJECT_BASED) {
+      roleEvaluationCriteria = "real-world project ownership, architectural design choices, technical hurdles resolved, and production debugging experience";
+    } else if (resolvedType === INTERVIEW_TYPES.CODING) {
+      roleEvaluationCriteria = "algorithmic correctness, time and space complexity, edge cases, and code optimization";
+    }
+
+    const systemPrompt = `${typeConfig.persona}
 STRICT TASK:
-Analyze the candidate's answer for the question asked.
-Assess technical correctness, relevance, completeness, depth, practical understanding, contradictions, misconceptions, and experience authenticity.
+Analyze the candidate's answer for the question asked in this ${resolvedType} interview.
+Assess ${roleEvaluationCriteria}.
 
 STRICT JSON OUTPUT FORMAT:
 {
@@ -167,7 +186,8 @@ CRITICAL INTERVIEWER RULES:
    - "NONE": When answer is correct AND complete, depthEstablished is true, or score < 40%.
 7. Return ONLY valid JSON matching the format.`;
 
-    let userPrompt = `Question: "${question}"
+    let userPrompt = `Interview Format: ${resolvedType.toUpperCase()}
+Question: "${question}"
 Topic: "${topic}"
 Difficulty: "${difficulty}"
 Candidate Answer: "${candidateAnswer}"`;

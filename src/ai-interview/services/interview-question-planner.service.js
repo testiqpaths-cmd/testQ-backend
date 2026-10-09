@@ -6,6 +6,7 @@ import { aiQuestionService } from "../ai/ai-question.service.js";
 import { questionBankService } from "./question-bank.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
+import { resolveInterviewTypeForTopic } from "../constants/interview-types.js";
 import logger from "../../config/logger.js";
 
 const MIN_READY = 3;
@@ -388,6 +389,8 @@ export class InterviewQuestionPlannerService {
           break;
         }
 
+        const qInterviewType = resolveInterviewTypeForTopic(target.topic, session.interviewTypes);
+
         try {
           const aiOutput = await this.ai.generateQuestion({
             role: session.role,
@@ -397,7 +400,7 @@ export class InterviewQuestionPlannerService {
             previousQuestions: Array.from(existingTexts),
             conceptsAlreadyTested: Array.from(existingConcepts),
             resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
-            interviewType: session.interviewTypes?.[0] || "technical",
+            interviewType: qInterviewType,
             interviewId: session.interviewId,
           });
 
@@ -418,8 +421,8 @@ export class InterviewQuestionPlannerService {
             questionId: `prep-${crypto.randomBytes(6).toString("hex")}`,
             topic: String(aiOutput.topic || target.topic).toUpperCase(),
             difficulty: String(aiOutput.difficulty || target.difficulty).toUpperCase(),
-            questionType: aiOutput.questionType || "TECHNICAL",
-            competency: aiOutput.competency || "Technical Knowledge",
+            questionType: aiOutput.questionType || (qInterviewType === "hr" ? "HR" : qInterviewType === "behavioral" ? "BEHAVIORAL" : "TECHNICAL"),
+            competency: aiOutput.competency || (qInterviewType === "hr" ? "Culture & Professionalism" : qInterviewType === "behavioral" ? "Behavioral & Leadership" : "Technical Knowledge"),
             question: qText,
             concept: aiOutput.concept || "",
             status: "READY",

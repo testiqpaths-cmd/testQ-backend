@@ -101,14 +101,37 @@ export class InterviewResultsService {
     const t = String(topic || "").toUpperCase();
     const qt = String(questionType || "").toUpperCase();
 
-    if (qt === "BEHAVIORAL" || t === "BEHAVIORAL") return "behavioral";
-    if (qt === "HR" || t === "HR") return "communication";
+    if (
+      qt === "BEHAVIORAL" ||
+      t.includes("BEHAVIORAL") ||
+      t.includes("LEADERSHIP") ||
+      t.includes("COLLABORATION") ||
+      t.includes("ADAPTABILITY") ||
+      t.includes("MANAGERIAL") ||
+      t.includes("DECISION_MAKING") ||
+      t.includes("CHALLENGE")
+    ) {
+      return "behavioral";
+    }
+    if (
+      qt === "HR" ||
+      t.includes("HR") ||
+      t.includes("CULTURE") ||
+      t.includes("CAREER_GOALS") ||
+      t.includes("WORK_ETHIC") ||
+      t.includes("TEAMWORK") ||
+      t.includes("CONFLICT") ||
+      t.includes("COMMUNICATION")
+    ) {
+      return "communication";
+    }
     if (qt === "PROJECT" || t.includes("PROJECT")) return "projects";
     if (
       qt === "PROBLEM_SOLVING" ||
       t.includes("PROBLEM_SOLV") ||
       t.includes("ALGORITHM") ||
-      t.includes("DATA_STRUCTURE")
+      t.includes("DATA_STRUCTURE") ||
+      t.includes("TIME_COMPLEXITY")
     ) {
       return "problemSolving";
     }
@@ -116,7 +139,9 @@ export class InterviewResultsService {
       (t.includes("SYSTEM") && t.includes("DESIGN")) ||
       t.includes("ARCHITECTURE") ||
       t.includes("SCALAB") ||
-      t.includes("DISTRIBUTED")
+      t.includes("DISTRIBUTED") ||
+      t.includes("MICROSERVICES") ||
+      t.includes("CACHING")
     ) {
       return "systemDesign";
     }
