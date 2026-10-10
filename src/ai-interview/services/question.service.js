@@ -154,13 +154,14 @@ export class QuestionService {
       questionTimestamp: new Date(),
     });
 
-    const cachedAudioUrl1 = questionAudioService.getCachedStreamUrl(turn.question);
+    const cachedAudioUrl1 = questionAudioService.getCachedStreamUrl(turn.question, 1);
     if (cachedAudioUrl1) turn.questionAudioUrl = cachedAudioUrl1;
     await turn.save();
 
     // Warm the question's narration now so it's ready when the room asks.
     questionAudioService.prewarmForTurn(turn._id, turn.question, {
       interviewId: session.interviewId,
+      turnNumber: 1,
     });
 
     // 4. Update Session State (Backend Authority)

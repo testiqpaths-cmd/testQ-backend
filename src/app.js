@@ -54,7 +54,7 @@ app.use(
       if (filePath.endsWith(".mp3")) {
         res.setHeader("Content-Type", "audio/mpeg");
         res.setHeader("Accept-Ranges", "bytes");
-        res.setHeader("Cache-Control", "public, max-age=604800, immutable");
+        res.setHeader("Cache-Control", "public, max-age=3600, must-revalidate");
       }
     },
   })
