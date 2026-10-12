@@ -6,6 +6,10 @@ import { integrityService } from "./integrity.service.js";
 import { assertCanViewSession } from "../utils/authorize.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
+import {
+  COMMON_TECHNICAL_V1,
+  evaluateCompetencyProfile,
+} from "../config/competency-profiles.config.js";
 
 const TERMINAL_STATES = ["COMPLETED", "EVALUATED", "CANCELLED", "EXPIRED"];
 
@@ -283,9 +287,33 @@ export class InterviewResultsService {
     const mappedBuckets = new Set(
       includedTurns.map((t) => this.mapToBucket(t.topic, t.questionType))
     );
-    const competencyScores = this.computeCompetencyScores(includedTurns, score);
+    const legacyCompetencyScores = this.computeCompetencyScores(includedTurns, score);
+    const assessmentProfile = evaluateCompetencyProfile(
+      COMMON_TECHNICAL_V1,
+      includedTurns,
+      session,
+      plan
+    );
+
+    // Provide both legacy buckets (for backwards compatibility) and the 7 new parameter scores
+    const competencyScores = {
+      ...legacyCompetencyScores,
+      technicalKnowledge:
+        assessmentProfile.competencies.find((c) => c.key === "technicalKnowledge")?.score ??
+        legacyCompetencyScores.technicalSkills,
+      practicalApplication:
+        assessmentProfile.competencies.find((c) => c.key === "practicalApplication")?.score ?? 0,
+      projectUnderstanding:
+        assessmentProfile.competencies.find((c) => c.key === "projectUnderstanding")?.score ??
+        legacyCompetencyScores.projects,
+      learningAndAdaptability:
+        assessmentProfile.competencies.find((c) => c.key === "learningAndAdaptability")?.score ?? 0,
+      codeQualityAndTesting:
+        assessmentProfile.competencies.find((c) => c.key === "codeQualityAndTesting")?.score ?? 0,
+    };
+
     const { strengths: rawStrengths, weaknesses: rawWeaknesses } =
-      this.computeStrengthsAndWeaknesses(competencyScores, mappedBuckets, session.coverageState);
+      this.computeStrengthsAndWeaknesses(legacyCompetencyScores, mappedBuckets, session.coverageState);
 
     const strengths = rawStrengths.length
       ? rawStrengths
@@ -322,7 +350,7 @@ export class InterviewResultsService {
     const questions = primaryTurns.map((t) => {
       const f = feedbackByTurn.get(t.turnNumber) || {};
       return {
-        id: t._id.toString(),
+        id: t._id ? t._id.toString() : String(t.turnNumber),
         section: this.mapToSection(t.topic, t.questionType),
         questionText: t.question,
         score: this.turnScore(t),
@@ -394,6 +422,12 @@ export class InterviewResultsService {
       score,
       readinessScore,
       competencyScores,
+      assessmentProfile,
+      competencyProfile: assessmentProfile.competencyProfile,
+      profileVersion: assessmentProfile.profileVersion,
+      isProvisionalScore: assessmentProfile.isProvisional,
+      provisionalReason: assessmentProfile.provisionalReason,
+      competencyCoveragePercentage: assessmentProfile.coveragePercentage,
       strengths,
       weaknesses,
       overallFeedback: feedback.overallFeedback,
@@ -466,6 +500,18 @@ export class InterviewResultsService {
         for (const bucket of COMPETENCY_BUCKETS) {
           updated.competencyScores[bucket] = 0;
         }
+      }
+      if (updated.assessmentProfile) {
+        updated.assessmentProfile = {
+          ...updated.assessmentProfile,
+          overallPerformanceScore: 0,
+          coveragePercentage: 0,
+          competencies: (updated.assessmentProfile.competencies || []).map((c) => ({
+            ...c,
+            score: 0,
+            evidenceLevel: "NONE",
+          })),
+        };
       }
     }
 

@@ -35,8 +35,13 @@ export class AdaptiveEngineService {
     }
 
     // 2. Time Expiration Gate
-    const timeRemaining = Number(session.timeRemaining ?? 0);
-    if (timeRemaining <= 0) {
+    const now = Date.now();
+    const isWallClockExpired = Boolean(session.endTime && now >= new Date(session.endTime).getTime());
+    const timeRemaining = session.endTime
+      ? Math.max(0, Math.round((new Date(session.endTime).getTime() - now) / 1000))
+      : Number(session.timeRemaining ?? 0);
+
+    if (isWallClockExpired || timeRemaining <= 0) {
       logger.info(`Session ${session.interviewId}: Duration expired. Concluding interview.`);
       return {
         action: InterviewAction.COMPLETE_INTERVIEW,
@@ -128,6 +133,26 @@ export class AdaptiveEngineService {
           trigger: "INTRODUCTION_TRANSITION",
           targetTopic: nextTopic,
           decisionConfidence: 1.0,
+        },
+      };
+    }
+
+    // 4c. Evidence-Based Competency Early Completion Gate
+    // If the candidate has demonstrated adequate, reliable evidence across
+    // ALL mandatory competencies (with no unresolved gaps or misconceptions),
+    // conclude interview early before timer expiration or question budget exhaustion.
+    if (!isIntro && this.hasAdequateEvidenceAcrossAllCompetencies(session, plan, lastTurn)) {
+      logger.info(
+        `Session ${session.interviewId}: Adequate evidence established across all mandatory competencies. Concluding interview early.`
+      );
+      return {
+        action: InterviewAction.COMPLETE_INTERVIEW,
+        reason: "Adequate evidence established across all mandatory competencies.",
+        decisionAudit: {
+          decision: "COMPLETE_INTERVIEW",
+          reason: "EVIDENCE_SUFFICIENCY_MET",
+          trigger: "COMPETENCY_EVIDENCE_SATISFIED",
+          decisionConfidence: 0.98,
         },
       };
     }
@@ -272,6 +297,7 @@ export class AdaptiveEngineService {
         },
       };
     }
+
 
     // 6. Follow-Up Authorization Gate (Knowledge-Driven Probing)
     // - Answer is PARTIAL or shallow ACCURATE (or unproven STRONG / EXCELLENT)
@@ -807,6 +833,105 @@ export class AdaptiveEngineService {
     const norm = (planDifficulty || Difficulty.ADAPTIVE).toUpperCase();
     if (norm === Difficulty.ADAPTIVE) return Difficulty.EASY;
     return norm;
+  }
+
+  /**
+   * Evaluates whether the candidate has demonstrated adequate, reliable evidence
+   * across all mandatory competencies required for the interview session.
+   *
+   * Deterministic criteria:
+   * 1. Session must have at least one mandatory topic (excluding INTRODUCTION).
+   * 2. Candidate must have answered at least 1 question for EVERY mandatory topic.
+   * 3. Overall question count must meet minimum baseline (>= Math.min(plan.globalQuestionLimit, mandatoryTopics.length)).
+   * 4. For every mandatory topic in coverageState:
+   *    - questionsAsked >= 1 (mandatory competency was actively evaluated; unvisited != competent)
+   *    - evidenceLevel is "MEDIUM" or "HIGH" (never "LOW")
+   *    - depthLevel is "ADEQUATE" or "DEEP" (never "SHALLOW")
+   *    - knowledgeLevel is verified in ["INTERMEDIATE", "STRONG", "STRONG_FOUNDATION", "EXCELLENT", "DEEP", "ADVANCED"]
+   *    - bestScore >= 75 and averageScore >= 70
+   *    - depthEstablished is true
+   *    - knowledgeGaps === 0 (no unresolved gaps in the competency)
+   *    - misconceptions.length === 0 (no unresolved misconceptions)
+   *    - contradictions.length === 0 (no unresolved contradictions)
+   * 5. Current turn (if present) does not have an active misconception, contradiction, or knowledge gap.
+   */
+  hasAdequateEvidenceAcrossAllCompetencies(session, plan, lastTurn = null) {
+    if (!session || !Array.isArray(session.coverageState) || session.coverageState.length === 0) {
+      return false;
+    }
+
+    const mandatoryTopics = (
+      session.topicOrder?.length ? session.topicOrder : session.allowedTopics || []
+    ).filter((t) => t && t.toUpperCase() !== "INTRODUCTION");
+
+    if (mandatoryTopics.length === 0) return false;
+
+    // Minimum baseline questions asked overall (at least 1 per topic, or at least 3)
+    const minRequiredTurns = Math.min(
+      plan?.globalQuestionLimit || 10,
+      Math.max(3, mandatoryTopics.length)
+    );
+    if ((session.questionCount || 0) < minRequiredTurns) {
+      return false;
+    }
+
+    // Last turn sanity: cannot early-complete on a flawed or incomplete active turn
+    if (lastTurn) {
+      const normStatus = lastTurn?.answerStatus || lastTurn?.status;
+      if (
+        normStatus === AnswerStatus.KNOWLEDGE_GAP ||
+        normStatus === AnswerStatus.INCORRECT ||
+        Boolean(lastTurn.isExplicitGap) ||
+        Boolean(lastTurn.contradictionDetected) ||
+        (Array.isArray(lastTurn.misconceptions) && lastTurn.misconceptions.length > 0)
+      ) {
+        return false;
+      }
+    }
+
+    const ACCEPTABLE_KNOWLEDGE_LEVELS = new Set([
+      "INTERMEDIATE",
+      "STRONG",
+      "STRONG_FOUNDATION",
+      "EXCELLENT",
+      "DEEP",
+      "ADVANCED",
+    ]);
+
+    for (const topicName of mandatoryTopics) {
+      const item = session.coverageState.find(
+        (c) => c.topic?.toUpperCase() === topicName.toUpperCase()
+      );
+
+      // Missing topic coverage item -> missing evidence (never assume competence)
+      if (!item) return false;
+
+      // Must have actively answered at least one question
+      if ((item.questionsAsked || 0) < 1) return false;
+
+      // Must not have unresolved knowledge gaps or misconceptions
+      if ((item.knowledgeGaps || 0) > 0) return false;
+      if (Array.isArray(item.misconceptions) && item.misconceptions.length > 0) return false;
+      if (Array.isArray(item.contradictions) && item.contradictions.length > 0) return false;
+
+      // Evidence level must be verified MEDIUM or HIGH (not LOW)
+      if (item.evidenceLevel !== "MEDIUM" && item.evidenceLevel !== "HIGH") return false;
+
+      // Depth level must be ADEQUATE or DEEP (not SHALLOW)
+      if (item.depthLevel !== "ADEQUATE" && item.depthLevel !== "DEEP") return false;
+
+      // Knowledge level must be verified
+      if (!ACCEPTABLE_KNOWLEDGE_LEVELS.has(item.knowledgeLevel)) return false;
+
+      // Depth established must be confirmed
+      if (!item.depthEstablished) return false;
+
+      // Scores must meet solid competence thresholds
+      if ((item.bestScore || 0) < 75) return false;
+      if ((item.averageScore || 0) < 70) return false;
+    }
+
+    return true;
   }
 }
 

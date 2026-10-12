@@ -19,25 +19,34 @@ import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
 export class InterviewSessionService {
-  // sessionId -> in-flight Promise. The room can reach startInterview /
-  // submitAnswer / processNextAction through two transports (REST and the
-  // Socket.io channel), and the socket client falls back to REST if an ack
-  // is slow — without this, a slow AI call (question-gen + dedup retries
-  // can take 30s+) lets both transports run the same mutation concurrently,
-  // and the loser's session.save() dies with a Mongoose VersionError. A
-  // second call for a session already in flight just awaits the first.
-  #inflight = new Map();
+  // Serialized session lock map: sessionId -> Promise representing the latest queued operation.
+  // Consecutive operations for the same session (e.g. submitAnswer followed by completeInterview)
+  // are strictly queued and executed sequentially rather than coalescing unrelated results.
+  #sessionLocks = new Map();
 
   async #withSessionLock(sessionId, fn) {
     const key = String(sessionId);
-    const existing = this.#inflight.get(key);
-    if (existing) return existing;
+    const prev = this.#sessionLocks.get(key) || Promise.resolve();
 
-    const promise = Promise.resolve()
-      .then(fn)
-      .finally(() => this.#inflight.delete(key));
-    this.#inflight.set(key, promise);
-    return promise;
+    let current;
+    current = prev
+      .catch(() => {})
+      .then(() => fn())
+      .finally(() => {
+        if (this.#sessionLocks.get(key) === current) {
+          this.#sessionLocks.delete(key);
+        }
+      });
+
+    this.#sessionLocks.set(key, current);
+    return current;
+  }
+
+  /**
+   * Internal test helper allowing white-box regression verification of session-level locking.
+   */
+  _withSessionLock(sessionId, fn) {
+    return this.#withSessionLock(sessionId, fn);
   }
 
   /**
@@ -439,9 +448,37 @@ export class InterviewSessionService {
   async #startInterviewImpl(sessionId, user) {
     const session = await this.getSessionById(sessionId, user);
 
+    // Idempotency: If already completed, return terminal state safely
+    if (session.interviewState === InterviewState.COMPLETED) {
+      return {
+        sessionId: session.interviewId,
+        interviewId: session.interviewId,
+        status: session.interviewState,
+        interviewState: session.interviewState,
+        isFinished: true,
+        completed: true,
+        durationMinutes: session.duration,
+        timeRemaining: 0,
+        endTime: session.endTime,
+        currentQuestion: null,
+      };
+    }
+
     // Idempotency: If already in progress and has a current question, return active state
     if (session.interviewState === InterviewState.IN_PROGRESS && session.currentQuestion) {
+      const now = new Date();
+      if (session.endTime && now >= session.endTime) {
+        logger.info(
+          `Session ${session.interviewId}: Resumed after endTime. Finalizing expired session.`
+        );
+        return this.#completeInterviewImpl(sessionId, user);
+      }
       const plan = await InterviewPlan.findById(session.planId);
+      session.timeRemaining = session.endTime
+        ? Math.max(0, Math.round((session.endTime.getTime() - now.getTime()) / 1000))
+        : session.timeRemaining;
+      await session.save();
+
       return {
         sessionId: session.interviewId,
         interviewId: session.interviewId,
@@ -450,6 +487,7 @@ export class InterviewSessionService {
         totalQuestions: plan?.globalQuestionLimit || 10,
         durationMinutes: session.duration,
         timeRemaining: session.timeRemaining,
+        endTime: session.endTime,
         questionIndex: session.questionCount || 1,
         currentQuestion: session.currentQuestion,
         role: session.role,
@@ -510,6 +548,7 @@ export class InterviewSessionService {
       totalQuestions: plan.globalQuestionLimit,
       durationMinutes: session.duration,
       timeRemaining: session.timeRemaining,
+      endTime: session.endTime,
       questionIndex: 1,
       currentQuestion: firstQuestion,
       role: session.role,
@@ -656,16 +695,20 @@ export class InterviewSessionService {
     }
 
     const tSaveStart = performance.now();
+    const isPastDeadline = Boolean(session.endTime && now >= session.endTime);
+
     // 7. Update the existing InterviewTurn (Do NOT create a second turn)
     turn.candidateAnswer = answerText;
     turn.answerTimestamp = now;
     turn.timeTakenSeconds = timeTaken || null;
     turn.audioReference = payload.audioReference || null;
-    turn.endedReason = endedReason;
+    turn.endedReason = endedReason || (isPastDeadline ? "deadline_timeout" : undefined);
     turn.processingState = "SUBMITTED";
 
-    // 8. Deduct elapsed time and advance state to WAITING_FOR_NEXT_QUESTION
-    if (timeTaken && session.timeRemaining > 0) {
+    // 8. Deduct elapsed time authoritatively and advance state to WAITING_FOR_NEXT_QUESTION
+    if (session.endTime) {
+      session.timeRemaining = Math.max(0, Math.round((session.endTime.getTime() - now.getTime()) / 1000));
+    } else if (timeTaken && session.timeRemaining > 0) {
       session.timeRemaining = Math.max(0, session.timeRemaining - timeTaken);
     }
     session.interviewState = InterviewState.WAITING_FOR_NEXT_QUESTION;
@@ -681,7 +724,26 @@ export class InterviewSessionService {
     };
 
     await turn.save();
-    await session.save();
+    try {
+      await session.save();
+    } catch (err) {
+      if (err.name === "VersionError" || err.message?.includes("version")) {
+        const reloaded = await InterviewSession.findById(session._id);
+        if (reloaded && reloaded.interviewState === InterviewState.COMPLETED) {
+          logger.info(`Session ${session.interviewId} completed concurrently during answer submission.`);
+          return {
+            sessionId: session.interviewId,
+            turnId: turn._id.toString(),
+            turnNumber: turn.turnNumber,
+            interviewState: reloaded.interviewState,
+            answerSaved: true,
+            questionId: turn._id.toString(),
+            isFinished: true,
+          };
+        }
+      }
+      throw err;
+    }
 
     logger.info(
       `Answer submitted for session ${session.interviewId} (turn ${turn.turnNumber}, length: ${answerText.length} chars)`
@@ -844,6 +906,10 @@ export class InterviewSessionService {
     }
 
     // 5. Determine next action through Adaptive Engine (Backend Authority)
+    // Synchronize wall-clock time remaining authoritatively prior to decision
+    if (session.endTime) {
+      session.timeRemaining = Math.max(0, Math.round((session.endTime.getTime() - Date.now()) / 1000));
+    }
     const tDecisionStart = performance.now();
     const decision = adaptiveEngineService.determineNextAction(session, plan, lastTurn);
     adaptiveDecisionMs = Math.round(performance.now() - tDecisionStart);
@@ -926,7 +992,8 @@ export class InterviewSessionService {
     // 6. Execute Determined Action
     if (decision.action === InterviewAction.COMPLETE_INTERVIEW) {
       session.interviewState = InterviewState.COMPLETED;
-      session.endTime = new Date();
+      session.endTime = session.endTime || new Date();
+      session.timeRemaining = 0;
       session.currentQuestion = null;
 
       if (Array.isArray(session.coverageState)) {
@@ -1168,19 +1235,36 @@ export class InterviewSessionService {
       // Reload in case analyzeTurnAnswer mutated session state underneath us.
       const reloaded = await InterviewSession.findById(session._id);
 
-      if (Array.isArray(reloaded.coverageState)) {
-        reloaded.coverageState.forEach((c) => {
-          if (c.status === "IN_PROGRESS") c.status = "EVALUATED";
-        });
+      if (reloaded) {
+        if (TERMINAL_STATES.includes(reloaded.interviewState)) {
+          return interviewResultsService.getInterviewResults(session.interviewId, user);
+        }
+
+        if (Array.isArray(reloaded.coverageState)) {
+          reloaded.coverageState.forEach((c) => {
+            if (c.status === "IN_PROGRESS") c.status = "EVALUATED";
+          });
+        }
+        reloaded.interviewState = InterviewState.COMPLETED;
+        reloaded.endTime = reloaded.endTime || new Date();
+        reloaded.currentQuestion = null;
+        reloaded.timeRemaining = 0;
+
+        try {
+          await reloaded.save();
+        } catch (err) {
+          if (err.name === "VersionError" || err.message?.includes("version")) {
+            logger.warn(
+              `Concurrent multi-instance completion conflict for ${session.interviewId}; returning finalized results.`
+            );
+            return interviewResultsService.getInterviewResults(session.interviewId, user);
+          }
+          throw err;
+        }
+
+        logger.info(`Interview force-completed: ${reloaded.interviewId} by user ${user._id}`);
+        return interviewResultsService.getInterviewResults(reloaded.interviewId, user);
       }
-      reloaded.interviewState = InterviewState.COMPLETED;
-      reloaded.endTime = reloaded.endTime || new Date();
-      reloaded.currentQuestion = null;
-      await reloaded.save();
-
-      logger.info(`Interview force-completed: ${reloaded.interviewId} by user ${user._id}`);
-
-      return interviewResultsService.getInterviewResults(reloaded.interviewId, user);
     }
 
     return interviewResultsService.getInterviewResults(session.interviewId, user);
