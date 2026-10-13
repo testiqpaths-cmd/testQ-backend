@@ -3,6 +3,7 @@ import { answerAnalysisService } from "../services/answer-analysis.service.js";
 import { interviewResultsService } from "../services/interview-results.service.js";
 import { interviewDashboardService } from "../services/interview-dashboard.service.js";
 import { interviewOrgService } from "../services/interview-org.service.js";
+import { interviewAdminAnalyticsService } from "../services/interview-admin-analytics.service.js";
 import { conceptHistoryService } from "../services/concept-history.service.js";
 import { integrityService } from "../services/integrity.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
@@ -231,6 +232,19 @@ export class AiInterviewController {
   async getOrgOverview(req, res, next) {
     try {
       const data = await interviewOrgService.getOrgOverview(req.user, req.query);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/admin/analytics
+   * Admin-only: comprehensive AI Interview analytics, metrics, trends, breakdowns and student performance table.
+   */
+  async getAdminAnalytics(req, res, next) {
+    try {
+      const data = await interviewAdminAnalyticsService.getAdminAnalytics(req.user, req.query);
       return res.status(200).json({ success: true, data });
     } catch (error) {
       next(error);

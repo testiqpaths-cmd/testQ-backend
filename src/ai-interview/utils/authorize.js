@@ -17,10 +17,17 @@ export async function assertCanViewSession(user, session) {
   if (session.userId.toString() === user._id.toString()) return;
   if (user.role === "IQPATH_ADMIN") return;
 
-  if (user.role === "ORGANIZATION" && user.organizationId) {
-    const owner = await User.findById(session.userId).select("organizationId").lean();
-    if (owner?.organizationId && owner.organizationId.toString() === user.organizationId.toString()) {
-      return;
+  if (user.role === "ORGANIZATION") {
+    let orgId = user.organizationId;
+    if (!orgId) {
+      const dbUser = await User.findById(user._id).select("organizationId").lean();
+      orgId = dbUser?.organizationId;
+    }
+    if (orgId) {
+      const owner = await User.findById(session.userId).select("organizationId").lean();
+      if (owner?.organizationId && owner.organizationId.toString() === orgId.toString()) {
+        return;
+      }
     }
   }
 
