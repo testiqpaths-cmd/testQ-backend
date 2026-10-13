@@ -9,7 +9,8 @@ export class ResumeTopicService {
     backend: ["Node.js", "Express", "NestJS", "Python", "Java", "PostgreSQL", "MongoDB", "REST", "Redis", "SQL"],
     fullstack: ["JavaScript", "React", "Node.js", "MongoDB", "PostgreSQL", "REST", "TypeScript"],
     devops: ["Docker", "Kubernetes", "AWS", "CI/CD", "Linux", "Terraform", "Git"],
-    data: ["Python", "SQL", "PostgreSQL", "Pandas", "Machine Learning", "FastAPI"],
+    mobile: ["Flutter", "Kotlin", "Swift", "Dart", "React Native", "Android", "iOS"],
+    data: ["Python", "PyTorch", "TensorFlow", "SQL", "PostgreSQL", "Pandas", "Machine Learning", "FastAPI"],
   };
 
   /**
@@ -68,7 +69,9 @@ export class ResumeTopicService {
         roleCategory = "backend";
       } else if (normRole.includes("devops") || normRole.includes("cloud") || normRole.includes("infra")) {
         roleCategory = "devops";
-      } else if (normRole.includes("data") || normRole.includes("ml") || normRole.includes("ai")) {
+      } else if (normRole.includes("mobile") || normRole.includes("flutter") || normRole.includes("android") || normRole.includes("ios")) {
+        roleCategory = "mobile";
+      } else if (normRole.includes("data") || normRole.includes("ml") || normRole.includes("ai") || normRole.includes("learning")) {
         roleCategory = "data";
       }
 
@@ -76,8 +79,21 @@ export class ResumeTopicService {
         ResumeTopicService.ROLE_RELEVANCE[roleCategory] ||
         ResumeTopicService.ROLE_RELEVANCE.fullstack;
 
-      // Score and rank candidate skills
-      const scoredSkills = (candidateSkills || []).map((skill) => {
+      // Deduplicate candidate skills case-insensitively while preserving original casing
+      const seen = new Set();
+      const uniqueCandidateSkills = [];
+      for (const raw of candidateSkills || []) {
+        const cleaned = String(raw || "").trim();
+        if (!cleaned) continue;
+        const lower = cleaned.toLowerCase();
+        if (!seen.has(lower)) {
+          seen.add(lower);
+          uniqueCandidateSkills.push(cleaned);
+        }
+      }
+
+      // Score and rank candidate's actual skills by role relevance (prioritization only)
+      const scoredSkills = uniqueCandidateSkills.map((skill) => {
         const isCore = roleCoreSkills.some(
           (s) => s.toLowerCase() === skill.toLowerCase()
         );
@@ -90,15 +106,25 @@ export class ResumeTopicService {
       scoredSkills.sort((a, b) => b.score - a.score);
       const selected = scoredSkills.map((s) => s.name.toUpperCase()).slice(0, count);
 
+      // Explicit general engineering competencies used ONLY when candidate's
+      // resume does not provide enough technical skills. Never invent specific technologies.
+      const GENERAL_COMPETENCIES = [
+        "PROBLEM_SOLVING",
+        "SYSTEM_DESIGN",
+        "TECHNICAL_FUNDAMENTALS",
+      ];
+
+      // If candidate has no technical skills extracted, assess general competencies
       if (selected.length === 0) {
-        return roleCoreSkills.slice(0, count).map((s) => s.toUpperCase());
+        return GENERAL_COMPETENCIES.slice(0, count);
       }
 
+      // If candidate has fewer skills than the duration slot budget, backfill with
+      // explicitly labeled general engineering competencies — NEVER fabricate unverified technologies.
       if (selected.length < count) {
-        for (const core of roleCoreSkills) {
-          const upper = core.toUpperCase();
-          if (!selected.includes(upper)) {
-            selected.push(upper);
+        for (const comp of GENERAL_COMPETENCIES) {
+          if (!selected.includes(comp)) {
+            selected.push(comp);
             if (selected.length >= count) break;
           }
         }

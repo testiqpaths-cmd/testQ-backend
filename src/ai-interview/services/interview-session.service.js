@@ -362,6 +362,9 @@ export class InterviewSessionService {
       resumeData: {
         filename: resumeData?.filename,
         detectedSkills: resumeData?.extracted?.skills || [],
+        primarySkills: resumeData?.extracted?.primarySkills || resumeData?.extracted?.skills || [],
+        secondarySkills: resumeData?.extracted?.secondarySkills || [],
+        projects: resumeData?.extracted?.projects || [],
       },
       createdAt: session.createdAt,
     };

@@ -8,6 +8,7 @@ import { conceptHistoryService } from "./concept-history.service.js";
 import { questionDedupService } from "./question-dedup.service.js";
 import { questionPlannerService } from "./interview-question-planner.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
+import { findRelevantProjectContext } from "../resume/resume-project-context.js";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import logger from "../../config/logger.js";
 
@@ -403,6 +404,7 @@ export class QuestionService {
     const questionSelectionMs = Math.round(performance.now() - tSelectStart);
 
     const qInterviewType = resolveInterviewTypeForTopic(activeTopic, session.interviewTypes);
+    const projectContext = findRelevantProjectContext(session.resumeData, activeTopic);
 
     // Generate question via AI layer (with automatic fallback +
     // cross-interview semantic dedup)
@@ -416,6 +418,7 @@ export class QuestionService {
           previousQuestions: [...previousQuestions, ...exclude],
           conceptsAlreadyTested,
           resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
+          projectContext,
           interviewType: qInterviewType,
           interviewId: session.interviewId,
         }),
@@ -571,6 +574,7 @@ export class QuestionService {
     const targetFollowUpType = options.followUpType || previousTurn.followUpType || "DEPTH_PROBE";
 
     const qFollowUpType = resolveInterviewTypeForTopic(previousTurn.topic, session.interviewTypes);
+    const projectContext = findRelevantProjectContext(session.resumeData, previousTurn.topic);
     const tGenStart = performance.now();
     const aiOutput = await this.ai.generateFollowUpQuestion({
       role: session.role,
@@ -587,6 +591,7 @@ export class QuestionService {
       contradictionDetails: previousTurn.contradictionDetails || null,
       followUpType: targetFollowUpType,
       resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
+      projectContext,
       interviewType: qFollowUpType,
       interviewId: session.interviewId,
     });

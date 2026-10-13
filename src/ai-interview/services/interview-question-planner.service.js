@@ -7,6 +7,7 @@ import { questionBankService } from "./question-bank.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { resolveInterviewTypeForTopic } from "../constants/interview-types.js";
+import { findRelevantProjectContext } from "../resume/resume-project-context.js";
 import logger from "../../config/logger.js";
 
 const MIN_READY = 3;
@@ -390,6 +391,7 @@ export class InterviewQuestionPlannerService {
         }
 
         const qInterviewType = resolveInterviewTypeForTopic(target.topic, session.interviewTypes);
+        const projectContext = findRelevantProjectContext(session.resumeData, target.topic);
 
         try {
           const aiOutput = await this.ai.generateQuestion({
@@ -400,6 +402,7 @@ export class InterviewQuestionPlannerService {
             previousQuestions: Array.from(existingTexts),
             conceptsAlreadyTested: Array.from(existingConcepts),
             resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
+            projectContext,
             interviewType: qInterviewType,
             interviewId: session.interviewId,
           });

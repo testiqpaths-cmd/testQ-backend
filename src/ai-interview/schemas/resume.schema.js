@@ -36,9 +36,17 @@ const resumeSchema = new Schema(
       default: "",
     },
     extracted: {
-      skills: { type: [String], default: [] },
-      detectedExperienceYears: { type: Number, default: 0 },
-      summaryPreview: { type: String, default: "" },
+      type: Schema.Types.Mixed,
+      default: () => ({
+        skills: [],
+        primarySkills: [],
+        secondarySkills: [],
+        detectedExperienceYears: 0,
+        summaryPreview: "",
+        projects: [],
+        experience: [],
+        evidenceSnippets: {},
+      }),
     },
     scopedTopics: {
       type: [String],

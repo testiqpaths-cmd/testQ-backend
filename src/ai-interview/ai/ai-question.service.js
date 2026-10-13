@@ -59,12 +59,26 @@ export class AiQuestionService {
       previousQuestions = [],
       conceptsAlreadyTested = [],
       resumeSkills = [],
+      projectContext = null,
       interviewType = "technical",
       interviewId = null,
     } = context || {};
 
     const resolvedType = resolveInterviewTypeForTopic(topic, [interviewType]);
     const typeConfig = getTypePersonaAndConfig(resolvedType, role, experienceLevel);
+
+    let projectContextPrompt = "";
+    if (projectContext && typeof projectContext === "object") {
+      const parts = [];
+      if (projectContext.title) parts.push(`- Project: ${projectContext.title}`);
+      if (projectContext.technologies?.length) parts.push(`- Technologies: ${projectContext.technologies.join(", ")}`);
+      if (projectContext.architecture) parts.push(`- Architecture: ${projectContext.architecture}`);
+      if (projectContext.contributions?.length) parts.push(`- Claimed Contributions: ${projectContext.contributions.join("; ")}`);
+      if (projectContext.evidenceSnippet) parts.push(`- Resume Evidence: "${projectContext.evidenceSnippet}"`);
+      if (parts.length > 0) {
+        projectContextPrompt = `\nCandidate Claimed Project Context:\n${parts.join("\n")}`;
+      }
+    }
 
     const systemPrompt = `${typeConfig.persona}
 ${typeConfig.goal}
@@ -80,7 +94,8 @@ STRICT RULES:
 ${conceptsAlreadyTested.filter(Boolean).map((c) => `   - ${c}`).join("\n") || "   (None yet)"}
 7. DO NOT repeat or ask variations of these previously asked questions:
 ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (None yet)"}
-8. You MUST return ONLY valid JSON matching this exact structure:
+8. If candidate claimed project context is provided, GROUND the question in what the candidate explicitly claims to have built or contributed, WITHOUT assuming or fabricating unstated implementation details, metrics, or frameworks. Ask about their claimed contribution, design trade-offs, architecture decisions, or implementation choices based strictly on what is stated. If no project is provided, ground the question in their claimed skills.
+9. You MUST return ONLY valid JSON matching this exact structure:
 {
   "question": "Your question here",
   "concept": "Specific concept tested (e.g. STAR leadership, event delegation, system scalability)",
@@ -91,7 +106,7 @@ ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (No
 }`;
 
     const userPrompt = `Generate a ${difficulty} ${resolvedType.toUpperCase()} interview question on topic "${topic}" for a ${role} candidate (${experienceLevel}).
-Candidate background / skills: ${resumeSkills.join(", ") || "Standard role background"}.`;
+Candidate background / skills: ${resumeSkills.join(", ") || "Standard role background"}.${projectContextPrompt ? `\n${projectContextPrompt}` : ""}`;
 
     try {
       const rawAiResponse = await this.llm.generateStructuredJson({
@@ -186,6 +201,7 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
       contradictionDetails = null,
       followUpType = "DEPTH_PROBE",
       resumeSkills = [],
+      projectContext = null,
       interviewType = "technical",
       interviewId = null,
     } = context || {};
@@ -220,7 +236,7 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
       experienceAuthenticity === "THEORETICAL_TEXTBOOK"
         ? resolvedType === "hr" || resolvedType === "behavioral"
           ? "\n- Candidate gave a generic/theoretical answer without concrete personal context: Ask for a specific real-world example from their actual experience."
-          : "\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario to test genuine project experience."
+          : `\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario from their claimed project context (${projectContext?.title ? `'${projectContext.title}'` : "hands-on experience"}).`
         : "";
 
     const contradictionStr = contradictionDetails
@@ -232,12 +248,17 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
         ? `\n- Candidate Background: ${resumeSkills.join(", ")}`
         : "";
 
+    const projectContextStr =
+      projectContext && typeof projectContext === "object" && projectContext.title
+        ? `\n- Candidate Project: ${projectContext.title} (${(projectContext.technologies || []).join(", ")})`
+        : "";
+
     const systemPrompt = `${typeConfig.persona}
 The candidate was asked: "${previousQuestion}"
 The candidate provided this answer: "${candidateAnswer}"
 Evaluation Notes:
 - Concepts demonstrated: ${conceptsDemonstrated.join(", ") || "Basic explanation"}
-- Missing or shallow aspects: ${missingStr}${misconceptionsStr}${authenticityStr}${contradictionStr}${resumeSkillsStr}
+- Missing or shallow aspects: ${missingStr}${misconceptionsStr}${authenticityStr}${contradictionStr}${resumeSkillsStr}${projectContextStr}
 - Probe type requested: ${targetQuestionType} (${difficulty})
 - Interview format: ${resolvedType} (${typeConfig.focusSummary})
 
@@ -247,7 +268,7 @@ STRICT RULES:
    - For HR / Behavioral: probe the STAR framework (specific actions, team dynamics, measurable impact, or what they would do differently).
    - For Technical / System Design / Coding: probe mechanics, failure handling, scalability trade-offs, or hands-on implementation details.
    - If candidate voiced a misconception, constructively challenge it without sounding condescending.
-   - If answer sounded textbook, ask how they handled this in their actual project or workplace experience.
+   - If answer sounded textbook, ask how they handled this in their actual project (${projectContext?.title ? `specifically in '${projectContext.title}'` : "or workplace experience"}).
 2. Question Types:
    - If CLARIFICATION: ask a constructive clarifying question addressing the core concepts they touched on.
    - If DEPTH_PROBE: probe internal mechanics, execution details, or specific decision steps.

@@ -21,6 +21,7 @@ const aiCallLogSchema = new Schema({
       "evaluation",
       "feedback_gen",
       "embedding",
+      "resume_extraction",
       "tts",
       "stt",
       "other",

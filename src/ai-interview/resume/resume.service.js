@@ -110,8 +110,13 @@ export class ResumeService {
       sizeBytes: doc.sizeBytes,
       fileUrl: doc.fileUrl || null,
       skills: doc.extracted?.skills || [],
+      primarySkills: doc.extracted?.primarySkills || doc.extracted?.skills || [],
+      secondarySkills: doc.extracted?.secondarySkills || [],
       experienceYears: doc.extracted?.detectedExperienceYears || 0,
       summaryPreview: doc.extracted?.summaryPreview || "",
+      projects: doc.extracted?.projects || [],
+      experience: doc.extracted?.experience || [],
+      evidenceSnippets: doc.extracted?.evidenceSnippets || {},
       recommendedTopics: doc.scopedTopics || [],
       uploadedAt: doc.createdAt,
     };
