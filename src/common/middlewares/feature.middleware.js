@@ -16,7 +16,7 @@ export const featureMiddleware = (featureKey, incrementUsage = false) => {
       }
 
       // Check if user has access (will throw ApiError 402 if denied/limit reached)
-      await checkFeatureAccess(userId, featureKey, incrementUsage);
+      await checkFeatureAccess(userId, featureKey, incrementUsage ? 1 : 0);
 
       next();
     } catch (error) {

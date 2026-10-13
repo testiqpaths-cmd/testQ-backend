@@ -13,8 +13,11 @@
  *
  * Usage:  node src/ai-interview/migrations/seed-ai-interview-feature.js
  */
+import crypto from "crypto";
+globalThis.crypto = crypto;
 import mongoose from "mongoose";
 import env from "../../config/env.js";
+import Role from "../../modules/subscription/models/Role.model.js";
 import Plan from "../../modules/subscription/models/Plan.model.js";
 import Feature from "../../modules/subscription/models/Feature.model.js";
 import PlanFeature from "../../modules/subscription/models/PlanFeature.model.js";
@@ -40,7 +43,7 @@ async function run() {
   );
   console.log("Feature ready:", feature.key, feature._id.toString());
 
-  const plans = await Plan.find({ active: true });
+  const plans = await Plan.find({ active: true }).populate("roleId");
   if (!plans.length) {
     console.warn("No active plans found — feature exists but is unmapped (fails open for everyone).");
     await mongoose.disconnect();
@@ -48,12 +51,20 @@ async function run() {
   }
 
   for (const plan of plans) {
+    const isStudentPlan = plan.roleId?.name === "STUDENT" || String(plan.roleId) === "STUDENT";
+    const isFreeStudent = isStudentPlan && (plan.price === 0 || plan.isDefault || plan.name.toLowerCase().includes("free"));
+
+    // Free student plan has AI Interview disabled (subscription required);
+    // Paid Pro students and Organizations have full access.
+    const enabled = !isFreeStudent;
+    const limit = enabled ? null : 0;
+
     const pf = await PlanFeature.findOneAndUpdate(
       { planId: plan._id, featureId: feature._id },
-      { enabled: true, limit: null, resetType: "LIFETIME" },
+      { enabled, limit, resetType: "LIFETIME" },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
-    console.log(`Plan "${plan.name}" (${plan._id}) -> AI_INTERVIEW enabled=${pf.enabled}`);
+    console.log(`Plan "${plan.name}" (${plan._id}) -> AI_INTERVIEW enabled=${pf.enabled}, limit=${pf.limit}`);
   }
 
   await mongoose.disconnect();

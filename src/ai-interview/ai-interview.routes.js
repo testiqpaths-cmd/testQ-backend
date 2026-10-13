@@ -31,6 +31,7 @@ router.get("/org/students/:studentId", orgOnly, aiInterviewController.getStudent
 // Path B: Set up custom interview
 router.post(
   "/custom",
+  featureMiddleware("AI_INTERVIEW", true),
   validate(createCustomInterviewSchema),
   aiInterviewController.createCustomInterview
 );
@@ -38,6 +39,7 @@ router.post(
 // Alias for frontend compatibility (POST /ai-interview/sessions)
 router.post(
   "/sessions",
+  featureMiddleware("AI_INTERVIEW", true),
   validate(createCustomInterviewSchema),
   aiInterviewController.createCustomInterview
 );
@@ -48,6 +50,7 @@ router.post(
 // requests straight through, so one route serves both.
 router.post(
   "/resume",
+  featureMiddleware("AI_INTERVIEW", true),
   resumeUpload.single("resume"),
   validate(resumeInterviewSchema),
   aiInterviewController.createResumeInterview
