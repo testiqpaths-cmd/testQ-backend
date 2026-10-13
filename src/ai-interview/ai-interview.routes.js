@@ -25,6 +25,8 @@ router.use(featureMiddleware("AI_INTERVIEW"));
 
 // Org/Admin monitoring — must precede the "/:id" catch-all
 const orgOnly = roleMiddleware("ORGANIZATION", "IQPATH_ADMIN");
+const adminOnly = roleMiddleware("IQPATH_ADMIN");
+router.get("/admin/analytics", orgOnly, aiInterviewController.getAdminAnalytics);
 router.get("/org/overview", orgOnly, aiInterviewController.getOrgOverview);
 router.get("/org/students/:studentId", orgOnly, aiInterviewController.getStudentInterviews);
 
