@@ -24,28 +24,35 @@ export class InterviewAdminAnalyticsService {
    */
   async resolveStudentScope(user, query = {}) {
     if (user.role === "IQPATH_ADMIN") {
-      const filter = { role: "STUDENT", isDeleted: { $ne: 1 } };
+      const filter = { role: "STUDENT", isDeleted: { $ne: true } };
       if (query.organizationId && mongoose.Types.ObjectId.isValid(query.organizationId)) {
         filter.organizationId = query.organizationId;
+        const studentIds = await User.find(filter).distinct("_id");
+        return { filter, totalStudents: studentIds.length, studentIds };
       }
       const totalStudents = await User.countDocuments(filter);
-      return { filter, totalStudents };
+      return { filter, totalStudents, studentIds: null };
     }
 
     if (user.role === "ORGANIZATION") {
-      if (!user.organizationId) {
+      let orgId = user.organizationId;
+      if (!orgId) {
+        const dbUser = await User.findById(user._id).select("organizationId").lean();
+        orgId = dbUser?.organizationId;
+      }
+      if (!orgId) {
         throw new ApiError(403, "Organization account not linked to an organization.");
       }
       const filter = {
         role: "STUDENT",
-        organizationId: user.organizationId,
-        isDeleted: { $ne: 1 },
+        organizationId: orgId,
+        isDeleted: { $ne: true },
       };
-      const totalStudents = await User.countDocuments(filter);
-      return { filter, totalStudents };
+      const studentIds = await User.find(filter).distinct("_id");
+      return { filter, totalStudents: studentIds.length, studentIds };
     }
 
-    throw new ApiError(403, "Access restricted to administrators.");
+    throw new ApiError(403, "Access restricted to administrators and organizations.");
   }
 
   fullName(u) {
@@ -55,13 +62,13 @@ export class InterviewAdminAnalyticsService {
   }
 
   /**
-   * Main analytics aggregation endpoint for the Admin AI Interview page.
+   * Main analytics aggregation endpoint for Admin/Organization AI Interview page.
    */
   async getAdminAnalytics(user, query = {}) {
     const { timeRange = "all", role, status, search, page = 1, limit = 20 } = query;
-    const { totalStudents } = await this.resolveStudentScope(user, query);
+    const { totalStudents, studentIds } = await this.resolveStudentScope(user, query);
 
-    // Build date filter
+    // Build date & student scope filter
     const dateQuery = {};
     const now = Date.now();
     if (timeRange === "7d") {
@@ -72,7 +79,11 @@ export class InterviewAdminAnalyticsService {
       dateQuery.createdAt = { $gte: new Date(now - 90 * 24 * 60 * 60 * 1000) };
     }
 
-    // Query all sessions matching date filter for aggregate analytics
+    if (studentIds !== null) {
+      dateQuery.userId = { $in: studentIds };
+    }
+
+    // Query all sessions matching date & student scope for aggregate analytics
     const allSessions = await InterviewSession.find(dateQuery)
       .populate("userId", "firstName lastName email")
       .sort({ createdAt: -1 })
