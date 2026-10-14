@@ -17,6 +17,7 @@ import { getIO } from "../../sockets/index.js";
 import IQRoom from "../../models/iqRoom.model.js";
 import UserModel from "../../models/user.model.js";
 import { createNotification } from "../notification/notification.service.js";
+import { hasTestEnded } from "../test-management/utils/status.js";
 import env from "../../config/env.js";
 
 // Let an organization know when a student completes one of its tests —
@@ -91,6 +92,16 @@ const isOwnOrgStudent = async (requester, studentId) => {
 const canStartTest = (test, user) => {
   if (!test || !user) return false;
 
+  // 1. Admins have universal access
+  if (user.role === "IQPATH_ADMIN") return true;
+
+  // 2. The creator of the test always has access
+  const ownerId = typeof test.createdBy?.userId === "object"
+    ? test.createdBy?.userId?.toString?.()
+    : String(test.createdBy?.userId || "");
+  const requesterId = String(user._id || user.id || "");
+  if (ownerId && requesterId && ownerId === requesterId) return true;
+
   if (test.visibility === "PUBLIC") return true;
   if (test.visibility === "LINK_ONLY") return true;
 
@@ -154,10 +165,15 @@ export const startTestAttemptController = async (req, res, next) => {
     if (req.user?.role === "STUDENT") {
       const User = (await import("../../modules/auth/models/User.model.js")).default;
       const dbUser = await User.findById(studentId).select("createdAt");
-      if (dbUser && test.createdAt && new Date(test.createdAt) < new Date(dbUser.createdAt)) {
+      if (
+        dbUser &&
+        test.createdAt &&
+        new Date(test.createdAt) < new Date(dbUser.createdAt) &&
+        hasTestEnded(test)
+      ) {
         return res.status(403).json({
           success: false,
-          message: "You cannot start a test created before your registration date",
+          message: "This test ended before your registration date",
         });
       }
     }

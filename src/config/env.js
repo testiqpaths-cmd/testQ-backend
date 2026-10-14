@@ -51,6 +51,11 @@ const env = {
   EXAM_SESSION_ACTIVE_TTL_SECONDS: Number(process.env.EXAM_SESSION_ACTIVE_TTL_SECONDS) || 14400, // 4 hr absolute ceiling once claimed
   EXAM_SESSION_HEARTBEAT_TIMEOUT_SECONDS: Number(process.env.EXAM_SESSION_HEARTBEAT_TIMEOUT_SECONDS) || 60,
   EXAM_LAUNCH_TOKEN_TTL_SECONDS: Number(process.env.EXAM_LAUNCH_TOKEN_TTL_SECONDS) || 120,
+
+  // Cross-app SSO (resume builder, and any future satellite app)
+  SSO_TICKET_TTL_SECONDS: Number(process.env.SSO_TICKET_TTL_SECONDS) || 90,
+  SSO_SERVICE_API_KEY: process.env.SSO_SERVICE_API_KEY,
+  RESUME_BUILDER_FRONTEND_URL: process.env.RESUME_BUILDER_FRONTEND_URL || "https://resume.iqpaths.com",
 };
 
 export default env;

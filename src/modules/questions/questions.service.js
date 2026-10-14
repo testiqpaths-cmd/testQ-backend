@@ -26,6 +26,7 @@ import {
 } from "./utils/questions.utils.js";
 
 const normalizeText = (value) => String(value ?? "").trim();
+const escapeRegex = (value) => String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const toQueryList = (...values) =>
   values
@@ -425,6 +426,9 @@ export const getAllQuestionsService = async (query = {}, requester = null) => {
   if (topicIds.length > 1) filters.topicId = { $in: topicIds };
   if (type) filters.type = type;
   if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
+  if (query.search && String(query.search).trim()) {
+    filters.questionText = { $regex: escapeRegex(String(query.search).trim()), $options: "i" };
+  }
 
   // Only the "Questions" management page sends mine=true — test creation's
   // question picker calls this same endpoint without it and must keep

@@ -10,6 +10,7 @@ import { errorMiddleware } from "./common/middlewares/error.middleware.js";
 import { requestLogger } from "./common/middlewares/logger.middleware.js";
 import logger from "./config/logger.js";
 import { corsOptions } from "./config/cors.js";
+import phoneDetectionRoutes from "./routes/phoneDetection.routes.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -62,7 +63,7 @@ app.use(
 
 // Routes
 app.use("/api", routes);
-
+app.use("/api", phoneDetectionRoutes);
 
 // Default route
 app.get("/", (req, res) => {
@@ -71,8 +72,6 @@ app.get("/", (req, res) => {
 
 // Error middleware (after routes)
 app.use(errorMiddleware);
-
-
 
 
 

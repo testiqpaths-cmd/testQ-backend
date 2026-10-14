@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import {
   createUser,
   findUserByEmail,
@@ -11,6 +12,8 @@ import {generateAccessToken,generateRefreshToken,} from "../../modules/auth/util
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { passwordService } from "./services/password.service.js";
 import { dispatchNotificationToAdminsAndOrgs } from "../notification/notification.service.js";
+import { getPaidAccessStatus } from "../subscription/services/subscription.service.js";
+import env from "../../config/env.js";
 
 const normalizeRequiredString = (value) => {
   if (value === undefined || value === null) return "";
@@ -75,6 +78,7 @@ export const register = async (userData) => {
         firstName,
         lastName,
         password: hashedPassword,
+        hasSetPassword: true,
         isEmailVerified: true,
         emailVerifiedAt: new Date(),
         isDeleted: false,
@@ -227,6 +231,109 @@ export const exchangeLaunchToken = async (token) => {
   };
 };
 
+/**
+ * Mints a one-time SSO ticket for handing this user's session off to a
+ * separate app (currently the resume builder) across a browser redirect.
+ * Deliberately opaque and short-lived — see SsoTicket.model.js's comment for
+ * why this isn't just a signed JWT passed in the URL.
+ */
+export const createSsoTicket = async (userId) => {
+  const SsoTicket = (await import("./models/SsoTicket.model.js")).default;
+  const token = crypto.randomBytes(32).toString("hex");
+  await SsoTicket.create({
+    token,
+    userId,
+    expiresAt: new Date(Date.now() + env.SSO_TICKET_TTL_SECONDS * 1000),
+  });
+  return token;
+};
+
+/**
+ * Redeems a one-time SSO ticket for a satellite app's backend (called
+ * server-to-server, never by a browser) — verifies the ticket, loads the
+ * user, and reports paid-access status so the caller can decide whether to
+ * let them in. Atomic delete-on-redeem: a second call with the same token,
+ * whether a genuine replay or a retried request, finds nothing and fails
+ * closed, same reasoning as exchangeLaunchToken's findOneAndUpdate above.
+ */
+export const verifySsoTicket = async (token) => {
+  if (!token) return { valid: false, reason: "missing_ticket" };
+
+  const SsoTicket = (await import("./models/SsoTicket.model.js")).default;
+  const ticket = await SsoTicket.findOneAndDelete({ token, expiresAt: { $gt: new Date() } });
+  if (!ticket) return { valid: false, reason: "invalid_or_expired_ticket" };
+
+  const user = await findUserById(ticket.userId);
+  if (!user || user.status === "SUSPENDED") {
+    return { valid: false, reason: "account_unavailable" };
+  }
+
+  const { hasActivePaidAccess, planName, subscriptionExpiresAt } = await getPaidAccessStatus(user._id);
+
+  return {
+    valid: true,
+    testQUserId: user._id,
+    email: user.email,
+    name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+    role: user.role,
+    hasActivePaidAccess,
+    planName,
+    subscriptionExpiresAt,
+  };
+};
+
+/**
+ * Verifies a raw email+password pair for a satellite app's backend (the
+ * resume builder's direct-login form) — same trust boundary and response
+ * shape as verifySsoTicket (X-Service-Api-Key on the controller side, not
+ * repeated here), just a different kind of credential. Never returns a
+ * testQ access/refresh token; the caller gets identity + subscription
+ * status only, exactly like the ticket path.
+ */
+export const verifyCredentials = async (email, password) => {
+  const normalizedEmail = normalizeEmail(email);
+  const user = await findUserByEmail(normalizedEmail);
+  if (!user) return { valid: false, reason: "invalid_credentials" };
+  if (user.status === "SUSPENDED") return { valid: false, reason: "account_unavailable" };
+
+  const isMatch = await bcrypt.compare(String(password || ""), user.password);
+  if (!isMatch) return { valid: false, reason: "invalid_credentials" };
+
+  const { hasActivePaidAccess, planName, subscriptionExpiresAt } = await getPaidAccessStatus(user._id);
+
+  return {
+    valid: true,
+    testQUserId: user._id,
+    email: user.email,
+    name: `${user.firstName || ""} ${user.lastName || ""}`.trim(),
+    role: user.role,
+    hasActivePaidAccess,
+    planName,
+    subscriptionExpiresAt,
+  };
+};
+
+/**
+ * Lets a logged-in user (however they authenticated — password or Google/
+ * GitHub) set a real, self-chosen password. No old-password confirmation:
+ * there's no forgot-password flow to fall back on if this were locked
+ * behind a password the user might not have (Google/GitHub accounts).
+ */
+export const setPassword = async (userId, newPassword) => {
+  const normalized = normalizeRequiredString(newPassword);
+  if (normalized.length < 8) {
+    throw new AuthError("Password must be at least 8 characters");
+  }
+  const hashed = await passwordService.hash(normalized);
+  const user = await User.findByIdAndUpdate(
+    userId,
+    { password: hashed, hasSetPassword: true },
+    { new: true }
+  );
+  if (!user) throw new AuthError("User not found");
+  return user;
+};
+
 export const firebaseAuth = async ({
   firebaseUid,
   email,
@@ -282,6 +389,7 @@ export const firebaseAuth = async ({
       lastName: lastName || derivedLastName || "",
       email: normalizedEmail,
       password: hashedPassword,
+      hasSetPassword: false,
       role: "STUDENT",
       firebaseUid: normalizedFirebaseUid,
       isEmailVerified: true,
@@ -464,6 +572,7 @@ export const githubAuth = async (code) => {
         lastName: derivedLastName,
         email,
         password: hashedPassword,
+        hasSetPassword: false,
         role: "STUDENT",
         isEmailVerified: true,
         emailVerifiedAt: new Date(),

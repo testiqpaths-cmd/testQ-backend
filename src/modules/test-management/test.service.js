@@ -357,14 +357,23 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     isIQRoomTest: { $ne: true },
   };
 
-  if (userCreatedAt) {
-    filters.createdAt = { $gte: new Date(userCreatedAt) };
-  }
-
-  // Combined into $and (rather than two competing top-level $or keys) since
-  // both the search condition and the SELECT_STUDENT gate below need their
-  // own $or.
+  // Combined into $and (rather than competing top-level $or keys) since the
+  // registration-date gate, the search condition and the SELECT_STUDENT gate
+  // below each need their own $or.
   const andConditions = [];
+
+  // A test created before the student registered is hidden only once it has
+  // ended; one still running or upcoming stays visible. Mirrors hasTestEnded:
+  // ended = FIXED schedule with an endTime in the past.
+  if (userCreatedAt) {
+    andConditions.push({
+      $or: [
+        { createdAt: { $gte: new Date(userCreatedAt) } },
+        { scheduleType: { $ne: "FIXED" } },
+        { endTime: { $not: { $lt: new Date() } } },
+      ],
+    });
+  }
 
   if (String(search || "").trim()) {
     andConditions.push({
@@ -399,10 +408,105 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
-      select: "title description visibility createdAt plannedTestCount",
+      select: "title description visibility createdAt plannedTestCount createdBy allowedOrganizations",
     })
     .sort({ createdAt: -1 })
     .lean();
+
+  // Resolve Organization Names for tests created by or assigned from an ORGANIZATION
+  const orgCreatorUserIds = [
+    ...new Set(
+      tests
+        .map((t) => {
+          if (t.createdBy?.role === "ORGANIZATION" && t.createdBy?.userId) {
+            return String(t.createdBy.userId);
+          }
+          if (t.testSeriesId?.createdBy?.role === "ORGANIZATION" && t.testSeriesId?.createdBy?.userId) {
+            return String(t.testSeriesId.createdBy.userId);
+          }
+          return null;
+        })
+        .filter(Boolean)
+    ),
+  ];
+
+  const allowedOrgIds = [
+    ...new Set([
+      ...tests.flatMap((t) => t.allowedOrganizations || []).filter(Boolean).map(String),
+      ...tests.flatMap((t) => t.testSeriesId?.allowedOrganizations || []).filter(Boolean).map(String),
+    ]),
+  ];
+
+  const creatorUsers = orgCreatorUserIds.length
+    ? await UserModel.find({ _id: { $in: orgCreatorUserIds } }).select("organizationId").lean()
+    : [];
+
+  const creatorOrgIdMap = new Map(
+    creatorUsers
+      .filter((c) => c.organizationId)
+      .map((c) => [String(c._id), String(c.organizationId)])
+  );
+
+  const allOrgIds = [
+    ...new Set([
+      ...allowedOrgIds,
+      ...Array.from(creatorOrgIdMap.values()),
+    ]),
+  ];
+
+  const Organization = (await import("../../models/organization.model.js")).default;
+  const orgConditions = [];
+  if (allOrgIds.length) {
+    orgConditions.push({ _id: { $in: allOrgIds } });
+  }
+  if (orgCreatorUserIds.length) {
+    orgConditions.push({ admins: { $in: orgCreatorUserIds } });
+  }
+
+  const orgs = orgConditions.length
+    ? await Organization.find({ $or: orgConditions }).select("name admins").lean()
+    : [];
+
+  const orgNameById = new Map(orgs.map((o) => [String(o._id), o.name]));
+  const orgNameByAdminId = new Map();
+  for (const org of orgs) {
+    if (Array.isArray(org.admins)) {
+      for (const adminId of org.admins) {
+        orgNameByAdminId.set(String(adminId), org.name);
+      }
+    }
+  }
+
+  const resolveTestOrgName = (test) => {
+    const creatorId = String(test.createdBy?.userId || "");
+    const seriesCreatorId = String(test.testSeriesId?.createdBy?.userId || "");
+
+    if (test.createdBy?.role === "ORGANIZATION") {
+      const orgId = creatorOrgIdMap.get(creatorId);
+      if (orgId && orgNameById.has(orgId)) return orgNameById.get(orgId);
+      if (orgNameByAdminId.has(creatorId)) return orgNameByAdminId.get(creatorId);
+    }
+
+    if (test.testSeriesId?.createdBy?.role === "ORGANIZATION") {
+      const orgId = creatorOrgIdMap.get(seriesCreatorId);
+      if (orgId && orgNameById.has(orgId)) return orgNameById.get(orgId);
+      if (orgNameByAdminId.has(seriesCreatorId)) return orgNameByAdminId.get(seriesCreatorId);
+    }
+
+    if (Array.isArray(test.allowedOrganizations) && test.allowedOrganizations.length > 0) {
+      for (const aId of test.allowedOrganizations) {
+        if (orgNameById.has(String(aId))) return orgNameById.get(String(aId));
+      }
+    }
+
+    if (Array.isArray(test.testSeriesId?.allowedOrganizations) && test.testSeriesId.allowedOrganizations.length > 0) {
+      for (const aId of test.testSeriesId.allowedOrganizations) {
+        if (orgNameById.has(String(aId))) return orgNameById.get(String(aId));
+      }
+    }
+
+    return null;
+  };
 
   if (studentId) {
     const assignments = await TestAssignment.find({
@@ -486,9 +590,13 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
         const assignment = assignmentMap.get(String(test._id));
         const seriesId = test.testSeriesId?._id || test.testSeriesId || null;
         const seriesAssignment = seriesId ? seriesAssignmentMap.get(String(seriesId)) : null;
+        const orgName =
+          resolveTestOrgName(test) ||
+          (student?.organizationId ? orgNameById.get(String(student.organizationId)) : null);
         return {
           ...test,
           id: String(test._id),
+          organizationName: orgName || null,
           assignmentStatus: assignment ? assignment.status : "PENDING",
           seriesAssignmentStatus: seriesId ? (seriesAssignment ? seriesAssignment.status : "PENDING") : null,
         };
@@ -504,6 +612,7 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
   return tests.map((test) => ({
     ...test,
     id: String(test._id),
+    organizationName: resolveTestOrgName(test) || null,
     assignmentStatus: "PENDING",
     seriesAssignmentStatus: (test.testSeriesId?._id || test.testSeriesId) ? "PENDING" : null,
   }));
