@@ -1,0 +1,592 @@
+import { interviewSessionService } from "../services/interview-session.service.js";
+import { answerAnalysisService } from "../services/answer-analysis.service.js";
+import { interviewResultsService } from "../services/interview-results.service.js";
+import { interviewDashboardService } from "../services/interview-dashboard.service.js";
+import { interviewOrgService } from "../services/interview-org.service.js";
+import { interviewAdminAnalyticsService } from "../services/interview-admin-analytics.service.js";
+import { conceptHistoryService } from "../services/concept-history.service.js";
+import { integrityService } from "../services/integrity.service.js";
+import { questionAudioService } from "../tts/question-audio.service.js";
+import { sttProviderService } from "../stt/stt-provider.service.js";
+import { interviewShareService } from "../services/interview-share.service.js";
+import { generateInterviewReport } from "../reports/interview-report.service.js";
+import { InterviewSession } from "../schemas/interview-session.schema.js";
+import { InterviewTurn } from "../schemas/interview-turn.schema.js";
+import { assertCanViewSession } from "../utils/authorize.js";
+import { ApiError } from "../../common/exceptions/ApiError.js";
+import { resumeService } from "../resume/resume.service.js";
+import { resumeTopicService } from "../resume/resume-topic.service.js";
+import logger from "../../config/logger.js";
+
+export class AiInterviewController {
+  /**
+   * POST /ai-interview/custom & POST /ai-interview/sessions
+   * Path B: Set up custom interview
+   */
+  async createCustomInterview(req, res, next) {
+    try {
+      const result = await interviewSessionService.createCustomInterview(
+        req.user._id,
+        req.body
+      );
+      return res.status(201).json({
+        success: true,
+        message: "Interview session created successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/resume
+   * Path A: Interview with resume (file upload or data)
+   */
+  async createResumeInterview(req, res, next) {
+    try {
+      const result = await interviewSessionService.createResumeInterview(
+        req.user._id,
+        req.file,
+        req.body
+      );
+      return res.status(201).json({
+        success: true,
+        message: "Resume interview created successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/:id/start & POST /ai-interview/sessions/:id/start
+   * Start interview session and generate the first question
+   */
+  async startInterview(req, res, next) {
+    try {
+      const result = await interviewSessionService.startInterview(
+        req.params.id,
+        req.user
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Interview started successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/:id/answer & POST /ai-interview/sessions/:id/answers
+   * Submit and persist candidate answer for the current question turn
+   */
+  async submitAnswer(req, res, next) {
+    try {
+      const result = await interviewSessionService.submitAnswer(
+        req.params.id,
+        req.user,
+        req.body
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Answer submitted successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/:id/submit-and-next & POST /ai-interview/sessions/:id/submit-and-next
+   * Fast Interaction Pipeline: Submits answer and executes next action in a single roundtrip
+   */
+  async submitAnswerAndNext(req, res, next) {
+    try {
+      const result = await interviewSessionService.submitAnswerAndNext(
+        req.params.id,
+        req.user,
+        req.body
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Answer processed and next action executed successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/:id/analyze-answer & POST /ai-interview/sessions/:id/analyze-answer
+   * Explicit endpoint to trigger answer analysis for active turn
+   */
+  async analyzeAnswer(req, res, next) {
+    try {
+      const result = await answerAnalysisService.analyzeTurnAnswer({
+        sessionId: req.params.id,
+        user: req.user,
+        turnId: req.body?.turnId || req.body?.questionId,
+      });
+      return res.status(200).json({
+        success: true,
+        message: "Answer analyzed successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/:id/next & POST /ai-interview/sessions/:id/next
+   * Determine and execute the next adaptive interview action
+   */
+  async nextAction(req, res, next) {
+    try {
+      const result = await interviewSessionService.processNextAction(
+        req.params.id,
+        req.user
+      );
+      return res.status(200).json({
+        success: true,
+        message: "Next action processed successfully",
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/resume/upload
+   * Parse a resume, extract skills/topics, and persist it so it can be
+   * reused later (GET /ai-interview/resume, or creating an interview from
+   * a resumeId) without re-uploading the file.
+   */
+  async parseResumeOnly(req, res, next) {
+    try {
+      const data = await resumeService.uploadAndSaveResume(req.user._id, req.file, {
+        role: req.body?.role || "Software Engineer",
+        duration: Number(req.body?.duration || 30),
+        experienceLevel: req.body?.experienceLevel,
+      });
+
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/resume
+   * Returns the candidate's most recently uploaded resume, or null.
+   */
+  async getSavedResume(req, res, next) {
+    try {
+      const data = await resumeService.getLatestForUser(req.user._id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/dashboard
+   * Aggregated readiness/competency/stats view across the candidate's own
+   * completed interviews.
+   */
+  async getDashboard(req, res, next) {
+    try {
+      const data = await interviewDashboardService.getDashboard(req.user._id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/concept-history
+   * The candidate's own topic/concept mastery rolled up across all their
+   * interviews.
+   */
+  async getConceptHistory(req, res, next) {
+    try {
+      const data = await conceptHistoryService.getForCandidate(req.user._id);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/org/overview
+   * Org/Admin: aggregate AI Interview stats + recent-interviews table for
+   * the caller's in-scope students (org = own students, admin = all).
+   */
+  async getOrgOverview(req, res, next) {
+    try {
+      const data = await interviewOrgService.getOrgOverview(req.user, req.query);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/admin/analytics
+   * Admin-only: comprehensive AI Interview analytics, metrics, trends, breakdowns and student performance table.
+   */
+  async getAdminAnalytics(req, res, next) {
+    try {
+      const data = await interviewAdminAnalyticsService.getAdminAnalytics(req.user, req.query);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/org/students/:studentId
+   * Org/Admin: one student's interview list (org-scoped).
+   */
+  async getStudentInterviews(req, res, next) {
+    try {
+      const data = await interviewOrgService.getStudentInterviews(
+        req.user,
+        req.params.studentId
+      );
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/details & GET /ai-interview/:id/details
+   * Full scored results + per-question feedback for a completed interview.
+   */
+  async getInterviewResults(req, res, next) {
+    try {
+      const data = await interviewResultsService.getInterviewResults(
+        req.params.id,
+        req.user
+      );
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/share
+   * Owner / org / admin: issue a single-use, expiring link to launch this
+   * interview. DELETE revokes it.
+   */
+  async createShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.createShareLink(req.params.id, req.user, {
+        expiresInHours: req.body?.expiresInHours,
+      });
+      return res.status(201).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async revokeShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.revokeShareLink(req.params.id, req.user);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET  /ai-interview/join/:token  — preview a link (does not consume it)
+   * POST /ai-interview/join/:token  — consume it; returns the session to
+   *                                   route the candidate into the room
+   */
+  async peekShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.peekShareLink(req.params.token);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  async consumeShareLink(req, res, next) {
+    try {
+      const data = await interviewShareService.consumeShareLink(req.params.token, req.user);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/transcribe  (multipart: audio)
+   * Server-side speech-to-text for one recorded answer. A fallback for
+   * browsers without SpeechRecognition — the client still submits the
+   * returned text through the normal answer flow. Owner-only.
+   */
+  async transcribeAudio(req, res, next) {
+    try {
+      if (!sttProviderService.isEnabled()) {
+        return res.status(200).json({ success: true, data: { enabled: false, text: "" } });
+      }
+      if (!req.file?.buffer?.length) {
+        throw new ApiError(400, "An audio file is required (field name: audio).");
+      }
+
+      const sessionId = req.params.id;
+      const query = String(sessionId).startsWith("int-")
+        ? { interviewId: sessionId }
+        : { _id: sessionId };
+      const session = await InterviewSession.findOne(query).select("_id userId interviewId");
+      if (!session) throw new ApiError(404, `Interview session not found: ${sessionId}`);
+      if (session.userId.toString() !== req.user._id.toString()) {
+        throw new ApiError(403, "Only the candidate can transcribe their own answer.");
+      }
+
+      const result = await sttProviderService.transcribe(req.file.buffer, req.file.mimetype, {
+        interviewId: session.interviewId,
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: { enabled: true, text: result?.text || "", provider: result?.provider || null },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/question-audio?turnId=<id>
+   * Narration URL for a question turn (default: the session's latest
+   * turn), synthesized + cached on first request. Returns
+   * { enabled:false } when TTS is switched off for this deployment.
+   */
+  async getQuestionAudio(req, res, next) {
+    try {
+      if (!questionAudioService.isEnabled()) {
+        return res.status(200).json({ success: true, data: { enabled: false } });
+      }
+
+      const sessionId = req.params.id;
+      const query = String(sessionId).startsWith("int-")
+        ? { interviewId: sessionId }
+        : { _id: sessionId };
+      const session = await InterviewSession.findOne(query);
+      if (!session) throw new ApiError(404, `Interview session not found: ${sessionId}`);
+      await assertCanViewSession(req.user, session);
+
+      const turnQuery = { sessionId: session._id };
+      if (req.query.turnId) turnQuery._id = req.query.turnId;
+      const turn = await InterviewTurn.findOne(turnQuery).sort({ turnNumber: -1 });
+      if (!turn) throw new ApiError(404, "No question turn found for this session.");
+
+      if (turn.questionAudioUrl) {
+        return res.status(200).json({
+          success: true,
+          data: { enabled: true, turnId: turn._id.toString(), url: turn.questionAudioUrl },
+        });
+      }
+
+      const audio = await questionAudioService.getOrCreate(turn.question, {
+        interviewId: session.interviewId,
+      });
+      if (!audio?.url) {
+        return res.status(200).json({
+          success: true,
+          data: { enabled: true, turnId: turn._id.toString(), url: null },
+        });
+      }
+
+      turn.questionAudioUrl = audio.url;
+      await turn.save();
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          enabled: true,
+          turnId: turn._id.toString(),
+          url: audio.url,
+          mimeType: audio.mimeType,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/audio/stream/:audioHash
+   * Instant low-latency stream for synthesized question audio.
+   * Serves directly from memory in 2ms, avoiding Cloudinary upload latency.
+   */
+  async streamQuestionAudio(req, res, next) {
+    try {
+      const { audioHash } = req.params;
+      const mem = questionAudioService.getCachedBuffer(audioHash);
+      if (mem?.buffer) {
+        res.setHeader("Content-Type", mem.mimeType || "audio/wav");
+        res.setHeader("Content-Length", mem.buffer.length);
+        res.setHeader("Cache-Control", "public, max-age=86400");
+        return res.send(mem.buffer);
+      }
+
+      const { QuestionAudio } = await import("../schemas/question-audio.schema.js");
+      const cached = await QuestionAudio.findOne({ audioHash }).lean();
+      if (cached?.url) {
+        return res.redirect(302, cached.url);
+      }
+
+      return res.status(404).json({ success: false, message: "Audio not found or expired." });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/integrity-signals
+   * Candidate-only: append a batch of observed proctoring signals.
+   */
+  async recordIntegritySignals(req, res, next) {
+    try {
+      const data = await integrityService.recordSignals(
+        req.params.id,
+        req.user,
+        req.body?.signals
+      );
+      return res.status(201).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/integrity-signals
+   * Owner / org / admin: raw signals + descriptive per-type summary.
+   */
+  async getIntegritySignals(req, res, next) {
+    try {
+      const data = await integrityService.getSignalsForSession(req.params.id, req.user);
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/sessions/:id/report?format=pdf|excel
+   * Streams a downloadable PDF/Excel of the completed interview's results.
+   */
+  async downloadInterviewReport(req, res, next) {
+    try {
+      const { buffer, filename, contentType } = await generateInterviewReport({
+        sessionId: req.params.id,
+        user: req.user,
+        format: req.query.format,
+      });
+      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
+      res.setHeader("Content-Type", contentType);
+      return res.send(buffer);
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/sessions/:id/complete & POST /ai-interview/:id/complete
+   * Force-finish an interview and return its scored results. Idempotent.
+   */
+  async completeInterview(req, res, next) {
+    try {
+      const data = await interviewSessionService.completeInterview(
+        req.params.id,
+        req.user
+      );
+      return res.status(200).json({ success: true, data });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/:id & GET /ai-interview/sessions/:id
+   * Get session status, current question state, plan, and ownership validation
+   */
+  async getSession(req, res, next) {
+    try {
+      const session = await interviewSessionService.getSessionById(
+        req.params.id,
+        req.user
+      );
+      return res.status(200).json({
+        success: true,
+        data: session,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * GET /ai-interview/history
+   * List candidate's past and active interview sessions
+   */
+  async getHistory(req, res, next) {
+    try {
+      const history = await interviewSessionService.getUserSessions(
+        req.user._id,
+        req.query
+      );
+      return res.status(200).json({
+        success: true,
+        data: history,
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  /**
+   * POST /ai-interview/recommendation
+   * Generate recommended setup for target role
+   */
+  async getRecommendedSetup(req, res, next) {
+    try {
+      const role = req.body?.role || req.body?.roles?.[0] || "Frontend Developer";
+      const topics = resumeTopicService.selectInterviewTopics({
+        role,
+        duration: Number(req.body?.duration || 30),
+      });
+
+      return res.status(200).json({
+        success: true,
+        data: {
+          role,
+          difficulty: "ADAPTIVE",
+          durationMinutes: 30,
+          interviewTypes: ["technical", "behavioral"],
+          recommendedTopics: topics,
+          techStack: topics,
+        },
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+}
+
+export const aiInterviewController = new AiInterviewController();
+export default aiInterviewController;
