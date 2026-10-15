@@ -276,7 +276,12 @@ export class TtsProviderService {
 
   /** Microsoft Azure Neural TTS via Read Aloud API (Free, high-fidelity neural voice, no key required). */
   async callEdge(text) {
-    const { MsEdgeTTS, OUTPUT_FORMAT } = await import("msedge-tts");
+    let MsEdgeTTS, OUTPUT_FORMAT;
+    try {
+      ({ MsEdgeTTS, OUTPUT_FORMAT } = await import("msedge-tts"));
+    } catch {
+      return this.callGoogleTranslate(text);
+    }
     return new Promise((resolve, reject) => {
       const tts = new MsEdgeTTS();
       const timer = setTimeout(() => {
