@@ -13,17 +13,41 @@ router.post(
   upload.single("file"),
   async (req, res) => {
     try {
-      if (!req.file) {
+      // SAFEGUARD: In-process computer vision (YOLO/ONNX) on CPU consumes 600%+ CPU
+      // across all server cores and locks up the single-threaded Node.js event loop.
+      // Phone detection runs client-side in the browser via TensorFlow.js / Coco-SSD.
+      // If server-side detection is not explicitly enabled, return a safe 200 response immediately.
+      if (process.env.ENABLE_PHONE_DETECTION !== "true") {
+        return res.status(200).json({
+          success: true,
+          phone_detected: false,
+          confidence: null,
+          count: 0,
+          detections: [],
+          message: "Client-side detection active or server detection disabled",
+        });
+      }
+
+      let imageBuffer = req.file?.buffer;
+      let filename = req.file?.originalname || "frame.jpg";
+      let mimetype = req.file?.mimetype || "image/jpeg";
+
+      if (!imageBuffer && req.body?.image) {
+        const base64Data = req.body.image.replace(/^data:image\/\w+;base64,/, "");
+        imageBuffer = Buffer.from(base64Data, "base64");
+      }
+
+      if (!imageBuffer) {
         return res.status(400).json({
           success: false,
-          message: "Image file is required",
+          message: "Image is required (file or base64)",
         });
       }
 
       const result = await detectPhone(
-        req.file.buffer,
-        req.file.originalname,
-        req.file.mimetype
+        imageBuffer,
+        filename,
+        mimetype
       );
 
       return res.status(200).json({

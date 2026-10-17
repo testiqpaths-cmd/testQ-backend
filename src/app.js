@@ -1,3 +1,5 @@
+import path from "path";
+import { fileURLToPath } from "url";
 import express from "express";
 import cookieParser from "cookie-parser";
 import cors from "cors";
@@ -9,6 +11,9 @@ import { requestLogger } from "./common/middlewares/logger.middleware.js";
 import logger from "./config/logger.js";
 import { corsOptions } from "./config/cors.js";
 import phoneDetectionRoutes from "./routes/phoneDetection.routes.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const app = express();
 
@@ -42,9 +47,23 @@ app.use(cookieParser());
 // Request logger middleware (logs body, headers, params, query)
 app.use(requestLogger);
 
+// Serve static audio assets with explicit audio/mpeg Content-Type and Cache-Control
+app.use(
+  "/audio",
+  express.static(path.join(__dirname, "../public/audio"), {
+    setHeaders: (res, filePath) => {
+      if (filePath.endsWith(".mp3")) {
+        res.setHeader("Content-Type", "audio/mpeg");
+        res.setHeader("Accept-Ranges", "bytes");
+        res.setHeader("Cache-Control", "public, max-age=3600, must-revalidate");
+      }
+    },
+  })
+);
+
 // Routes
 app.use("/api", routes);
-
+app.use("/api", phoneDetectionRoutes);
 
 // Default route
 app.get("/", (req, res) => {
@@ -53,8 +72,6 @@ app.get("/", (req, res) => {
 
 // Error middleware (after routes)
 app.use(errorMiddleware);
-
-app.use("/api", phoneDetectionRoutes);
 
 
 

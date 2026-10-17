@@ -29,6 +29,7 @@ import {
 } from "./utils/questions.utils.js";
 
 const normalizeText = (value) => String(value ?? "").trim();
+const escapeRegex = (value) => String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 const toQueryList = (...values) =>
   values
@@ -462,6 +463,9 @@ export const getAllQuestionsService = async (query = {}, requester = null) => {
 
   if (type) filters.type = type;
   if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
+  if (query.search && String(query.search).trim()) {
+    filters.questionText = { $regex: escapeRegex(String(query.search).trim()), $options: "i" };
+  }
 
   // ✅ Free-text search — matches everything the question-bank table
   // actually shows a column for: question text, subject name, topic name,

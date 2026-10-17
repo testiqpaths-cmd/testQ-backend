@@ -92,6 +92,16 @@ const isOwnOrgStudent = async (requester, studentId) => {
 const canStartTest = (test, user) => {
   if (!test || !user) return false;
 
+  // 1. Admins have universal access
+  if (user.role === "IQPATH_ADMIN") return true;
+
+  // 2. The creator of the test always has access
+  const ownerId = typeof test.createdBy?.userId === "object"
+    ? test.createdBy?.userId?.toString?.()
+    : String(test.createdBy?.userId || "");
+  const requesterId = String(user._id || user.id || "");
+  if (ownerId && requesterId && ownerId === requesterId) return true;
+
   if (test.visibility === "PUBLIC") return true;
   if (test.visibility === "LINK_ONLY") return true;
 

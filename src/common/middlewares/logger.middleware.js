@@ -10,9 +10,17 @@ export const requestLogger = (req, res, next) => {
   
   // Log headers (exclude sensitive ones)
 
-  // Log body
-  if (Object.keys(body || {}).length > 0) {
-    logger.info(`Body: ${JSON.stringify(body, null, 2)}`);
+  // Log body (omit large base64/image payloads to prevent CPU event-loop lockup and disk exhaustion)
+  if (body && typeof body === "object" && Object.keys(body).length > 0) {
+    if (url.includes("detect-phone") || body.image) {
+      const sanitized = { ...body };
+      if (sanitized.image) {
+        sanitized.image = `[Base64 Image Omitted - ${Math.round(String(body.image).length / 1024)} KB]`;
+      }
+      logger.info(`Body: ${JSON.stringify(sanitized, null, 2)}`);
+    } else {
+      logger.info(`Body: ${JSON.stringify(body, null, 2)}`);
+    }
   }
 
   // Log params
@@ -31,12 +39,22 @@ export const requestLogger = (req, res, next) => {
     logger.info(`\n📤 API RESPONSE`);
     logger.info(`Status: ${res.statusCode}`);
     
+    if (
+      Buffer.isBuffer(data) ||
+      req.originalUrl?.includes("/audio/stream/") ||
+      req.url?.includes("/audio/stream/")
+    ) {
+      const len = Buffer.isBuffer(data) ? data.length : typeof data === "string" ? data.length : 0;
+      logger.info(`Response: <Binary Audio Stream ${len} bytes>`);
+      return originalSend.call(this, data);
+    }
+
     // Try to parse and log response data
     try {
       if (typeof data === "string") {
         const parsed = JSON.parse(data);
         logger.info(`Response: ${JSON.stringify(parsed, null, 2)}`);
-      } else if (typeof data === "object") {
+      } else if (typeof data === "object" && data !== null) {
         logger.info(`Response: ${JSON.stringify(data, null, 2)}`);
       } else {
         logger.info(`Response: ${data}`);
