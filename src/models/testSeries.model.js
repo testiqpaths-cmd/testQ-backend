@@ -26,7 +26,15 @@ const TestSeriesSchema = new mongoose.Schema(
     allowedOrganizations: [{ type: mongoose.Schema.Types.ObjectId }],
     allowedStudents: [{ type: mongoose.Schema.Types.ObjectId, ref: "User" }],
     tests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
-    seriesCode: String
+    seriesCode: String,
+
+    launchDate: { type: Date, default: null },
+    isLaunched: { type: Boolean, default: false },
+    status: {
+      type: String,
+      enum: ["DRAFT", "SCHEDULED", "LAUNCHED"],
+      default: "DRAFT",
+    },
   },
   { timestamps: true }
 );
@@ -35,5 +43,6 @@ const TestSeriesSchema = new mongoose.Schema(
 // on every series creation query by title. Neither was indexed.
 TestSeriesSchema.index({ "createdBy.userId": 1 });
 TestSeriesSchema.index({ title: 1 });
+TestSeriesSchema.index({ isLaunched: 1, launchDate: 1 });
 
 export default mongoose.model("TestSeries", TestSeriesSchema);

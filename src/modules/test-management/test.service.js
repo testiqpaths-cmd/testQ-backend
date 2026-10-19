@@ -529,14 +529,15 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     // only STARTED/SUBMITTED/MISSED are left alone, since those reflect an
     // attempt that already happened.
     const student = await UserModel.findById(studentId).select("organizationId").lean();
-    const mandatoryTestIds = await resolveMandatoryOrgTestIds(tests, student?.organizationId);
+    const standaloneTests = tests.filter((t) => !t.testSeriesId);
+    const mandatoryTestIds = await resolveMandatoryOrgTestIds(standaloneTests, student?.organizationId);
     // Same self-healing reasoning as mandatory org tests above: a student
     // can't decline their own test either — there's no one else who could
     // have assigned it to them, so an Accept/Decline prompt on it is
     // meaningless. Auto-accepting here (a real ACCEPTED record) means the
     // start-attempt gate and every other TestAssignment-reading code path
     // needs no self-authored special-casing of its own.
-    const ownTestIds = tests
+    const ownTestIds = standaloneTests
       .filter((t) => String(t.createdBy?.userId) === String(studentId))
       .map((t) => String(t._id));
     const needsAutoAccept = [...new Set([...mandatoryTestIds, ...ownTestIds])].filter((id) => {
