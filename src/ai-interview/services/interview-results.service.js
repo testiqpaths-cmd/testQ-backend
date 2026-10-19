@@ -552,6 +552,18 @@ export class InterviewResultsService {
     // the candidate their report is ready. Non-fatal.
     this.notifyReportReady(session, results);
 
+    // If this session is part of a company-track attempt, sync progression
+    if (session.trackAttemptId || session.trackId) {
+      try {
+        const { updateTrackAttemptFromInterviewSession } = await import(
+          "../../modules/company-exams/companyExam.service.js"
+        );
+        await updateTrackAttemptFromInterviewSession(session, results);
+      } catch (err) {
+        logger.warn(`Failed to update company track progress from interview ${session.interviewId}: ${err.message}`);
+      }
+    }
+
     return results;
   }
 

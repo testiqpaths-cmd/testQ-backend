@@ -72,6 +72,62 @@ const TestSeriesSchema = new mongoose.Schema(
         },
       },
     ],
+
+    // Experience-Specific Hiring Track fields
+    experienceLevel: {
+      type: String,
+      enum: ["FRESHER", "EXPERIENCED_1_3", "EXPERIENCED_3_PLUS", "ALL"],
+      default: "FRESHER",
+      index: true,
+    },
+    targetRole: {
+      type: String,
+      default: "Software Engineer",
+      trim: true,
+    },
+    hiringRounds: [
+      {
+        roundOrder: { type: Number, required: true, min: 1 },
+        roundKey: { type: String, required: true, trim: true },
+        roundName: { type: String, required: true, trim: true },
+        roundType: {
+          type: String,
+          enum: ["TESTS", "AI_INTERVIEW"],
+          default: "TESTS",
+        },
+        cutoffPercentage: { type: Number, min: 0, max: 100, default: 50 },
+        weight: { type: Number, min: 0, default: 100 },
+        retakePolicy: {
+          type: String,
+          enum: ["ALL_TESTS", "FAILED_ONLY"],
+          default: "ALL_TESTS",
+        },
+        tests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
+        aiInterviewConfig: {
+          role: { type: String, default: "Software Engineer", trim: true },
+          experienceLevel: { type: String, default: "Fresher", trim: true },
+          topics: { type: [String], default: [] },
+          duration: { type: Number, min: 5, max: 120, default: 30 },
+          difficulty: {
+            type: String,
+            enum: ["EASY", "MEDIUM", "HARD", "ADAPTIVE"],
+            default: "MEDIUM",
+          },
+          customRubric: { type: String, default: null },
+          interviewTypes: { type: [String], default: ["technical"] },
+        },
+      },
+    ],
+    isPublished: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
+    isDeleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
   },
   { timestamps: true }
 );
@@ -81,5 +137,6 @@ const TestSeriesSchema = new mongoose.Schema(
 TestSeriesSchema.index({ "createdBy.userId": 1 });
 TestSeriesSchema.index({ title: 1 });
 TestSeriesSchema.index({ category: 1, companyId: 1, createdAt: -1 });
+TestSeriesSchema.index({ category: 1, companyId: 1, experienceLevel: 1 });
 
-export default mongoose.model("TestSeries", TestSeriesSchema);
+export default mongoose.models.TestSeries || mongoose.model("TestSeries", TestSeriesSchema);

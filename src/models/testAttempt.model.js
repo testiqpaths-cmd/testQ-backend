@@ -40,6 +40,25 @@ const testAttemptSchema = new mongoose.Schema(
       index: true,
     },
 
+    companyTrackAttemptId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CompanyTrackAttempt",
+      default: null,
+      index: true,
+    },
+
+    companyTrackId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TestSeries",
+      default: null,
+      index: true,
+    },
+
+    companyRoundOrder: {
+      type: Number,
+      default: null,
+    },
+
     roundAttemptId: {
       type: String,
       default: null,
@@ -285,5 +304,7 @@ testAttemptSchema.index({ createdAt: 1 });
 testAttemptSchema.index({ studentId: 1, testCategory: 1, submittedAt: -1 });
 testAttemptSchema.index({ companyId: 1, studentId: 1 });
 testAttemptSchema.index({ studentId: 1, companyId: 1, companyStageKey: 1 });
+testAttemptSchema.index({ companyTrackAttemptId: 1 });
+testAttemptSchema.index({ companyTrackId: 1, studentId: 1 });
 
 export default mongoose.model("TestAttempt", testAttemptSchema);
