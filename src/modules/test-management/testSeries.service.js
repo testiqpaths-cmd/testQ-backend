@@ -68,9 +68,30 @@ export const createSeries = async (data, user) => {
       ? crypto.randomBytes(4).toString("hex")
       : undefined;
 
+  let launchDate = null;
+  let isLaunched = false;
+  let status = "DRAFT";
+
+  if (data.launchDate) {
+    const parsedDate = new Date(data.launchDate);
+    if (!Number.isNaN(parsedDate.getTime())) {
+      launchDate = parsedDate;
+      if (launchDate <= new Date()) {
+        isLaunched = true;
+        status = "LAUNCHED";
+      } else {
+        isLaunched = false;
+        status = "SCHEDULED";
+      }
+    }
+  }
+
   const payload = {
     ...data,
     seriesCode,
+    launchDate,
+    isLaunched,
+    status,
     allowedStudents: await resolveAllowedStudents(data.visibility, data.allowedStudents, user),
     createdBy: {
       userId: new mongoose.Types.ObjectId(user._id || user.id),
@@ -79,16 +100,113 @@ export const createSeries = async (data, user) => {
   };
   await ensureCreatorOrgIncluded(payload);
 
-  return TestSeries.create(payload);
+  const series = await TestSeries.create(payload);
+
+  // Dispatch launch notification & socket broadcast to target students
+  try {
+    const { dispatchNotificationToStudents } = await import("../notification/notification.service.js");
+    const formattedDate = launchDate
+      ? launchDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : null;
+
+    const notifMessage = formattedDate
+      ? `A new test series "${series.title}" has been created and will launch on ${formattedDate}. Check it out in Assigned Tests!`
+      : `A new test series "${series.title}" has been created and assigned to you. Check it out in Assigned Tests!`;
+
+    await dispatchNotificationToStudents(
+      user,
+      {
+        title: "New Test Series Announced",
+        message: notifMessage,
+        type: "TEST_ASSIGNED",
+        link: "/dashboard/assignedTest",
+        metadata: { seriesId: series._id, launchDate },
+      },
+      series
+    );
+  } catch (err) {
+    logger.error(`Failed to dispatch series creation notification: ${err.message}`);
+  }
+
+  return series;
 };
 
 export const updateSeries = async (id, data) => {
   const series = await TestSeries.findById(id);
   if (!series) return null;
 
+  if (data.launchDate !== undefined) {
+    if (data.launchDate) {
+      const parsed = new Date(data.launchDate);
+      if (!Number.isNaN(parsed.getTime())) {
+        series.launchDate = parsed;
+        series.isLaunched = parsed <= new Date();
+        series.status = series.isLaunched ? "LAUNCHED" : "SCHEDULED";
+      }
+    } else {
+      series.launchDate = null;
+      series.isLaunched = false;
+      series.status = "DRAFT";
+    }
+  }
+
   Object.assign(series, data);
   await ensureCreatorOrgIncluded(series);
   await series.save();
+
+  return series;
+};
+
+export const launchSeries = async (seriesId, { launchDate = null, launchNow = false } = {}, user) => {
+  const series = await TestSeries.findById(seriesId);
+  if (!series) {
+    throw new Error("Test series not found");
+  }
+
+  let finalLaunchDate = launchNow ? new Date() : (launchDate ? new Date(launchDate) : new Date());
+  if (Number.isNaN(finalLaunchDate.getTime())) {
+    finalLaunchDate = new Date();
+  }
+
+  const isImmediate = launchNow || finalLaunchDate <= new Date();
+
+  series.launchDate = finalLaunchDate;
+  series.isLaunched = isImmediate;
+  series.status = isImmediate ? "LAUNCHED" : "SCHEDULED";
+
+  await series.save();
+
+  // Send launch notification to assigned audience
+  try {
+    const { dispatchNotificationToStudents } = await import("../notification/notification.service.js");
+    const formattedDate = finalLaunchDate.toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
+
+    const notifTitle = isImmediate
+      ? `Test Series Launched: ${series.title}`
+      : `Test Series Launch Date Announced`;
+
+    const notifMessage = isImmediate
+      ? `"${series.title}" is now officially launched and live! Check it out in your Assigned Tests.`
+      : `"${series.title}" has been scheduled to launch on ${formattedDate}. Check it out in your Assigned Tests!`;
+
+    await dispatchNotificationToStudents(
+      user,
+      {
+        title: notifTitle,
+        message: notifMessage,
+        type: "TEST_ASSIGNED",
+        link: "/dashboard/assignedTest",
+        metadata: { seriesId: series._id, launchDate: finalLaunchDate, isLaunched: isImmediate },
+      },
+      series
+    );
+  } catch (err) {
+    logger.error(`Failed to dispatch launch notification: ${err.message}`);
+  }
 
   return series;
 };
@@ -399,4 +517,98 @@ export const createSeriesTest = async (seriesId, data, user) => {
   }
 
   return test;
+};
+
+export const getAssignedSeries = async ({ studentId = null, userRole = null, search = "" } = {}) => {
+  const filters = {};
+
+  if (String(search || "").trim()) {
+    filters.$or = [
+      { title: { $regex: search, $options: "i" } },
+      { description: { $regex: search, $options: "i" } },
+    ];
+  }
+
+  let studentOrgId = null;
+  const UserModel = (await import("../../models/user.model.js")).default;
+  if (studentId) {
+    const student = await UserModel.findById(studentId).select("organizationId").lean();
+    studentOrgId = student?.organizationId ? String(student.organizationId) : null;
+  }
+
+  // Admin sees all series; students only see what is visible to them
+  if (userRole !== "IQPATH_ADMIN" && studentId) {
+    const orClauses = [
+      { visibility: "PUBLIC" },
+      { visibility: "SELECT_STUDENT", allowedStudents: studentId },
+      { "createdBy.userId": studentId },
+    ];
+
+    if (studentOrgId) {
+      orClauses.push({
+        visibility: "ORG_ONLY",
+        allowedOrganizations: studentOrgId,
+      });
+      const orgAdmins = await UserModel.find({ organizationId: studentOrgId }).distinct("_id");
+      if (orgAdmins.length) {
+        orClauses.push({
+          "createdBy.userId": { $in: orgAdmins },
+        });
+      }
+    }
+
+    if (filters.$or) {
+      filters.$and = [{ $or: filters.$or }, { $or: orClauses }];
+      delete filters.$or;
+    } else {
+      filters.$or = orClauses;
+    }
+  }
+
+  const seriesList = await TestSeries.find(filters)
+    .populate({
+      path: "tests",
+      select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status",
+    })
+    .sort({ createdAt: -1 })
+    .lean();
+
+  const Organization = (await import("../../models/organization.model.js")).default;
+  const orgIds = [
+    ...new Set(
+      seriesList.flatMap((s) => s.allowedOrganizations || []).filter(Boolean).map(String)
+    ),
+  ];
+  const orgs = orgIds.length ? await Organization.find({ _id: { $in: orgIds } }).select("name").lean() : [];
+  const orgNameMap = new Map(orgs.map((o) => [String(o._id), o.name]));
+
+  const seriesIds = seriesList.map((s) => s._id);
+  let seriesAssignmentMap = new Map();
+  if (studentId && seriesIds.length) {
+    const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
+    const assignments = await TestSeriesAssignment.find({
+      studentId,
+      seriesId: { $in: seriesIds },
+    }).lean();
+    seriesAssignmentMap = new Map(
+      assignments.map((a) => [String(a.seriesId), a.status])
+    );
+  }
+
+  return seriesList
+    .map((s) => {
+      let orgName = null;
+      if (Array.isArray(s.allowedOrganizations) && s.allowedOrganizations.length) {
+        orgName = orgNameMap.get(String(s.allowedOrganizations[0]));
+      }
+      const assignmentStatus = seriesAssignmentMap.get(String(s._id)) || "PENDING";
+      return {
+        ...s,
+        id: String(s._id),
+        organizationName: orgName || null,
+        testsCount: Array.isArray(s.tests) ? s.tests.length : 0,
+        assignmentStatus,
+      };
+    })
+    .filter((s) => userRole === "IQPATH_ADMIN" || (s.assignmentStatus !== "DECLINED" && s.assignmentStatus !== "HIDDEN"));
 };
