@@ -1,3 +1,4 @@
+import jwt from "jsonwebtoken";
 import { verifyAccessToken } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../exceptions/AuthError.js";
 import { getAuth as getFirebaseAuth } from "../../firebase/firebaseAdmin.js";
@@ -24,7 +25,6 @@ export const authMiddleware = async (req, res, next) => {
       });
     }
 
-    
     try {
       const decoded = verifyAccessToken(token); // backend JWT
       logger.debug(`auth.middleware: backend JWT verified id=${decoded.id}`);
@@ -52,14 +52,42 @@ export const authMiddleware = async (req, res, next) => {
       return next();
     } catch (e) {
       logger.debug(`auth.middleware: backend JWT verify failed: ${e.message}`);
-      // Not a backend JWT — try Firebase ID token
+      if (e.name === "TokenExpiredError" || e.message?.includes("jwt expired")) {
+        return res.status(401).json({
+          success: false,
+          message: "Token expired",
+          code: "TOKEN_EXPIRED",
+        });
+      }
+      // Not an expired backend JWT — check if it is a Firebase ID token
     }
 
-    // Try verifying as Firebase ID token
+    // Only attempt Firebase verification if token was issued by Google/Firebase
+    const unverified = jwt.decode(token);
+    const isFirebaseToken = Boolean(
+      unverified &&
+      typeof unverified === "object" &&
+      typeof unverified.iss === "string" &&
+      unverified.iss.startsWith("https://securetoken.google.com/")
+    );
+
+    if (!isFirebaseToken) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token",
+        errors: null,
+      });
+    }
+
+    // Try verifying as Firebase ID token with 5s timeout to avoid request stalling
     try {
       const firebaseAuth = getFirebaseAuth();
       logger.debug(`auth.middleware: attempting Firebase verify for token length=${token?.length}`);
-      const fbDecoded = await firebaseAuth.verifyIdToken(token);
+      const verifyPromise = firebaseAuth.verifyIdToken(token);
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error("Firebase verification timed out")), 5000)
+      );
+      const fbDecoded = await Promise.race([verifyPromise, timeoutPromise]);
 
       // fbDecoded contains uid, email, name, picture, email_verified
       const uid = fbDecoded.uid;
