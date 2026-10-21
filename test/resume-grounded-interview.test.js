@@ -228,4 +228,51 @@ test("Resume-Grounded Pipeline: Acceptance Criteria Verification", async (t) => 
     assert.ok(context.technologies.length <= 6, "Technologies list should be bounded <= 6");
     assert.ok(context.contributions.length <= 2, "Contributions should be bounded <= 2");
   });
+
+  await t.test("8. TC-024: Empty 0-byte resume file rejection with HTTP 422", async () => {
+    // 0-byte PDF file
+    const emptyPdfFile = {
+      buffer: Buffer.alloc(0),
+      originalname: "empty_resume.pdf",
+      mimetype: "application/pdf",
+      size: 0,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(emptyPdfFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should return HTTP 422 for empty file");
+        assert.equal(
+          err.message,
+          "Uploaded resume appears to be empty or unreadable text.",
+          "Error message must match expected rejection text"
+        );
+        return true;
+      }
+    );
+
+    // 0-byte DOCX file
+    const emptyDocxFile = {
+      buffer: Buffer.alloc(0),
+      originalname: "empty_resume.docx",
+      mimetype: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: 0,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(emptyDocxFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should return HTTP 422 for empty docx");
+        assert.equal(
+          err.message,
+          "Uploaded resume appears to be empty or unreadable text."
+        );
+        return true;
+      }
+    );
+  });
 });

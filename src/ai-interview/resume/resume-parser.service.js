@@ -61,6 +61,13 @@ export class ResumeParserService {
       throw new ApiError(400, "No resume file provided.");
     }
 
+    if (file.size === 0 || file.buffer.length === 0) {
+      throw new ApiError(
+        422,
+        "Uploaded resume appears to be empty or unreadable text."
+      );
+    }
+
     const { mimetype, originalname, size, buffer } = file;
     const extension = (originalname || "").split(".").pop().toLowerCase();
 
@@ -114,6 +121,12 @@ export class ResumeParserService {
     } catch (err) {
       logger.error(`Resume file parsing failed: ${err.message}`);
       if (err instanceof ApiError) throw err;
+      if (err.message && /empty|zero bytes/i.test(err.message)) {
+        throw new ApiError(
+          422,
+          "Uploaded resume appears to be empty or unreadable text."
+        );
+      }
       throw new ApiError(422, `Failed to parse resume content: ${err.message}`);
     }
 
