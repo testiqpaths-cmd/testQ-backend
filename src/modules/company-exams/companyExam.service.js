@@ -86,7 +86,32 @@ export const normalizeTrackRounds = (series) => {
           weight,
           retakePolicy,
           tests,
-          aiInterviewConfig: r.aiInterviewConfig || null,
+          aiInterviewConfig: r.aiInterviewConfig
+            ? {
+                interviewMode: r.aiInterviewConfig.interviewMode || "PREDEFINED",
+                allowResumeUpload: Boolean(
+                  r.aiInterviewConfig.allowResumeUpload ||
+                  r.aiInterviewConfig.requireResume ||
+                  r.aiInterviewConfig.interviewMode === "RESUME_BASED" ||
+                  r.aiInterviewConfig.interviewMode === "HYBRID"
+                ),
+                requireResume: Boolean(
+                  r.aiInterviewConfig.requireResume ||
+                  r.aiInterviewConfig.interviewMode === "RESUME_BASED"
+                ),
+                role: r.aiInterviewConfig.role || series.targetRole || "Software Engineer",
+                experienceLevel: r.aiInterviewConfig.experienceLevel || series.experienceLevel || "Fresher",
+                topics: Array.isArray(r.aiInterviewConfig.topics) ? r.aiInterviewConfig.topics : [],
+                duration: Number(r.aiInterviewConfig.duration || r.aiInterviewConfig.durationMinutes) || 30,
+                durationMinutes: Number(r.aiInterviewConfig.durationMinutes || r.aiInterviewConfig.duration) || 30,
+                difficulty: r.aiInterviewConfig.difficulty || "MEDIUM",
+                customRubric: r.aiInterviewConfig.customRubric || null,
+                interviewTypes:
+                  Array.isArray(r.aiInterviewConfig.interviewTypes) && r.aiInterviewConfig.interviewTypes.length > 0
+                    ? r.aiInterviewConfig.interviewTypes
+                    : ["technical"],
+              }
+            : null,
         };
       })
       .sort((a, b) => a.roundOrder - b.roundOrder);
@@ -809,7 +834,13 @@ export const updateTrackAttemptFromInterviewSession = async (sessionOrId, result
  * Enforces sequential gating, validates ownership, checks publishing and accessible status,
  * maps round aiInterviewConfig, and prevents duplicate session creation.
  */
-export const launchCompanyInterviewRound = async ({ studentId, trackId, roundOrder }) => {
+export const launchCompanyInterviewRound = async ({
+  studentId,
+  trackId,
+  roundOrder,
+  file = null,
+  body = {},
+}) => {
   if (!studentId || !mongoose.Types.ObjectId.isValid(studentId)) {
     const err = new Error("Invalid student ID");
     err.statusCode = 400;
@@ -911,6 +942,7 @@ export const launchCompanyInterviewRound = async ({ studentId, trackId, roundOrd
 
   const InterviewSession = (await import("../../ai-interview/schemas/interview-session.schema.js")).default;
   const { interviewSessionService } = await import("../../ai-interview/services/interview-session.service.js");
+  const { resumeService } = await import("../../ai-interview/resume/resume.service.js");
 
   // Prevent duplicate sessions / resume existing eligible session
   if (roundAttempt.interviewSessionId) {
@@ -931,9 +963,15 @@ export const launchCompanyInterviewRound = async ({ studentId, trackId, roundOrd
 
   // Create new session mapped with company aiInterviewConfig
   const cfg = roundDef.aiInterviewConfig || {};
+  const interviewMode = cfg.interviewMode || "PREDEFINED";
+  const requireResume = Boolean(cfg.requireResume || interviewMode === "RESUME_BASED");
+  const allowResumeUpload = Boolean(
+    cfg.allowResumeUpload || requireResume || interviewMode === "RESUME_BASED" || interviewMode === "HYBRID"
+  );
+
   const role = cfg.role || track.targetRole || "Software Engineer";
   const experienceLevel = cfg.experienceLevel || track.experienceLevel || "1-3 Years";
-  const duration = Number(cfg.duration) || 30;
+  const duration = Number(cfg.duration || cfg.durationMinutes) || 30;
   const difficulty = cfg.difficulty || "MEDIUM";
   const interviewTypes =
     Array.isArray(cfg.interviewTypes) && cfg.interviewTypes.length > 0
@@ -942,22 +980,67 @@ export const launchCompanyInterviewRound = async ({ studentId, trackId, roundOrd
   const topics = Array.isArray(cfg.topics) && cfg.topics.length > 0 ? cfg.topics : [];
   const customRubric = cfg.customRubric || null;
 
-  const session = await interviewSessionService.createCustomInterview(studentId, {
-    role,
-    experienceLevel,
-    duration,
-    difficulty,
-    interviewTypes,
-    topics,
-    focusTopics: topics,
-    customRubric,
-    company: track.companyId?.name || "",
-    companyId: track.companyId?._id || track.companyId,
-    trackId: track._id,
-    trackAttemptId: trackAttempt._id,
-    companyRoundOrder: order,
-    companyRoundKey: roundDef.roundKey,
-  });
+  // Resolve resume context if provided or required
+  let resumeIdToUse = body?.resumeId || null;
+  const useSaved = body?.useSavedResume === true || body?.useSavedResume === "true";
+
+  if (!file && !resumeIdToUse && (requireResume || useSaved)) {
+    try {
+      const saved = await resumeService.getLatestForUser(studentId);
+      if (saved && (saved.resumeId || saved._id)) {
+        resumeIdToUse = saved.resumeId || String(saved._id);
+      }
+    } catch {
+      // resume retrieval error handled below
+    }
+  }
+
+  if (requireResume && !file && !resumeIdToUse) {
+    const err = new Error("Candidate resume is required for this interview round. Please upload your resume to continue.");
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const shouldUseResume = Boolean(allowResumeUpload && (file || resumeIdToUse));
+  let session = null;
+
+  if (shouldUseResume) {
+    session = await interviewSessionService.createResumeInterview(studentId, file, {
+      resumeId: resumeIdToUse || undefined,
+      role,
+      experienceLevel,
+      duration,
+      durationMinutes: duration,
+      difficulty,
+      interviewTypes,
+      topics: interviewMode === "HYBRID" ? topics : topics.length > 0 ? topics : undefined,
+      focusTopics: topics,
+      customRubric,
+      company: track.companyId?.name || "",
+      companyId: track.companyId?._id || track.companyId,
+      trackId: track._id,
+      trackAttemptId: trackAttempt._id,
+      companyRoundOrder: order,
+      companyRoundKey: roundDef.roundKey,
+    });
+  } else {
+    session = await interviewSessionService.createCustomInterview(studentId, {
+      role,
+      experienceLevel,
+      duration,
+      difficulty,
+      interviewTypes,
+      topics,
+      focusTopics: topics,
+      customRubric,
+      company: track.companyId?.name || "",
+      companyId: track.companyId?._id || track.companyId,
+      trackId: track._id,
+      trackAttemptId: trackAttempt._id,
+      companyRoundOrder: order,
+      companyRoundKey: roundDef.roundKey,
+    });
+  }
 
   // Link to track attempt and transition round to IN_PROGRESS
   roundAttempt.interviewSessionId = session.interviewId;

@@ -286,6 +286,15 @@ export class InterviewSessionService {
       throw new ApiError(400, "Please upload a resume file (PDF or DOCX).");
     }
 
+    const additionalTopics = Array.isArray(payload.topics) && payload.topics.length > 0
+      ? payload.topics
+      : Array.isArray(payload.focusTopics) && payload.focusTopics.length > 0
+      ? payload.focusTopics
+      : [];
+    if (additionalTopics.length > 0) {
+      scopedTopics = Array.from(new Set([...additionalTopics, ...scopedTopics]));
+    }
+
     if (!scopedTopics || scopedTopics.length === 0) {
       scopedTopics = ["TECHNICAL_FUNDAMENTALS", "PROBLEM_SOLVING"];
     }
@@ -325,7 +334,13 @@ export class InterviewSessionService {
       interviewType: "RESUME",
       role,
       experienceLevel,
-      company,
+      company: payload.company || company,
+      companyId: payload.companyId || null,
+      trackId: payload.trackId || null,
+      trackAttemptId: payload.trackAttemptId || null,
+      companyRoundOrder: payload.companyRoundOrder != null ? Number(payload.companyRoundOrder) : null,
+      companyRoundKey: payload.companyRoundKey || null,
+      customRubric: payload.customRubric || null,
       techStack: resumeData?.extracted?.skills || [],
       interviewTypes,
       duration,

@@ -202,6 +202,8 @@ export const launchCompanyInterviewRound = async (req, res, next) => {
       studentId,
       trackId,
       roundOrder,
+      file: req.file || null,
+      body: req.body || {},
     });
     return res.status(200).json({
       success: true,

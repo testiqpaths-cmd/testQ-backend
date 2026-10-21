@@ -681,4 +681,307 @@ describe("Step 5: AI Interview Session Integration & Mixed Progression Tests", (
       assert.equal(res, null, "Standalone interviews must return null and have zero side effects on company tracks");
     });
   });
+
+  /* ── 5. PREDEFINED VS RESUME-BASED VS HYBRID AI INTERVIEWS ── */
+  describe("5. Predefined vs Resume-Based vs Hybrid Company AI Interview Options", () => {
+    test("5.1 hiringRoundSchema accepts PREDEFINED, RESUME_BASED, and HYBRID interview modes with resume options", async () => {
+      const { hiringRoundSchema } = await import("../src/modules/test-management/schemas/testSeries.schema.js");
+
+      // Predefined round
+      const predefinedRound = {
+        roundOrder: 1,
+        roundKey: "ROUND_1_PREDEFINED",
+        roundName: "Predefined Standard Interview",
+        roundType: "AI_INTERVIEW",
+        aiInterviewConfig: {
+          interviewMode: "PREDEFINED",
+          allowResumeUpload: false,
+          requireResume: false,
+          role: "Frontend Engineer",
+          experienceLevel: "FRESHER",
+          topics: ["REACT", "JAVASCRIPT"],
+          durationMinutes: 30,
+          difficulty: "MEDIUM",
+        },
+      };
+      const res1 = hiringRoundSchema.safeParse(predefinedRound);
+      assert.equal(res1.success, true);
+      assert.equal(res1.data.aiInterviewConfig.interviewMode, "PREDEFINED");
+      assert.equal(res1.data.aiInterviewConfig.allowResumeUpload, false);
+
+      // Resume-based round
+      const resumeBasedRound = {
+        roundOrder: 2,
+        roundKey: "ROUND_2_RESUME",
+        roundName: "Resume Grounded Interview",
+        roundType: "AI_INTERVIEW",
+        aiInterviewConfig: {
+          interviewMode: "RESUME_BASED",
+          allowResumeUpload: true,
+          requireResume: true,
+          role: "Full Stack Engineer",
+          experienceLevel: "MID",
+          durationMinutes: 45,
+          difficulty: "HARD",
+        },
+      };
+      const res2 = hiringRoundSchema.safeParse(resumeBasedRound);
+      assert.equal(res2.success, true);
+      assert.equal(res2.data.aiInterviewConfig.interviewMode, "RESUME_BASED");
+      assert.equal(res2.data.aiInterviewConfig.requireResume, true);
+
+      // Hybrid round
+      const hybridRound = {
+        roundOrder: 3,
+        roundKey: "ROUND_3_HYBRID",
+        roundName: "Hybrid Standard + Resume Interview",
+        roundType: "AI_INTERVIEW",
+        aiInterviewConfig: {
+          interviewMode: "HYBRID",
+          allowResumeUpload: true,
+          requireResume: false,
+          role: "Backend Architect",
+          experienceLevel: "SENIOR",
+          topics: ["DISTRIBUTED_SYSTEMS", "KAFKA"],
+          durationMinutes: 60,
+          difficulty: "HARD",
+        },
+      };
+      const res3 = hiringRoundSchema.safeParse(hybridRound);
+      assert.equal(res3.success, true);
+      assert.equal(res3.data.aiInterviewConfig.interviewMode, "HYBRID");
+      assert.equal(res3.data.aiInterviewConfig.allowResumeUpload, true);
+    });
+
+    test("5.2 launchCompanyInterviewRound invokes createResumeInterview when resumeId is provided", async () => {
+      const origTrackFindById = TestSeries.findById;
+      const origTrackAttemptFindOne = CompanyTrackAttempt.findOne;
+      let resumeInterviewCreated = false;
+      let passedPayload = null;
+
+      const origCreateResume = interviewSessionService.createResumeInterview;
+      interviewSessionService.createResumeInterview = async (userId, file, payload) => {
+        resumeInterviewCreated = true;
+        passedPayload = payload;
+        return {
+          interviewId: "int-resume-launched-001",
+          role: payload.role,
+          duration: payload.duration,
+        };
+      };
+
+      const mockTrack = {
+        _id: dummyTrackId,
+        category: "COMPANY",
+        isPublished: true,
+        isDeleted: false,
+        progressionMode: "OPEN",
+        companyId: { _id: dummyCompanyId, name: "Amazon" },
+        hiringRounds: [
+          {
+            roundOrder: 1,
+            roundKey: "R1_RESUME",
+            roundName: "Resume Round",
+            roundType: "AI_INTERVIEW",
+            cutoffPercentage: 60,
+            aiInterviewConfig: {
+              interviewMode: "RESUME_BASED",
+              allowResumeUpload: true,
+              requireResume: true,
+              role: "Cloud Specialist",
+              topics: ["AWS", "DOCKER"],
+            },
+          },
+        ],
+      };
+
+      const mockAttempt = {
+        _id: new Types.ObjectId(),
+        studentId: dummyUserId,
+        trackId: dummyTrackId,
+        status: "IN_PROGRESS",
+        roundAttempts: [
+          { roundOrder: 1, status: "READY", interviewSessionId: null },
+        ],
+        save: async () => {},
+      };
+
+      const mockQuery = {
+        populate: () => mockQuery,
+        lean: async () => mockTrack,
+      };
+      TestSeries.findById = () => mockQuery;
+      CompanyTrackAttempt.findOne = () => mockAttempt;
+
+      try {
+        const result = await launchCompanyInterviewRound({
+          studentId: dummyUserId.toString(),
+          trackId: dummyTrackId.toString(),
+          roundOrder: 1,
+          body: { resumeId: "resume-test-12345" },
+        });
+
+        assert.equal(resumeInterviewCreated, true, "createResumeInterview must be invoked for resume interview round");
+        assert.equal(result.interviewId, "int-resume-launched-001");
+        assert.equal(passedPayload.resumeId, "resume-test-12345");
+        assert.equal(passedPayload.role, "Cloud Specialist");
+        assert.equal(String(passedPayload.trackId), String(dummyTrackId));
+        assert.equal(passedPayload.companyRoundOrder, 1);
+        assert.equal(mockAttempt.roundAttempts[0].status, "IN_PROGRESS");
+        assert.equal(mockAttempt.roundAttempts[0].interviewSessionId, "int-resume-launched-001");
+      } finally {
+        TestSeries.findById = origTrackFindById;
+        CompanyTrackAttempt.findOne = origTrackAttemptFindOne;
+        interviewSessionService.createResumeInterview = origCreateResume;
+      }
+    });
+
+    test("5.3 launchCompanyInterviewRound rejects launch when requireResume is true and no resume is found", async () => {
+      const origTrackFindById = TestSeries.findById;
+      const origTrackAttemptFindOne = CompanyTrackAttempt.findOne;
+      const { resumeService } = await import("../src/ai-interview/resume/resume.service.js");
+      const origGetLatest = resumeService.getLatestForUser;
+      resumeService.getLatestForUser = async () => null; // No resume on file
+
+      const mockTrack = {
+        _id: dummyTrackId,
+        category: "COMPANY",
+        isPublished: true,
+        isDeleted: false,
+        progressionMode: "OPEN",
+        hiringRounds: [
+          {
+            roundOrder: 1,
+            roundKey: "R1_REQ_RESUME",
+            roundName: "Mandatory Resume Round",
+            roundType: "AI_INTERVIEW",
+            cutoffPercentage: 60,
+            aiInterviewConfig: {
+              interviewMode: "RESUME_BASED",
+              requireResume: true,
+              role: "Data Scientist",
+            },
+          },
+        ],
+      };
+
+      const mockAttempt = {
+        _id: new Types.ObjectId(),
+        studentId: dummyUserId,
+        trackId: dummyTrackId,
+        status: "IN_PROGRESS",
+        roundAttempts: [
+          { roundOrder: 1, status: "READY", interviewSessionId: null },
+        ],
+        save: async () => {},
+      };
+
+      const mockQuery = {
+        populate: () => mockQuery,
+        lean: async () => mockTrack,
+      };
+      TestSeries.findById = () => mockQuery;
+      CompanyTrackAttempt.findOne = () => mockAttempt;
+
+      try {
+        await assert.rejects(
+          async () => {
+            await launchCompanyInterviewRound({
+              studentId: dummyUserId.toString(),
+              trackId: dummyTrackId.toString(),
+              roundOrder: 1,
+              file: null,
+              body: {}, // No resumeId provided
+            });
+          },
+          (err) => {
+            assert.equal(err.statusCode, 400);
+            assert.ok(err.message.includes("Candidate resume is required"));
+            return true;
+          }
+        );
+      } finally {
+        TestSeries.findById = origTrackFindById;
+        CompanyTrackAttempt.findOne = origTrackAttemptFindOne;
+        resumeService.getLatestForUser = origGetLatest;
+      }
+    });
+
+    test("5.4 launchCompanyInterviewRound launches PREDEFINED round with custom interview without requiring resume", async () => {
+      const origTrackFindById = TestSeries.findById;
+      const origTrackAttemptFindOne = CompanyTrackAttempt.findOne;
+      let customInterviewCreated = false;
+      let passedPayload = null;
+
+      const origCreateCustom = interviewSessionService.createCustomInterview;
+      interviewSessionService.createCustomInterview = async (userId, payload) => {
+        customInterviewCreated = true;
+        passedPayload = payload;
+        return {
+          interviewId: "int-predefined-launched-002",
+          role: payload.role,
+        };
+      };
+
+      const mockTrack = {
+        _id: dummyTrackId,
+        category: "COMPANY",
+        isPublished: true,
+        isDeleted: false,
+        progressionMode: "OPEN",
+        companyId: { _id: dummyCompanyId, name: "Microsoft" },
+        hiringRounds: [
+          {
+            roundOrder: 1,
+            roundKey: "R1_PREDEFINED",
+            roundName: "Predefined Standard Round",
+            roundType: "AI_INTERVIEW",
+            cutoffPercentage: 60,
+            aiInterviewConfig: {
+              interviewMode: "PREDEFINED",
+              requireResume: false,
+              allowResumeUpload: false,
+              role: "Core C# Developer",
+              topics: ["DOTNET", "CSHARP", "ASPNET"],
+            },
+          },
+        ],
+      };
+
+      const mockAttempt = {
+        _id: new Types.ObjectId(),
+        studentId: dummyUserId,
+        trackId: dummyTrackId,
+        status: "IN_PROGRESS",
+        roundAttempts: [
+          { roundOrder: 1, status: "READY", interviewSessionId: null },
+        ],
+        save: async () => {},
+      };
+
+      const mockQuery = {
+        populate: () => mockQuery,
+        lean: async () => mockTrack,
+      };
+      TestSeries.findById = () => mockQuery;
+      CompanyTrackAttempt.findOne = () => mockAttempt;
+
+      try {
+        const result = await launchCompanyInterviewRound({
+          studentId: dummyUserId.toString(),
+          trackId: dummyTrackId.toString(),
+          roundOrder: 1,
+        });
+
+        assert.equal(customInterviewCreated, true, "createCustomInterview must be invoked for predefined standard round");
+        assert.equal(result.interviewId, "int-predefined-launched-002");
+        assert.equal(passedPayload.role, "Core C# Developer");
+        assert.deepEqual(passedPayload.topics, ["DOTNET", "CSHARP", "ASPNET"]);
+      } finally {
+        TestSeries.findById = origTrackFindById;
+        CompanyTrackAttempt.findOne = origTrackAttemptFindOne;
+        interviewSessionService.createCustomInterview = origCreateCustom;
+      }
+    });
+  });
 });

@@ -2,15 +2,27 @@ import { z } from "zod";
 
 const objectId = z.string().regex(/^[0-9a-fA-F]{24}$/, "Invalid ObjectId");
 
-export const aiInterviewConfigSchema = z.object({
-  role: z.string().optional().nullable(),
-  experienceLevel: z.enum(["FRESHER", "MID", "SENIOR", "LEAD"]).optional().nullable(),
-  interviewTypes: z.array(z.enum(["TECHNICAL", "BEHAVIORAL", "SYSTEM_DESIGN", "HR"])).optional().default([]),
-  topics: z.array(z.string()).optional().default([]),
-  durationMinutes: z.number().min(5).max(180).optional().default(30),
-  difficulty: z.enum(["EASY", "MEDIUM", "HARD"]).optional().default("MEDIUM"),
-  customRubric: z.any().optional().nullable(),
-});
+export const aiInterviewConfigSchema = z
+  .object({
+    interviewMode: z.enum(["PREDEFINED", "RESUME_BASED", "HYBRID"]).optional().default("PREDEFINED"),
+    allowResumeUpload: z.boolean().optional().default(false),
+    requireResume: z.boolean().optional().default(false),
+    role: z.string().optional().nullable(),
+    experienceLevel: z.enum(["FRESHER", "MID", "SENIOR", "LEAD"]).optional().nullable(),
+    interviewTypes: z.array(z.enum(["TECHNICAL", "BEHAVIORAL", "SYSTEM_DESIGN", "HR"])).optional().default([]),
+    topics: z.array(z.string()).optional().default([]),
+    duration: z.number().min(5).max(180).optional(),
+    durationMinutes: z.number().min(5).max(180).optional().default(30),
+    difficulty: z.enum(["EASY", "MEDIUM", "HARD"]).optional().default("MEDIUM"),
+    customRubric: z.any().optional().nullable(),
+  })
+  .refine(
+    (data) => !(data.requireResume && data.allowResumeUpload === false),
+    {
+      message: "allowResumeUpload must be true if requireResume is enabled",
+      path: ["allowResumeUpload"],
+    }
+  );
 
 export const hiringRoundSchema = z.object({
   roundOrder: z.number().int().min(1, "Round order must be at least 1"),

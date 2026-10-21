@@ -36,8 +36,20 @@ router.post("/tracks/:trackId/start", authMiddleware, startCompanyTrackAttempt);
 router.get("/tracks/:trackId/attempt", authMiddleware, getCompanyTrackAttempt);
 router.post("/tracks/:trackId/retake", authMiddleware, retakeCompanyTrackAttempt);
 
-// AI Interview round launch endpoints
-router.post("/tracks/:trackId/rounds/:roundOrder/interview/launch", authMiddleware, launchCompanyInterviewRound);
-router.post("/tracks/:trackId/interview/launch", authMiddleware, launchCompanyInterviewRound);
+import { resumeUpload } from "../../ai-interview/middlewares/resume-upload.middleware.js";
+
+// AI Interview round launch endpoints (supports direct launch or resume upload)
+router.post(
+  "/tracks/:trackId/rounds/:roundOrder/interview/launch",
+  authMiddleware,
+  resumeUpload.single("resume"),
+  launchCompanyInterviewRound
+);
+router.post(
+  "/tracks/:trackId/interview/launch",
+  authMiddleware,
+  resumeUpload.single("resume"),
+  launchCompanyInterviewRound
+);
 
 export default router;

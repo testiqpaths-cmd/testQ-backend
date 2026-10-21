@@ -104,10 +104,18 @@ const TestSeriesSchema = new mongoose.Schema(
         },
         tests: [{ type: mongoose.Schema.Types.ObjectId, ref: "Test" }],
         aiInterviewConfig: {
+          interviewMode: {
+            type: String,
+            enum: ["PREDEFINED", "RESUME_BASED", "HYBRID"],
+            default: "PREDEFINED",
+          },
+          allowResumeUpload: { type: Boolean, default: false },
+          requireResume: { type: Boolean, default: false },
           role: { type: String, default: "Software Engineer", trim: true },
           experienceLevel: { type: String, default: "Fresher", trim: true },
           topics: { type: [String], default: [] },
           duration: { type: Number, min: 5, max: 120, default: 30 },
+          durationMinutes: { type: Number, min: 5, max: 120, default: 30 },
           difficulty: {
             type: String,
             enum: ["EASY", "MEDIUM", "HARD", "ADAPTIVE"],
