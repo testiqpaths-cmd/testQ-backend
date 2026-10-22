@@ -449,7 +449,7 @@ export class InterviewSessionService {
   }
 
   async #startInterviewImpl(sessionId, user) {
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     // Idempotency: If already completed, return terminal state safely
     if (session.interviewState === InterviewState.COMPLETED) {
@@ -574,7 +574,7 @@ export class InterviewSessionService {
   }
 
   async #submitAnswerImpl(sessionId, user, payload) {
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     // 1. State Gate: Accept answers when IN_PROGRESS or PROCESSING_ANSWER.
     // If the session is already in WAITING_FOR_NEXT_QUESTION (e.g. from an earlier socket call,
@@ -806,7 +806,7 @@ export class InterviewSessionService {
     let t5Wall = null;
     let t6Wall = null;
 
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     // 1. Terminal / Inactive State Gate
     if (session.interviewState === InterviewState.COMPLETED) {
@@ -895,9 +895,7 @@ export class InterviewSessionService {
       const tReloadStart = performance.now();
       const reloaded = await InterviewSession.findById(session._id);
       if (reloaded) {
-        session.candidatePerformance = reloaded.candidatePerformance;
-        session.coverageState = reloaded.coverageState;
-        session.interviewState = reloaded.interviewState;
+        session = reloaded;
       }
       lastTurn = await InterviewTurn.findById(lastTurn._id);
       const stateReloadMs = Math.round(performance.now() - tReloadStart);
@@ -924,7 +922,26 @@ export class InterviewSessionService {
 
     const finalizeTurnMetrics = async (newQuestion = null) => {
       const tDbStart = performance.now();
-      await session.save();
+      try {
+        await session.save();
+      } catch (err) {
+        if (err.name === "VersionError" || err.message?.includes("version")) {
+          const fresh = await InterviewSession.findById(session._id);
+          if (fresh) {
+            fresh.interviewState = session.interviewState;
+            fresh.timeRemaining = session.timeRemaining;
+            fresh.endTime = session.endTime;
+            fresh.currentQuestion = session.currentQuestion;
+            if (Array.isArray(session.coverageState)) {
+              fresh.coverageState = session.coverageState;
+            }
+            await fresh.save().catch(() => {});
+            session = fresh;
+          }
+        } else {
+          throw err;
+        }
+      }
       dbMs = Math.round(performance.now() - tDbStart);
       const t7Wall = Date.now();
 
@@ -1003,6 +1020,23 @@ export class InterviewSessionService {
         session.coverageState.forEach((c) => {
           if (c.status === "IN_PROGRESS") c.status = "EVALUATED";
         });
+      }
+
+      if (
+        lastTurn &&
+        !lastTurn.candidateAnswer &&
+        lastTurn.processingState !== "ANALYZED" &&
+        lastTurn.processingState !== "EVALUATED"
+      ) {
+        lastTurn.answerStatus = "SKIPPED";
+        lastTurn.relevanceScore = 0;
+        lastTurn.correctnessScore = 0;
+        lastTurn.completenessScore = 0;
+        lastTurn.confidence = 0;
+        lastTurn.feedbackSummary = "Question skipped — interview ended before this question was answered.";
+        lastTurn.processingState = "EVALUATED";
+        lastTurn.analysisTimestamp = new Date();
+        await lastTurn.save().catch(() => {});
       }
 
       t6Wall = Date.now();
@@ -1198,7 +1232,7 @@ export class InterviewSessionService {
   }
 
   async #completeInterviewImpl(sessionId, user) {
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     const TERMINAL_STATES = [
       InterviewState.COMPLETED,
@@ -1206,6 +1240,16 @@ export class InterviewSessionService {
       InterviewState.CANCELLED,
       InterviewState.EXPIRED,
     ];
+
+    if (
+      session.interviewState === InterviewState.CREATED ||
+      session.interviewState === InterviewState.READY
+    ) {
+      throw new ApiError(
+        400,
+        `Cannot complete interview: session has not been started (state: ${session.interviewState}).`
+      );
+    }
 
     if (!TERMINAL_STATES.includes(session.interviewState)) {
       const turn = await InterviewTurn.findOne({ sessionId: session._id }).sort({
