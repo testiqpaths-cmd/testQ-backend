@@ -1,11 +1,42 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "module";
 import mongoose from "mongoose";
 import { resumeTopicService } from "../src/ai-interview/resume/resume-topic.service.js";
-import { resumeParserService } from "../src/ai-interview/resume/resume-parser.service.js";
+import {
+  resumeParserService,
+  UNREADABLE_RESUME_MESSAGE,
+  cleanExtractedText,
+  hasMeaningfulContent,
+} from "../src/ai-interview/resume/resume-parser.service.js";
 import { findRelevantProjectContext } from "../src/ai-interview/resume/resume-project-context.js";
 import { interviewStateBuilderService } from "../src/ai-interview/services/interview-state-builder.service.js";
 import { aiQuestionService } from "../src/ai-interview/ai/ai-question.service.js";
+
+const require = createRequire(import.meta.url);
+const PDFDocument = require("pdfkit");
+const AdmZip = require("adm-zip");
+
+function createPdfBuffer(configure) {
+  return new Promise((resolve) => {
+    const doc = new PDFDocument();
+    const chunks = [];
+    doc.on("data", (chunk) => chunks.push(chunk));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    if (configure) configure(doc);
+    doc.end();
+  });
+}
+
+function createDocxBuffer(textContent) {
+  const zip = new AdmZip();
+  const docXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body><w:p><w:r><w:t>${textContent}</w:t></w:r></w:p></w:body>
+</w:document>`;
+  zip.addFile("word/document.xml", Buffer.from(docXml, "utf8"));
+  return zip.toBuffer();
+}
 
 test("Resume-Grounded Pipeline: Acceptance Criteria Verification", async (t) => {
   await t.test("1. Python/Django resume: No automatic Node.js or Express injection", () => {
@@ -227,5 +258,254 @@ test("Resume-Grounded Pipeline: Acceptance Criteria Verification", async (t) => 
     assert.ok(context.evidenceSnippet.length <= 150, "Evidence snippet should be bounded <= 150 chars");
     assert.ok(context.technologies.length <= 6, "Technologies list should be bounded <= 6");
     assert.ok(context.contributions.length <= 2, "Contributions should be bounded <= 2");
+  });
+
+  await t.test("8. TC-024: Empty 0-byte resume file rejection with HTTP 422", async () => {
+    // 0-byte PDF file
+    const emptyPdfFile = {
+      buffer: Buffer.alloc(0),
+      originalname: "empty_resume.pdf",
+      mimetype: "application/pdf",
+      size: 0,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(emptyPdfFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should return HTTP 422 for empty file");
+        assert.equal(
+          err.message,
+          UNREADABLE_RESUME_MESSAGE,
+          "Error message must match expected rejection text"
+        );
+        return true;
+      }
+    );
+
+    // 0-byte DOCX file
+    const emptyDocxFile = {
+      buffer: Buffer.alloc(0),
+      originalname: "empty_resume.docx",
+      mimetype: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: 0,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(emptyDocxFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should return HTTP 422 for empty docx");
+        assert.equal(
+          err.message,
+          UNREADABLE_RESUME_MESSAGE
+        );
+        return true;
+      }
+    );
+  });
+
+  await t.test("9. TC-027: Scanned single-page image-only PDF rejected with HTTP 422", async () => {
+    // Create an image-only / blank PDF containing no text elements
+    const scannedPdfBuffer = await createPdfBuffer((doc) => {
+      // PDF document with page initialized but no text calls
+    });
+
+    const scannedFile = {
+      buffer: scannedPdfBuffer,
+      originalname: "scanned_image_resume.pdf",
+      mimetype: "application/pdf",
+      size: scannedPdfBuffer.length,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(scannedFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should reject scanned image-only PDF with HTTP 422");
+        assert.equal(
+          err.message,
+          "Uploaded resume appears to be empty or unreadable text. Please provide a text-searchable PDF.",
+          "Must return exact unreadable text error message"
+        );
+        return true;
+      }
+    );
+  });
+
+  await t.test("10. TC-027: Multi-page scanned image-only PDF rejected with HTTP 422", async () => {
+    // Multi-page PDF with pages but no extractable text
+    const multiPagePdfBuffer = await createPdfBuffer((doc) => {
+      doc.addPage();
+      doc.addPage();
+    });
+
+    const multiPageScannedFile = {
+      buffer: multiPagePdfBuffer,
+      originalname: "multipage_scanned.pdf",
+      mimetype: "application/pdf",
+      size: multiPagePdfBuffer.length,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(multiPageScannedFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should reject multi-page scanned PDF with HTTP 422");
+        assert.equal(
+          err.message,
+          UNREADABLE_RESUME_MESSAGE,
+          "Must return exact unreadable text message"
+        );
+        return true;
+      }
+    );
+  });
+
+  await t.test("11. TC-027: File with only whitespace, page markers, or symbols rejected with HTTP 422", async () => {
+    // Plain text / artifact file with only '-- 1 of 1 --'
+    const artifactOnlyFile = {
+      buffer: Buffer.from("\n\n-- 1 of 1 --\n\n", "utf-8"),
+      originalname: "artifacts_only.txt",
+      mimetype: "text/plain",
+      size: 16,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(artifactOnlyFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should reject file containing only extraction artifacts");
+        assert.equal(err.message, UNREADABLE_RESUME_MESSAGE);
+        return true;
+      }
+    );
+
+    // File with only whitespace and dividers
+    const symbolsOnlyFile = {
+      buffer: Buffer.from("   \n\t  --- === ... --- \n\n", "utf-8"),
+      originalname: "symbols_only.txt",
+      mimetype: "text/plain",
+      size: 25,
+    };
+
+    await assert.rejects(
+      async () => {
+        await resumeParserService.parseResumeFile(symbolsOnlyFile);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 422, "Should reject file containing only symbols and whitespace");
+        assert.equal(err.message, UNREADABLE_RESUME_MESSAGE);
+        return true;
+      }
+    );
+  });
+
+  await t.test("12. Valid text-based PDF accepted and extracted cleanly", async () => {
+    const validPdfBuffer = await createPdfBuffer((doc) => {
+      doc.text("Sarah Connor\nPrincipal Cloud Architect\nSkills: AWS, Kubernetes, Terraform, Go, Python\nExperience: 8 years designing cloud systems.");
+    });
+
+    const validPdfFile = {
+      buffer: validPdfBuffer,
+      originalname: "sarah_connor_resume.pdf",
+      mimetype: "application/pdf",
+      size: validPdfBuffer.length,
+    };
+
+    const parsed = await resumeParserService.parseResumeFile(validPdfFile);
+    assert.ok(parsed, "Should parse valid PDF");
+    assert.ok(parsed.rawText.includes("Sarah Connor"), "Raw text must contain candidate name");
+    assert.ok(!parsed.rawText.includes("-- 1 of 1 --"), "Raw text must not contain '-- 1 of 1 --'");
+    assert.ok(parsed.extracted.skills.includes("AWS"), "Skills must include AWS");
+    assert.ok(parsed.extracted.skills.includes("Kubernetes"), "Skills must include Kubernetes");
+    assert.ok(!parsed.extracted.summaryPreview.includes("-- 1 of 1 --"), "summaryPreview must not leak page markers");
+  });
+
+  await t.test("13. Valid DOCX resume accepted and extracted cleanly", async () => {
+    const docxBuffer = createDocxBuffer(
+      "David Miller\nFull Stack Developer\nSkills: React, Node.js, TypeScript, PostgreSQL\nProjects: Cloud Management Console with React and Node.js"
+    );
+
+    const docxFile = {
+      buffer: docxBuffer,
+      originalname: "david_miller_resume.docx",
+      mimetype: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      size: docxBuffer.length,
+    };
+
+    const parsed = await resumeParserService.parseResumeFile(docxFile);
+    assert.ok(parsed, "Should parse valid DOCX resume");
+    assert.ok(parsed.rawText.includes("David Miller"), "Raw text must contain candidate name");
+    assert.ok(parsed.extracted.skills.includes("React"), "Skills must include React");
+    assert.ok(parsed.extracted.skills.includes("Node.js"), "Skills must include Node.js");
+  });
+
+  await t.test("14. Legitimate resume with zero recognized technical skills accepted (no false rejection)", async () => {
+    const nonTechPdfBuffer = await createPdfBuffer((doc) => {
+      doc.text(
+        "Marcus Aurelius\nSenior Administrator & Policy Advisor\nCore Competencies: Public Administration, Strategic Logistics, Organizational Governance, Civic Planning\nExperience: Over 15 years leading governance institutions and civil administration."
+      );
+    });
+
+    const nonTechFile = {
+      buffer: nonTechPdfBuffer,
+      originalname: "marcus_resume.pdf",
+      mimetype: "application/pdf",
+      size: nonTechPdfBuffer.length,
+    };
+
+    // Must NOT reject simply because tech skills are empty
+    const parsed = await resumeParserService.parseResumeFile(nonTechFile);
+    assert.ok(parsed, "Should accept valid non-technical resume");
+    assert.ok(parsed.rawText.includes("Marcus Aurelius"), "Raw text must contain candidate content");
+    assert.equal(parsed.extracted.skills.length, 0, "Skills may be empty without causing rejection");
+    assert.ok(parsed.extracted.summaryPreview.includes("Marcus Aurelius"), "Summary preview must contain resume content");
+  });
+
+  await t.test("15. Valid PDF with page-number extraction artifacts accepted with cleaned text", async () => {
+    const artifactPdfBuffer = await createPdfBuffer((doc) => {
+      doc.text(
+        "Emily Watson\nLead Backend Engineer\nSkills: Python, Django, Redis\nPage 1 of 2\n\nExperience:\nBuilt payment gateway processing 10k transactions/sec.\nPage 2 of 2"
+      );
+    });
+
+    const artifactPdfFile = {
+      buffer: artifactPdfBuffer,
+      originalname: "emily_watson_resume.pdf",
+      mimetype: "application/pdf",
+      size: artifactPdfBuffer.length,
+    };
+
+    const parsed = await resumeParserService.parseResumeFile(artifactPdfFile);
+    assert.ok(parsed, "Should parse valid PDF with page numbers");
+    assert.ok(parsed.extracted.skills.includes("Python"), "Should extract Python");
+    assert.ok(parsed.extracted.skills.includes("Django"), "Should extract Django");
+    // Ensure standalone 'Page 1 of 2' line was stripped from rawText
+    assert.ok(!parsed.rawText.includes("Page 1 of 2"), "Page 1 of 2 artifact should be stripped");
+    assert.ok(!parsed.extracted.summaryPreview.includes("Page 1 of 2"), "summaryPreview should not contain page marker");
+  });
+
+  await t.test("16. Unit verification: cleanExtractedText and hasMeaningfulContent", () => {
+    assert.equal(cleanExtractedText("-- 1 of 1 --"), "");
+    assert.equal(cleanExtractedText("\n\n-- 1 of 3 --\n\n\n\n-- 2 of 3 --\n\n\n\n-- 3 of 3 --\n\n"), "");
+    assert.equal(cleanExtractedText("   \t\n  "), "");
+    assert.equal(cleanExtractedText("Page 1 of 2\nPage 2 of 2"), "");
+    assert.equal(cleanExtractedText("- 1 -"), "");
+
+    assert.equal(hasMeaningfulContent("-- 1 of 1 --"), false);
+    assert.equal(hasMeaningfulContent("\n\n-- 1 of 3 --\n\n"), false);
+    assert.equal(hasMeaningfulContent("   \n\t  "), false);
+    assert.equal(hasMeaningfulContent("--- === ... ---"), false);
+    assert.equal(hasMeaningfulContent("\f\u200B\uFEFF"), false);
+
+    assert.equal(hasMeaningfulContent("Jane Doe - Consultant"), true);
+    assert.equal(hasMeaningfulContent("Art Historian"), true);
+    assert.equal(hasMeaningfulContent("A"), true);
   });
 });
