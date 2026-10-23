@@ -18,7 +18,8 @@ const CONTENT_TYPES = {
  * @returns {Promise<{ buffer: Buffer, filename: string, contentType: string }>}
  */
 export const generateInterviewReport = async ({ sessionId, user, format }) => {
-  const fmt = String(format || "").toLowerCase().trim();
+  let fmt = String(format || "pdf").toLowerCase().trim();
+  if (fmt === "xlsx") fmt = "excel";
   if (!["pdf", "excel"].includes(fmt)) {
     throw new ApiError(400, "Invalid format. Use pdf or excel.");
   }
