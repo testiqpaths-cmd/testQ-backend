@@ -20,6 +20,67 @@ const testAttemptSchema = new mongoose.Schema(
       default: null,
     },
 
+    testCategory: {
+      type: String,
+      enum: ["GENERAL", "COMPANY"],
+      default: "GENERAL",
+      index: true,
+    },
+
+    companyId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Company",
+      default: null,
+      index: true,
+    },
+
+    companyStageKey: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    companyTrackAttemptId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CompanyTrackAttempt",
+      default: null,
+      index: true,
+    },
+
+    companyTrackId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "TestSeries",
+      default: null,
+      index: true,
+    },
+
+    companyRoundOrder: {
+      type: Number,
+      default: null,
+    },
+
+    roundAttemptId: {
+      type: String,
+      default: null,
+      index: true,
+    },
+
+    roundAttemptNumber: {
+      type: Number,
+      default: 1,
+    },
+
+    isCompleted: {
+      type: Boolean,
+      default: false,
+      index: true,
+    },
+
+    isPassed: {
+      type: Boolean,
+      default: false,
+    },
+
     startedAt: {
       type: Date,
       default: Date.now,
@@ -239,5 +300,11 @@ testAttemptSchema.index({ status: 1, endsAt: 1 });
 testAttemptSchema.index({ iqRoomId: 1 });
 // Backs date-range platform/time-based analytics reports.
 testAttemptSchema.index({ createdAt: 1 });
+// Backs student company-wise results filtering
+testAttemptSchema.index({ studentId: 1, testCategory: 1, submittedAt: -1 });
+testAttemptSchema.index({ companyId: 1, studentId: 1 });
+testAttemptSchema.index({ studentId: 1, companyId: 1, companyStageKey: 1 });
+testAttemptSchema.index({ companyTrackAttemptId: 1 });
+testAttemptSchema.index({ companyTrackId: 1, studentId: 1 });
 
 export default mongoose.model("TestAttempt", testAttemptSchema);

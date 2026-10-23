@@ -5,6 +5,18 @@ const testSchema = new Schema({
   title: { type: String, required: true },
   description: { type: String },
   subjectId: { type: Types.ObjectId, ref: "Subject"},
+
+   // ✅ Company references
+  companyIds: [{ type: Types.ObjectId, ref: "Company" }],
+  companyId: { type: Types.ObjectId, ref: "Company", default: null, index: true },
+  companyStage: { type: String, default: null }, // legacy display string fallback
+  companyStageKey: { type: String, default: null, index: true }, // e.g. "ROUND_1", "ROUND_2"
+  companyStageName: { type: String, default: null }, // e.g. "Cognitive Skills", "Advanced Technical"
+  companyStageOrder: { type: Number, default: 1 }, // 1, 2, 3...
+  passingPercentage: { type: Number, default: 50 },
+  questions: [{ type: Types.ObjectId, ref: "Question" }],
+  // Immutable frozen question content snapshot captured at publish time
+  questionSnapshot: [{ type: Schema.Types.Mixed, default: undefined }],
   createdBy: {
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
@@ -20,7 +32,7 @@ const testSchema = new Schema({
     default: "SUBJECT_TOPIC",
   },
   excelBatchId: { type: String, default: null },
-  subjectIds: [{ type: Types.ObjectId, ref: "Subject", required: true }],
+  subjectIds: [{ type: Types.ObjectId, ref: "Subject"}],
   topicIds: [{ type: Types.ObjectId, ref: "Topic" }],
   difficulty: [{ type: String }],
   type: [{ type: String }],
@@ -61,6 +73,7 @@ const testSchema = new Schema({
 testSchema.index({ isDeleted: 1, isPublished: 1, isIQRoomTest: 1, createdAt: -1 });
 testSchema.index({ "createdBy.userId": 1, isDeleted: 1, createdAt: -1 });
 testSchema.index({ status: 1, isDeleted: 1 });
-testSchema.index({ testSeriesId: 1 });
+testSchema.index({ testSeriesId: 1, companyStageOrder: 1 });
+testSchema.index({ companyId: 1, isDeleted: 1 });
 
 export default model("Test", testSchema);

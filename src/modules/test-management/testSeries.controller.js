@@ -51,11 +51,183 @@ export const getSeriesStats = async (req, res) => {
   }
 };
 
-// export const createSeries = async (req, res) => {
-//   const series = await service.createSeries(req.body, req.user);
-//   res.status(201).json({ success: true, data: series });
+import Company from "../../models/company.model.js";
+import Test from "../../models/test.model.js";
 
-// };
+const ALLOWED_EXPERIENCE_LEVELS = ["FRESHER", "EXPERIENCED_1_3", "EXPERIENCED_3_PLUS", "ALL"];
+const ALLOWED_ROUND_TYPES = ["TESTS", "AI_INTERVIEW"];
+const ALLOWED_RETAKE_POLICIES = ["ALL_TESTS", "FAILED_ONLY"];
+
+export const validateHiringRoundsAndReferences = async ({ companyId, hiringRounds, experienceLevel, category }) => {
+  if (category === "COMPANY" || companyId) {
+    if (!companyId) {
+      const err = new Error("Company ID is required for Company tracks");
+      err.statusCode = 400;
+      throw err;
+    }
+    if (!mongoose.Types.ObjectId.isValid(companyId)) {
+      const err = new Error("Invalid company ID format");
+      err.statusCode = 400;
+      throw err;
+    }
+    const companyExists = await Company.findById(companyId).select("_id name").lean();
+    if (!companyExists) {
+      const err = new Error("Referenced company does not exist");
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
+  if (experienceLevel && !ALLOWED_EXPERIENCE_LEVELS.includes(experienceLevel)) {
+    const err = new Error(`Invalid experience level "${experienceLevel}". Allowed: ${ALLOWED_EXPERIENCE_LEVELS.join(", ")}`);
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (!hiringRounds || !Array.isArray(hiringRounds) || hiringRounds.length === 0) {
+    return [];
+  }
+
+  const seenOrders = new Set();
+  const seenKeys = new Set();
+  const allReferencedTestIds = [];
+  const validatedRounds = [];
+
+  for (let i = 0; i < hiringRounds.length; i++) {
+    const r = hiringRounds[i];
+    const order = Number(r.roundOrder);
+    if (!Number.isInteger(order) || order < 1) {
+      const err = new Error(`Round at index ${i} must have a valid positive integer roundOrder`);
+      err.statusCode = 400;
+      throw err;
+    }
+    if (seenOrders.has(order)) {
+      const err = new Error(`Duplicate roundOrder ${order} found in hiring rounds`);
+      err.statusCode = 400;
+      throw err;
+    }
+    seenOrders.add(order);
+
+    const roundKey = String(r.roundKey || "").trim();
+    if (!roundKey) {
+      const err = new Error(`Round at order ${order} requires a roundKey`);
+      err.statusCode = 400;
+      throw err;
+    }
+    const normKey = roundKey.toLowerCase();
+    if (seenKeys.has(normKey)) {
+      const err = new Error(`Duplicate roundKey "${roundKey}" found in hiring rounds`);
+      err.statusCode = 400;
+      throw err;
+    }
+    seenKeys.add(normKey);
+
+    const roundName = String(r.roundName || "").trim();
+    if (!roundName) {
+      const err = new Error(`Round "${roundKey}" requires a roundName`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    if (!ALLOWED_ROUND_TYPES.includes(r.roundType)) {
+      const err = new Error(`Round "${roundName}" has invalid roundType "${r.roundType}". Must be TESTS or AI_INTERVIEW`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const cutoff = r.cutoffPercentage !== undefined ? Number(r.cutoffPercentage) : 50;
+    if (Number.isNaN(cutoff) || cutoff < 0 || cutoff > 100) {
+      const err = new Error(`Round "${roundName}" cutoff percentage must be between 0 and 100`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const weight = r.weight !== undefined ? Number(r.weight) : 100;
+    if (Number.isNaN(weight) || weight < 0) {
+      const err = new Error(`Round "${roundName}" weight must be a non-negative number`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const retakePolicy = r.retakePolicy || "ALL_TESTS";
+    if (!ALLOWED_RETAKE_POLICIES.includes(retakePolicy)) {
+      const err = new Error(`Round "${roundName}" has invalid retakePolicy "${retakePolicy}"`);
+      err.statusCode = 400;
+      throw err;
+    }
+
+    const validatedRound = {
+      roundOrder: order,
+      roundKey,
+      roundName,
+      roundType: r.roundType,
+      cutoffPercentage: cutoff,
+      weight,
+      retakePolicy,
+      tests: [],
+      aiInterviewConfig: null,
+    };
+
+    if (r.roundType === "TESTS") {
+      const tests = Array.isArray(r.tests) ? r.tests : [];
+      if (tests.length === 0) {
+        const err = new Error(`Round "${roundName}" is a TESTS round and must include at least one test`);
+        err.statusCode = 400;
+        throw err;
+      }
+      for (const tId of tests) {
+        const strId = String(tId?._id || tId);
+        if (!mongoose.Types.ObjectId.isValid(strId)) {
+          const err = new Error(`Invalid test ID "${strId}" in round "${roundName}"`);
+          err.statusCode = 400;
+          throw err;
+        }
+        validatedRound.tests.push(new mongoose.Types.ObjectId(strId));
+        allReferencedTestIds.push(strId);
+      }
+    } else if (r.roundType === "AI_INTERVIEW") {
+      const cfg = r.aiInterviewConfig || {};
+      validatedRound.aiInterviewConfig = {
+        role: cfg.role ? String(cfg.role).trim() : null,
+        experienceLevel: cfg.experienceLevel || null,
+        interviewTypes: Array.isArray(cfg.interviewTypes) ? cfg.interviewTypes : [],
+        topics: Array.isArray(cfg.topics) ? cfg.topics.map((t) => String(t).trim()).filter(Boolean) : [],
+        durationMinutes: cfg.durationMinutes ? Number(cfg.durationMinutes) : 30,
+        difficulty: cfg.difficulty || "MEDIUM",
+        customRubric: cfg.customRubric || null,
+      };
+      if (
+        validatedRound.aiInterviewConfig.durationMinutes < 5 ||
+        validatedRound.aiInterviewConfig.durationMinutes > 180
+      ) {
+        const err = new Error(`Interview duration in round "${roundName}" must be between 5 and 180 minutes`);
+        err.statusCode = 400;
+        throw err;
+      }
+    }
+
+    validatedRounds.push(validatedRound);
+  }
+
+  // Validate that all referenced tests actually exist in the database and are not soft-deleted
+  if (allReferencedTestIds.length > 0) {
+    const uniqueIds = [...new Set(allReferencedTestIds)];
+    const existing = await Test.find({
+      _id: { $in: uniqueIds },
+      isDeleted: { $ne: 1 },
+    }).select("_id").lean();
+
+    const existingIdSet = new Set(existing.map((doc) => doc._id.toString()));
+    const missing = uniqueIds.filter((id) => !existingIdSet.has(id));
+    if (missing.length > 0) {
+      const err = new Error(`Referenced test(s) do not exist or have been deleted: ${missing.join(", ")}`);
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+
+  return validatedRounds;
+};
 
 export const createSeries = async (req, res, next) => {
   try {
@@ -67,6 +239,16 @@ export const createSeries = async (req, res, next) => {
       allowedStudents,
       tests = [],
       plannedTestCount,
+      category,
+      companyId,
+      mode,
+      progressionMode,
+      patternVersion,
+      passingPercentage,
+      roundsConfig,
+      experienceLevel,
+      targetRole,
+      hiringRounds,
       launchDate,
     } = req.body;
 
@@ -74,6 +256,13 @@ export const createSeries = async (req, res, next) => {
       return res
         .status(400)
         .json({ success: false, message: "Title is required" });
+    }
+
+    if (category === "COMPANY" && req.user?.role !== "IQPATH_ADMIN") {
+      return res.status(403).json({
+        success: false,
+        message: "Only IQPATH_ADMIN is authorized to create company placement tracks",
+      });
     }
 
     let cleanedPlannedTestCount;
@@ -88,10 +277,22 @@ export const createSeries = async (req, res, next) => {
       cleanedPlannedTestCount = parsed;
     }
 
-    // ✅ validate test ids (prevents mongoose crash)
+    // Validate hiring rounds and company/test references
+    const validatedHiringRounds = await validateHiringRoundsAndReferences({
+      companyId,
+      hiringRounds,
+      experienceLevel,
+      category,
+    });
+
+    // Validate test ids (prevents mongoose crash)
     const cleanedTests = (Array.isArray(tests) ? tests : []).filter((id) =>
       mongoose.Types.ObjectId.isValid(id),
     );
+
+    // Merge round tests into series.tests for unified indexing and backward compatibility
+    const roundTestIds = validatedHiringRounds.flatMap((r) => r.tests.map((t) => t.toString()));
+    const mergedTests = [...new Set([...cleanedTests.map((t) => t.toString()), ...roundTestIds])];
 
     const series = await service.createSeries(
       {
@@ -100,8 +301,18 @@ export const createSeries = async (req, res, next) => {
         visibility,
         allowedOrganizations,
         allowedStudents,
-        tests: cleanedTests,
+        tests: mergedTests,
         plannedTestCount: cleanedPlannedTestCount,
+        category: category || "GENERAL",
+        companyId: companyId && mongoose.Types.ObjectId.isValid(companyId) ? companyId : null,
+        mode: mode || "SIMULATION",
+        progressionMode: progressionMode || "SEQUENTIAL",
+        patternVersion: patternVersion || "2026",
+        passingPercentage: typeof passingPercentage === "number" ? passingPercentage : 50,
+        roundsConfig: Array.isArray(roundsConfig) ? roundsConfig : [],
+        experienceLevel: experienceLevel || "ALL",
+        targetRole: targetRole || null,
+        hiringRounds: validatedHiringRounds,
         launchDate,
       },
       req.user
@@ -114,7 +325,8 @@ export const createSeries = async (req, res, next) => {
     });
   } catch (err) {
     logger.error(`createSeries error: ${err.message}`);
-    return res.status(500).json({
+    const statusCode = err.statusCode || 500;
+    return res.status(statusCode).json({
       success: false,
       message: err.message || "Internal Server Error",
     });
@@ -159,6 +371,24 @@ export const updateSeries = async (req, res) => {
     const id = req.params.id;
     const payload = req.body || {};
 
+    // Authorization checks for ORGANIZATION users
+    if (req.user?.role === "ORGANIZATION") {
+      if (req.series?.category === "COMPANY" || payload.category === "COMPANY") {
+        return res.status(403).json({
+          success: false,
+          message: "Organization users are not permitted to modify company placement tracks",
+        });
+      }
+      const creatorId = String(req.series?.createdBy?.userId || "");
+      const requesterId = String(req.user._id || req.user.id || "");
+      if (creatorId && requesterId && creatorId !== requesterId) {
+        return res.status(403).json({
+          success: false,
+          message: "Forbidden: You can only update test series created by your organization",
+        });
+      }
+    }
+
     if (payload.plannedTestCount !== undefined && payload.plannedTestCount !== null && payload.plannedTestCount !== "") {
       const parsed = Number(payload.plannedTestCount);
       if (!Number.isInteger(parsed) || parsed < 0) {
@@ -170,11 +400,28 @@ export const updateSeries = async (req, res) => {
       payload.plannedTestCount = parsed;
     }
 
+    // Validate hiring rounds and company/test references only when hiringRounds is explicitly provided
+    if (payload.hiringRounds !== undefined) {
+      const validatedHiringRounds = await validateHiringRoundsAndReferences({
+        companyId: payload.companyId !== undefined ? payload.companyId : req.series?.companyId,
+        hiringRounds: payload.hiringRounds,
+        experienceLevel: payload.experienceLevel !== undefined ? payload.experienceLevel : req.series?.experienceLevel,
+        category: payload.category !== undefined ? payload.category : req.series?.category,
+      });
+      payload.hiringRounds = validatedHiringRounds;
+
+      if (validatedHiringRounds.length > 0) {
+        const roundTestIds = validatedHiringRounds.flatMap((r) => r.tests.map((t) => t.toString()));
+        const existingTests = Array.isArray(payload.tests) ? payload.tests.map((t) => t.toString()) : [];
+        payload.tests = [...new Set([...existingTests, ...roundTestIds])];
+      }
+    }
+
     const series = await service.updateSeries(id, payload);
 
     // If client requested schedule update, compute start/end for tests
     if (Array.isArray(payload.tests) && payload.scheduleStart) {
-      const Test = (await import('../../models/test.model.js')).default;
+      const TestModel = (await import('../../models/test.model.js')).default;
 
       // parse scheduleStart
       let cursor = new Date(payload.scheduleStart);
@@ -182,7 +429,7 @@ export const updateSeries = async (req, res) => {
 
       for (const testId of payload.tests) {
         try {
-          const test = await Test.findById(testId);
+          const test = await TestModel.findById(testId);
           if (!test) continue;
 
           const durationMinutes = Number(test.duration) || 0;
@@ -209,7 +456,8 @@ export const updateSeries = async (req, res) => {
     res.json({ success: true, data: series });
   } catch (err) {
     logger.error(`updateSeries error: ${err.message}`);
-    res.status(500).json({ success: false, message: err.message || 'Internal Server Error' });
+    const statusCode = err.statusCode || 500;
+    res.status(statusCode).json({ success: false, message: err.message || 'Internal Server Error' });
   }
 };
 

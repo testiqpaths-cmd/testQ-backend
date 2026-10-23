@@ -21,7 +21,7 @@ const shuffle = (items = []) => {
 const buildFilters = (test) => {
   const filters = {};
 
-  // Only apply subject/topic filters for SUBJECT_TOPIC source
+  // Only apply subject/topic/company filters for SUBJECT_TOPIC source
   if (test.questionSource === "SUBJECT_TOPIC") {
     if (Array.isArray(test.subjectIds) && test.subjectIds.length) {
       filters.subjectId = { $in: test.subjectIds };
@@ -29,6 +29,13 @@ const buildFilters = (test) => {
 
     if (Array.isArray(test.topicIds) && test.topicIds.length) {
       filters.topicId = { $in: test.topicIds };
+    }
+
+    // ✅ Company-wise: support singular companyId or companyIds array
+    if (test.companyId) {
+      filters.companyIds = { $in: [test.companyId] };
+    } else if (Array.isArray(test.companyIds) && test.companyIds.length) {
+      filters.companyIds = { $in: test.companyIds };
     }
   }
 
@@ -66,12 +73,22 @@ const toSafeQuestion = (question, order) => ({
 });
 
 export const selectAttemptQuestions = async (test) => {
-  const filters = buildFilters(test);
   const desiredCount = Math.max(1, Number(test.totalQuestions) || 0);
+  let questions = [];
 
-  const questions = await Question.find(filters)
-    .select("_id questionText type options correctAnswer imageUrl")
-    .lean();
+  // 1) If the test has an immutable frozen question snapshot from publish time, use it directly!
+  if (Array.isArray(test.questionSnapshot) && test.questionSnapshot.length > 0) {
+    questions = test.questionSnapshot;
+  } else if (Array.isArray(test.questions) && test.questions.length > 0) {
+    questions = await Question.find({ _id: { $in: test.questions } })
+      .select("_id questionText type options correctAnswer imageUrl")
+      .lean();
+  } else {
+    const filters = buildFilters(test);
+    questions = await Question.find(filters)
+      .select("_id questionText type options correctAnswer imageUrl")
+      .lean();
+  }
 
   const selectedQuestions = shuffle(questions).slice(0, Math.min(desiredCount, questions.length));
 

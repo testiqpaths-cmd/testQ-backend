@@ -114,6 +114,15 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
 
   await attempt.save();
 
+  if (attempt.testCategory === "COMPANY" || attempt.companyTrackAttemptId || attempt.companyTrackId) {
+    try {
+      const { updateTrackAttemptProgress } = await import("../../company-exams/companyExam.service.js");
+      await updateTrackAttemptProgress(attempt);
+    } catch (err) {
+      console.error("Failed to update company track progress in manualEvaluateAttempt:", err);
+    }
+  }
+
   // Dispatch notification to the student about the evaluation
   if (attempt.studentId) {
     const test = await Test.findById(attempt.testId).select("title");

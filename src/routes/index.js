@@ -25,6 +25,8 @@ import iqRoomRoutes from "../modules/iq-room/iqRoom.routes.js";
 import subscriptionRoutes from "../modules/subscription/routes/subscription.routes.js";
 import newsUpdatesRoutes from "../modules/news-updates/newsUpdates.routes.js";
 import examBrowserRoutes from "../modules/exam-browser/examBrowser.routes.js";
+import companyRoutes from "../modules/company/company.routes.js";
+import companyExamRoutes from "../modules/company-exams/companyExam.routes.js";
 import aiInterviewRoutes from "../ai-interview/ai-interview.routes.js";
 const router = express.Router();
 
@@ -88,6 +90,8 @@ router.use("/iq-room", iqRoomRoutes);
 router.use("/subscriptions", subscriptionRoutes);
 router.use("/news-updates", newsUpdatesRoutes);
 router.use("/exam-browser", examBrowserRoutes);
+router.use("/companies", companyRoutes);
+router.use("/company-exams", companyExamRoutes);
 router.use("/ai-interview", aiInterviewRoutes);
 
 export default router;

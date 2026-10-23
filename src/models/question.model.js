@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 const questionSchema = new mongoose.Schema({
   subjectId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: "Subject",
+    ref: "Subject", 
     required: false,
   },
   topicId: {
@@ -12,6 +12,11 @@ const questionSchema = new mongoose.Schema({
     ref: "Topic",
     required: false,
   },
+   // ✅ Added companyIds to tag questions with companies (e.g. Google, TCS, Amazon)
+  companyIds: [{
+    type: mongoose.Schema.Types.ObjectId,
+    ref: "Company",
+  }],
   questionText: {
     type: String,
     required: true,
@@ -64,5 +69,14 @@ const questionSchema = new mongoose.Schema({
 // (questionSelection.service.js), and the question-bank list/pagination
 // endpoints filter the same way — none of it indexed beyond excelBatchId.
 questionSchema.index({ subjectId: 1, topicId: 1, type: 1, difficulty: 1 });
+
+// Fast question selection by company and subject/topic
+questionSchema.index({
+  companyIds: 1,
+  subjectId: 1,
+  topicId: 1,
+  difficulty: 1,
+  type: 1,
+});
 
 export default mongoose.model("Question", questionSchema);

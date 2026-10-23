@@ -1,3 +1,7 @@
+import crypto from "node:crypto";
+if (!global.crypto) global.crypto = crypto;
+if (!globalThis.crypto) globalThis.crypto = crypto;
+
 import app from "./app.js";
 import env  from "./config/env.js";
 import { connectDB } from "./config/db.js";

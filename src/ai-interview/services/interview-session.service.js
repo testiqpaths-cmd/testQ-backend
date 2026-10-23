@@ -86,14 +86,26 @@ export class InterviewSessionService {
       ? [payload.interviewType]
       : ["technical"]).map((t) => String(t || "").toLowerCase().trim()).filter(Boolean);
 
-    // Determine scoped topics from selected tech, role, and interviewTypes
-    let topics = resumeTopicService.selectInterviewTopics({
-      role,
-      candidateSkills: techStack,
-      duration,
-      experienceLevel,
-      interviewTypes,
-    });
+    // Determine configured topics or scoped topics from selected tech, role, and interviewTypes
+    const configuredTopics = (
+      Array.isArray(payload.focusTopics) && payload.focusTopics.length
+        ? payload.focusTopics
+        : Array.isArray(payload.topics) && payload.topics.length
+        ? payload.topics
+        : []
+    )
+      .map((t) => String(t || "").toUpperCase().trim())
+      .filter(Boolean);
+
+    let topics = configuredTopics.length > 0
+      ? configuredTopics
+      : resumeTopicService.selectInterviewTopics({
+          role,
+          candidateSkills: techStack,
+          duration,
+          experienceLevel,
+          interviewTypes,
+        });
 
     // Always ensure at least 1 topic
     if (topics.length === 0) {
@@ -165,6 +177,12 @@ export class InterviewSessionService {
       topicOrder: orderedTopics,
       planId: plan._id,
       resumeData: null,
+      companyId: payload.companyId || null,
+      trackId: payload.trackId || null,
+      trackAttemptId: payload.trackAttemptId || null,
+      companyRoundOrder: payload.companyRoundOrder != null ? Number(payload.companyRoundOrder) : null,
+      companyRoundKey: payload.companyRoundKey || null,
+      customRubric: payload.customRubric || null,
     });
 
     await session.save();
@@ -268,6 +286,15 @@ export class InterviewSessionService {
       throw new ApiError(400, "Please upload a resume file (PDF or DOCX).");
     }
 
+    const additionalTopics = Array.isArray(payload.topics) && payload.topics.length > 0
+      ? payload.topics
+      : Array.isArray(payload.focusTopics) && payload.focusTopics.length > 0
+      ? payload.focusTopics
+      : [];
+    if (additionalTopics.length > 0) {
+      scopedTopics = Array.from(new Set([...additionalTopics, ...scopedTopics]));
+    }
+
     if (!scopedTopics || scopedTopics.length === 0) {
       scopedTopics = ["TECHNICAL_FUNDAMENTALS", "PROBLEM_SOLVING"];
     }
@@ -307,7 +334,13 @@ export class InterviewSessionService {
       interviewType: "RESUME",
       role,
       experienceLevel,
-      company,
+      company: payload.company || company,
+      companyId: payload.companyId || null,
+      trackId: payload.trackId || null,
+      trackAttemptId: payload.trackAttemptId || null,
+      companyRoundOrder: payload.companyRoundOrder != null ? Number(payload.companyRoundOrder) : null,
+      companyRoundKey: payload.companyRoundKey || null,
+      customRubric: payload.customRubric || null,
       techStack: resumeData?.extracted?.skills || [],
       interviewTypes,
       duration,
@@ -1310,11 +1343,33 @@ export class InterviewSessionService {
         }
 
         logger.info(`Interview force-completed: ${reloaded.interviewId} by user ${user._id}`);
-        return interviewResultsService.getInterviewResults(reloaded.interviewId, user);
+        const results = await interviewResultsService.getInterviewResults(reloaded.interviewId, user);
+        if (reloaded.trackAttemptId || reloaded.trackId) {
+          try {
+            const { updateTrackAttemptFromInterviewSession } = await import(
+              "../../modules/company-exams/companyExam.service.js"
+            );
+            await updateTrackAttemptFromInterviewSession(reloaded, results);
+          } catch (trackErr) {
+            logger.warn(`Failed to update company track progress from interview: ${trackErr.message}`);
+          }
+        }
+        return results;
       }
     }
 
-    return interviewResultsService.getInterviewResults(session.interviewId, user);
+    const results = await interviewResultsService.getInterviewResults(session.interviewId, user);
+    if (session.trackAttemptId || session.trackId) {
+      try {
+        const { updateTrackAttemptFromInterviewSession } = await import(
+          "../../modules/company-exams/companyExam.service.js"
+        );
+        await updateTrackAttemptFromInterviewSession(session, results);
+      } catch (trackErr) {
+        logger.warn(`Failed to update company track progress from interview: ${trackErr.message}`);
+      }
+    }
+    return results;
   }
 }
 
