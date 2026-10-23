@@ -4,6 +4,45 @@ import logger from "../../config/logger.js";
 
 const require = createRequire(import.meta.url);
 
+export const UNREADABLE_RESUME_MESSAGE =
+  "Uploaded resume appears to be empty or unreadable text. Please provide a text-searchable PDF.";
+
+/**
+ * Strips PDF/DOCX extraction artifacts, page markers, and non-printable noise.
+ * @param {string} text
+ * @returns {string}
+ */
+export function cleanExtractedText(text) {
+  if (!text || typeof text !== "string") return "";
+  return text
+    // Remove pdf-parse page joiners, e.g. "-- 1 of 1 --", "-- 2 of 5 --"
+    .replace(/--\s*\d+\s*(?:of|\/)\s*\d+\s*--/gi, "")
+    // Remove un-interpolated template joiner if present
+    .replace(/--\s*page_number\s*of\s*total_number\s*--/gi, "")
+    // Remove standalone page markers, e.g. "Page 1 of 2", "Page 1", "- 1 -", "-- 1 --", "1 of 2"
+    .replace(/(?:^|\r?\n)\s*(?:page\s+)?\d+\s*(?:of|\/)\s*\d+\s*(?=\r?\n|$)/gi, "")
+    .replace(/(?:^|\r?\n)\s*page\s+\d+\s*(?=\r?\n|$)/gi, "")
+    .replace(/(?:^|\r?\n)\s*-{1,2}\s*\d+\s*-{1,2}\s*(?=\r?\n|$)/gi, "")
+    // Remove control/non-printable and zero-width characters (form feeds, BOM, etc.)
+    .replace(/[\f\u0000-\u001F\u200B-\u200D\uFEFF]/g, " ")
+    .trim();
+}
+
+/**
+ * Validates whether the text contains meaningful candidate content rather than
+ * only extraction artifacts, whitespace, or non-word symbols.
+ * Avoids arbitrary character count thresholds so short legitimate resumes pass.
+ * @param {string} text
+ * @returns {boolean}
+ */
+export function hasMeaningfulContent(text) {
+  const cleaned = cleanExtractedText(text);
+  if (!cleaned) return false;
+  // A meaningful resume contains letters or numbers.
+  // Scanned/image-only PDFs or noise-only files contain zero letters/numbers once markers are removed.
+  return /[\p{L}\p{N}]/u.test(cleaned);
+}
+
 let pdfPkg = null;
 try {
   pdfPkg = require("pdf-parse");
@@ -61,6 +100,10 @@ export class ResumeParserService {
       throw new ApiError(400, "No resume file provided.");
     }
 
+    if (file.size === 0 || file.buffer.length === 0) {
+      throw new ApiError(422, UNREADABLE_RESUME_MESSAGE);
+    }
+
     const { mimetype, originalname, size, buffer } = file;
     const extension = (originalname || "").split(".").pop().toLowerCase();
 
@@ -79,7 +122,7 @@ export class ResumeParserService {
         }
         if (pdfPkg?.PDFParse) {
           const parser = new pdfPkg.PDFParse({ data: buffer });
-          const textResult = await parser.getText();
+          const textResult = await parser.getText({ pageJoiner: "\n" });
           rawText = typeof textResult === "string" ? textResult : textResult?.text || "";
           if (parser.destroy) await parser.destroy();
         } else if (typeof pdfPkg === "function") {
@@ -114,21 +157,23 @@ export class ResumeParserService {
     } catch (err) {
       logger.error(`Resume file parsing failed: ${err.message}`);
       if (err instanceof ApiError) throw err;
+      if (err.message && /empty|zero bytes/i.test(err.message)) {
+        throw new ApiError(422, UNREADABLE_RESUME_MESSAGE);
+      }
       throw new ApiError(422, `Failed to parse resume content: ${err.message}`);
     }
 
-    if (!rawText.trim()) {
-      throw new ApiError(
-        422,
-        "Uploaded resume appears to be empty or unreadable text."
-      );
+    const cleanedText = cleanExtractedText(rawText);
+
+    if (!hasMeaningfulContent(cleanedText)) {
+      throw new ApiError(422, UNREADABLE_RESUME_MESSAGE);
     }
 
     // Extract rich, evidence-grounded candidate profile
-    const extracted = await this.extractStructuredProfile(rawText, options);
+    const extracted = await this.extractStructuredProfile(cleanedText, options);
 
     return {
-      rawText: rawText.trim(),
+      rawText: cleanedText,
       filename: originalname,
       sizeBytes: size,
       extracted,

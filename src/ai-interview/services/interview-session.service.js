@@ -86,14 +86,26 @@ export class InterviewSessionService {
       ? [payload.interviewType]
       : ["technical"]).map((t) => String(t || "").toLowerCase().trim()).filter(Boolean);
 
-    // Determine scoped topics from selected tech, role, and interviewTypes
-    let topics = resumeTopicService.selectInterviewTopics({
-      role,
-      candidateSkills: techStack,
-      duration,
-      experienceLevel,
-      interviewTypes,
-    });
+    // Determine configured topics or scoped topics from selected tech, role, and interviewTypes
+    const configuredTopics = (
+      Array.isArray(payload.focusTopics) && payload.focusTopics.length
+        ? payload.focusTopics
+        : Array.isArray(payload.topics) && payload.topics.length
+        ? payload.topics
+        : []
+    )
+      .map((t) => String(t || "").toUpperCase().trim())
+      .filter(Boolean);
+
+    let topics = configuredTopics.length > 0
+      ? configuredTopics
+      : resumeTopicService.selectInterviewTopics({
+          role,
+          candidateSkills: techStack,
+          duration,
+          experienceLevel,
+          interviewTypes,
+        });
 
     // Always ensure at least 1 topic
     if (topics.length === 0) {
@@ -165,6 +177,12 @@ export class InterviewSessionService {
       topicOrder: orderedTopics,
       planId: plan._id,
       resumeData: null,
+      companyId: payload.companyId || null,
+      trackId: payload.trackId || null,
+      trackAttemptId: payload.trackAttemptId || null,
+      companyRoundOrder: payload.companyRoundOrder != null ? Number(payload.companyRoundOrder) : null,
+      companyRoundKey: payload.companyRoundKey || null,
+      customRubric: payload.customRubric || null,
     });
 
     await session.save();
@@ -268,6 +286,15 @@ export class InterviewSessionService {
       throw new ApiError(400, "Please upload a resume file (PDF or DOCX).");
     }
 
+    const additionalTopics = Array.isArray(payload.topics) && payload.topics.length > 0
+      ? payload.topics
+      : Array.isArray(payload.focusTopics) && payload.focusTopics.length > 0
+      ? payload.focusTopics
+      : [];
+    if (additionalTopics.length > 0) {
+      scopedTopics = Array.from(new Set([...additionalTopics, ...scopedTopics]));
+    }
+
     if (!scopedTopics || scopedTopics.length === 0) {
       scopedTopics = ["TECHNICAL_FUNDAMENTALS", "PROBLEM_SOLVING"];
     }
@@ -307,7 +334,13 @@ export class InterviewSessionService {
       interviewType: "RESUME",
       role,
       experienceLevel,
-      company,
+      company: payload.company || company,
+      companyId: payload.companyId || null,
+      trackId: payload.trackId || null,
+      trackAttemptId: payload.trackAttemptId || null,
+      companyRoundOrder: payload.companyRoundOrder != null ? Number(payload.companyRoundOrder) : null,
+      companyRoundKey: payload.companyRoundKey || null,
+      customRubric: payload.customRubric || null,
       techStack: resumeData?.extracted?.skills || [],
       interviewTypes,
       duration,
@@ -449,7 +482,7 @@ export class InterviewSessionService {
   }
 
   async #startInterviewImpl(sessionId, user) {
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     // Idempotency: If already completed, return terminal state safely
     if (session.interviewState === InterviewState.COMPLETED) {
@@ -574,7 +607,7 @@ export class InterviewSessionService {
   }
 
   async #submitAnswerImpl(sessionId, user, payload) {
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     // 1. State Gate: Accept answers when IN_PROGRESS or PROCESSING_ANSWER.
     // If the session is already in WAITING_FOR_NEXT_QUESTION (e.g. from an earlier socket call,
@@ -806,7 +839,7 @@ export class InterviewSessionService {
     let t5Wall = null;
     let t6Wall = null;
 
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     // 1. Terminal / Inactive State Gate
     if (session.interviewState === InterviewState.COMPLETED) {
@@ -895,9 +928,7 @@ export class InterviewSessionService {
       const tReloadStart = performance.now();
       const reloaded = await InterviewSession.findById(session._id);
       if (reloaded) {
-        session.candidatePerformance = reloaded.candidatePerformance;
-        session.coverageState = reloaded.coverageState;
-        session.interviewState = reloaded.interviewState;
+        session = reloaded;
       }
       lastTurn = await InterviewTurn.findById(lastTurn._id);
       const stateReloadMs = Math.round(performance.now() - tReloadStart);
@@ -924,7 +955,26 @@ export class InterviewSessionService {
 
     const finalizeTurnMetrics = async (newQuestion = null) => {
       const tDbStart = performance.now();
-      await session.save();
+      try {
+        await session.save();
+      } catch (err) {
+        if (err.name === "VersionError" || err.message?.includes("version")) {
+          const fresh = await InterviewSession.findById(session._id);
+          if (fresh) {
+            fresh.interviewState = session.interviewState;
+            fresh.timeRemaining = session.timeRemaining;
+            fresh.endTime = session.endTime;
+            fresh.currentQuestion = session.currentQuestion;
+            if (Array.isArray(session.coverageState)) {
+              fresh.coverageState = session.coverageState;
+            }
+            await fresh.save().catch(() => {});
+            session = fresh;
+          }
+        } else {
+          throw err;
+        }
+      }
       dbMs = Math.round(performance.now() - tDbStart);
       const t7Wall = Date.now();
 
@@ -1003,6 +1053,23 @@ export class InterviewSessionService {
         session.coverageState.forEach((c) => {
           if (c.status === "IN_PROGRESS") c.status = "EVALUATED";
         });
+      }
+
+      if (
+        lastTurn &&
+        !lastTurn.candidateAnswer &&
+        lastTurn.processingState !== "ANALYZED" &&
+        lastTurn.processingState !== "EVALUATED"
+      ) {
+        lastTurn.answerStatus = "SKIPPED";
+        lastTurn.relevanceScore = 0;
+        lastTurn.correctnessScore = 0;
+        lastTurn.completenessScore = 0;
+        lastTurn.confidence = 0;
+        lastTurn.feedbackSummary = "Question skipped — interview ended before this question was answered.";
+        lastTurn.processingState = "EVALUATED";
+        lastTurn.analysisTimestamp = new Date();
+        await lastTurn.save().catch(() => {});
       }
 
       t6Wall = Date.now();
@@ -1198,7 +1265,7 @@ export class InterviewSessionService {
   }
 
   async #completeInterviewImpl(sessionId, user) {
-    const session = await this.getSessionById(sessionId, user);
+    let session = await this.getSessionById(sessionId, user);
 
     const TERMINAL_STATES = [
       InterviewState.COMPLETED,
@@ -1206,6 +1273,16 @@ export class InterviewSessionService {
       InterviewState.CANCELLED,
       InterviewState.EXPIRED,
     ];
+
+    if (
+      session.interviewState === InterviewState.CREATED ||
+      session.interviewState === InterviewState.READY
+    ) {
+      throw new ApiError(
+        400,
+        `Cannot complete interview: session has not been started (state: ${session.interviewState}).`
+      );
+    }
 
     if (!TERMINAL_STATES.includes(session.interviewState)) {
       const turn = await InterviewTurn.findOne({ sessionId: session._id }).sort({
@@ -1266,11 +1343,33 @@ export class InterviewSessionService {
         }
 
         logger.info(`Interview force-completed: ${reloaded.interviewId} by user ${user._id}`);
-        return interviewResultsService.getInterviewResults(reloaded.interviewId, user);
+        const results = await interviewResultsService.getInterviewResults(reloaded.interviewId, user);
+        if (reloaded.trackAttemptId || reloaded.trackId) {
+          try {
+            const { updateTrackAttemptFromInterviewSession } = await import(
+              "../../modules/company-exams/companyExam.service.js"
+            );
+            await updateTrackAttemptFromInterviewSession(reloaded, results);
+          } catch (trackErr) {
+            logger.warn(`Failed to update company track progress from interview: ${trackErr.message}`);
+          }
+        }
+        return results;
       }
     }
 
-    return interviewResultsService.getInterviewResults(session.interviewId, user);
+    const results = await interviewResultsService.getInterviewResults(session.interviewId, user);
+    if (session.trackAttemptId || session.trackId) {
+      try {
+        const { updateTrackAttemptFromInterviewSession } = await import(
+          "../../modules/company-exams/companyExam.service.js"
+        );
+        await updateTrackAttemptFromInterviewSession(session, results);
+      } catch (trackErr) {
+        logger.warn(`Failed to update company track progress from interview: ${trackErr.message}`);
+      }
+    }
+    return results;
   }
 }
 

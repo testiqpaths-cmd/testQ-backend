@@ -89,6 +89,7 @@ export class AiAnswerAnalysisService {
     interviewState = null,
     previousTurns = [],
     interviewId = null,
+    customRubric = null,
   }) {
     const resolvedType = resolveInterviewTypeForTopic(topic, [interviewType]);
     const typeConfig = getTypePersonaAndConfig(resolvedType, role, experienceLevel);
@@ -111,7 +112,7 @@ export class AiAnswerAnalysisService {
     const systemPrompt = `${typeConfig.persona}
 STRICT TASK:
 Analyze the candidate's answer for the question asked in this ${resolvedType} interview.
-Assess ${roleEvaluationCriteria}.
+Assess ${roleEvaluationCriteria}.${customRubric ? `\n\nCUSTOM COMPANY EVALUATION RUBRIC:\n${customRubric}\nIncorporate this company-specific rubric into your assessment and scoring.` : ""}
 
 STRICT JSON OUTPUT FORMAT:
 {

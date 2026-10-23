@@ -136,12 +136,16 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   if (hasSubjective) {
     attempt.status = "SUBMITTED";
     attempt.resultStatus = attempt.expireReason === "CHEATING" ? "FAIL" : null;
+    attempt.isCompleted = true;
+    attempt.isPassed = false;
   } else {
     attempt.status = "EVALUATED";
     attempt.resultStatus =
       attempt.expireReason === "CHEATING"
         ? "FAIL"
         : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+    attempt.isCompleted = true;
+    attempt.isPassed = attempt.resultStatus === "PASS";
   }
 
   if (!attempt.iqRoomId) {
@@ -164,5 +168,15 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   }
 
   await attempt.save();
+
+  if (attempt.testCategory === "COMPANY" || attempt.companyTrackAttemptId || attempt.companyTrackId) {
+    try {
+      const { updateTrackAttemptProgress } = await import("../../company-exams/companyExam.service.js");
+      await updateTrackAttemptProgress(attempt);
+    } catch (err) {
+      console.error("Failed to update company track progress in evaluateObjectiveForAttempt:", err);
+    }
+  }
+
   return attempt;
 };

@@ -270,6 +270,7 @@ export class AnswerAnalysisService {
         interviewState,
         previousTurns: previousSessionTurns,
         interviewId: session.interviewId,
+        customRubric: session.customRubric || null,
       });
 
       finalStatus = aiResult.answerStatus || AnswerStatus.PARTIAL;

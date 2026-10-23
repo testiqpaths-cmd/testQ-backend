@@ -341,6 +341,39 @@ const interviewSessionSchema = new Schema(
       ref: "User",
       default: null,
     },
+
+    // Optional Company-Wise Hiring Track associations
+    companyId: {
+      type: Types.ObjectId,
+      ref: "Company",
+      default: null,
+      index: true,
+    },
+    trackId: {
+      type: Types.ObjectId,
+      ref: "TestSeries",
+      default: null,
+      index: true,
+    },
+    trackAttemptId: {
+      type: Types.ObjectId,
+      ref: "CompanyTrackAttempt",
+      default: null,
+      index: true,
+    },
+    customRubric: {
+      type: String,
+      default: null,
+    },
+    companyRoundOrder: {
+      type: Number,
+      default: null,
+      index: true,
+    },
+    companyRoundKey: {
+      type: String,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -358,6 +391,7 @@ interviewSessionSchema.index(
 // Helpful compound indexes
 interviewSessionSchema.index({ userId: 1, createdAt: -1 });
 interviewSessionSchema.index({ userId: 1, interviewState: 1 });
+interviewSessionSchema.index({ trackAttemptId: 1, companyRoundOrder: 1 });
 
 export const InterviewSession =
   mongoose.models.InterviewSession ||

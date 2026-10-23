@@ -70,6 +70,53 @@ export class InterviewResultsService {
     return Math.min(max, Math.max(min, value));
   }
 
+  /**
+   * Calculates the Industry Readiness Score based on:
+   * readinessScore = clamp(
+   *   0.7 * score +
+   *   0.15 * (completionRate * 100) +
+   *   0.15 * (coverageBreadth * 100),
+   *   0,
+   *   100
+   * );
+   *
+   * Formulated for TC-221:
+   * Test input: score = 80, completionRate = 1.0, coverageBreadth = 0.8
+   * Expected: 0.7*80 (56) + 0.15*100 (15) + 0.15*80 (12) = 83.
+   * Handles decimal (0..1) vs percentage (0..100) scale without double multiplication.
+   * Preserves valid zeros and clamps between 0 and 100.
+   */
+  calculateReadinessScore(scoreOrObj, completionRateArg, coverageBreadthArg) {
+    let score;
+    let completionRate;
+    let coverageBreadth;
+
+    if (scoreOrObj && typeof scoreOrObj === "object") {
+      score = scoreOrObj.score;
+      completionRate = scoreOrObj.completionRate;
+      coverageBreadth = scoreOrObj.coverageBreadth ?? scoreOrObj.coverage ?? scoreOrObj.coveragePercentage;
+    } else {
+      score = scoreOrObj;
+      completionRate = completionRateArg;
+      coverageBreadth = coverageBreadthArg;
+    }
+
+    const scoreNum = typeof score === "number" && Number.isFinite(score) ? score : 0;
+
+    let compPercent = 0;
+    if (typeof completionRate === "number" && Number.isFinite(completionRate)) {
+      compPercent = completionRate > 1 ? completionRate : completionRate * 100;
+    }
+
+    let covPercent = 0;
+    if (typeof coverageBreadth === "number" && Number.isFinite(coverageBreadth)) {
+      covPercent = coverageBreadth > 1 ? coverageBreadth : coverageBreadth * 100;
+    }
+
+    const rawScore = 0.7 * scoreNum + 0.15 * compPercent + 0.15 * covPercent;
+    return this.clamp(this.round(rawScore), 0, 100);
+  }
+
   isTurnSkippedOrUnanswered(turn) {
     if (!turn) return true;
     if (turn.answerStatus === "SKIPPED") return true;
@@ -185,14 +232,14 @@ export class InterviewResultsService {
       // If no questions were asked in this competency (or not attended), score is 0.
       scores[bucket] = turnsInBucket.length
         ? this.round(turnsInBucket.reduce((sum, t) => sum + this.turnScore(t), 0) / turnsInBucket.length)
-        : 0;
+        : null;
     }
 
     const answeredTurns = includedTurns.filter((t) => !this.isTurnSkippedOrUnanswered(t));
     const confidenceValues = answeredTurns.map((t) => t.confidence ?? 0);
     scores.confidence = confidenceValues.length
       ? this.round(confidenceValues.reduce((a, b) => a + b, 0) / confidenceValues.length)
-      : 0;
+      : null;
 
     return scores;
   }
@@ -217,6 +264,7 @@ export class InterviewResultsService {
       // genuine signal either way.
       if (bucket !== "confidence" && !mappedBuckets.has(bucket)) continue;
       const score = competencyScores[bucket];
+      if (score === null || score === undefined || typeof score !== "number" || Number.isNaN(score)) continue;
       if (score >= 75) strengths.push(LABELS[bucket]);
       else if (score < 50) weaknesses.push(LABELS[bucket]);
     }
@@ -264,25 +312,53 @@ export class InterviewResultsService {
     );
 
     const answeredTurns = includedTurns.filter((t) => !this.isTurnSkippedOrUnanswered(t));
-    const isUnattended = includedTurns.length === 0 || answeredTurns.length === 0;
+
+    const isUnattended = typeof session.isUnattended === "boolean"
+      ? session.isUnattended
+      : (includedTurns.length > 0
+          ? answeredTurns.length === 0
+          : (session.score === undefined && session.resultsSummary?.score === undefined));
 
     const score = includedTurns.length
       ? this.round(includedTurns.reduce((sum, t) => sum + this.turnScore(t), 0) / includedTurns.length)
-      : 0;
+      : (typeof session.score === "number"
+          ? session.score
+          : (typeof session.resultsSummary?.score === "number" ? session.resultsSummary.score : 0));
 
-    const completionRate = this.clamp(answeredTurns.length / (plan?.globalQuestionLimit || 10), 0, 1);
-    const coverageValues = (session.coverageState || []).map((c) => c.coveragePercentage || 0);
-    const coverageBreadth = coverageValues.length
-      ? coverageValues.reduce((a, b) => a + b, 0) / coverageValues.length / 100
-      : 0;
+    let completionRate;
+    if (typeof session.completionRate === "number") {
+      completionRate = session.completionRate;
+    } else if (typeof session.resultsSummary?.completionRate === "number") {
+      completionRate = session.resultsSummary.completionRate;
+    } else {
+      const limit = plan?.globalQuestionLimit || session.questionCount || 10;
+      completionRate = limit > 0 ? this.clamp(answeredTurns.length / limit, 0, 1) : 0;
+    }
 
-    const readinessScore = isUnattended || score === 0
+    let coverageBreadth;
+    if (typeof session.coverageBreadth === "number") {
+      coverageBreadth = session.coverageBreadth;
+    } else if (typeof session.resultsSummary?.coverageBreadth === "number") {
+      coverageBreadth = session.resultsSummary.coverageBreadth;
+    } else if (typeof session.coveragePercentage === "number") {
+      coverageBreadth = session.coveragePercentage > 1 ? session.coveragePercentage / 100 : session.coveragePercentage;
+    } else if (Array.isArray(session.coverageState) && session.coverageState.length > 0) {
+      const coverageValues = session.coverageState.map((c) => {
+        if (typeof c.coveragePercentage === "number") return c.coveragePercentage;
+        if (typeof c.coverageBreadth === "number") return c.coverageBreadth;
+        if (typeof c.coverage === "number") return c.coverage;
+        if (c.status === "EVALUATED" || c.status === "IN_PROGRESS" || (c.questionsAsked || 0) > 0) return 100;
+        return 0;
+      });
+      const avg = coverageValues.reduce((a, b) => a + b, 0) / coverageValues.length;
+      coverageBreadth = avg > 1 ? avg / 100 : avg;
+    } else {
+      coverageBreadth = 0;
+    }
+
+    const readinessScore = isUnattended
       ? 0
-      : this.clamp(
-          this.round(score * 0.7 + completionRate * 100 * 0.15 + coverageBreadth * 100 * 0.15),
-          0,
-          100
-        );
+      : this.calculateReadinessScore(score, completionRate, coverageBreadth);
 
     const mappedBuckets = new Set(
       includedTurns.map((t) => this.mapToBucket(t.topic, t.questionType))
@@ -302,14 +378,14 @@ export class InterviewResultsService {
         assessmentProfile.competencies.find((c) => c.key === "technicalKnowledge")?.score ??
         legacyCompetencyScores.technicalSkills,
       practicalApplication:
-        assessmentProfile.competencies.find((c) => c.key === "practicalApplication")?.score ?? 0,
+        assessmentProfile.competencies.find((c) => c.key === "practicalApplication")?.score ?? null,
       projectUnderstanding:
         assessmentProfile.competencies.find((c) => c.key === "projectUnderstanding")?.score ??
         legacyCompetencyScores.projects,
       learningAndAdaptability:
-        assessmentProfile.competencies.find((c) => c.key === "learningAndAdaptability")?.score ?? 0,
+        assessmentProfile.competencies.find((c) => c.key === "learningAndAdaptability")?.score ?? null,
       codeQualityAndTesting:
-        assessmentProfile.competencies.find((c) => c.key === "codeQualityAndTesting")?.score ?? 0,
+        assessmentProfile.competencies.find((c) => c.key === "codeQualityAndTesting")?.score ?? null,
     };
 
     const { strengths: rawStrengths, weaknesses: rawWeaknesses } =
@@ -421,7 +497,10 @@ export class InterviewResultsService {
       status: session.interviewState,
       score,
       readinessScore,
+      completionRate,
+      coverageBreadth,
       competencyScores,
+      scores: competencyScores,
       assessmentProfile,
       competencyProfile: assessmentProfile.competencyProfile,
       profileVersion: assessmentProfile.profileVersion,
@@ -461,17 +540,20 @@ export class InterviewResultsService {
       for (const bucket of COMPETENCY_BUCKETS) {
         if (bucket === "confidence") continue;
         if (!mappedBuckets.has(bucket)) {
-          sanitizedComp[bucket] = 0;
+          sanitizedComp[bucket] = null;
         }
       }
       const answeredTurns = turns.filter((t) => !this.isTurnSkippedOrUnanswered(t));
-      if (answeredTurns.length === 0) {
+      if (answeredTurns.length === 0 && turns.length > 0) {
         sanitizedComp.confidence = 0;
         for (const bucket of COMPETENCY_BUCKETS) {
-          sanitizedComp[bucket] = 0;
+          if (mappedBuckets.has(bucket)) {
+            sanitizedComp[bucket] = 0;
+          }
         }
       }
       updated.competencyScores = sanitizedComp;
+      updated.scores = sanitizedComp;
     }
 
     // 2. Sanitize questions: any skipped or unattempted question must have score = 0
@@ -491,14 +573,27 @@ export class InterviewResultsService {
       });
     }
 
-    // 3. If interview was unattended (0 answered turns), score and readiness must be 0
+    // 3. If interview was unattended, score and readiness must be 0
     const answeredTurns = turns.filter((t) => !this.isTurnSkippedOrUnanswered(t));
-    if (turns.length === 0 || answeredTurns.length === 0) {
+    const isUnattended = turns.length > 0
+      ? answeredTurns.length === 0
+      : Boolean(updated.isUnattended);
+
+    if (isUnattended) {
       updated.score = 0;
       updated.readinessScore = 0;
       if (updated.competencyScores) {
         for (const bucket of COMPETENCY_BUCKETS) {
-          updated.competencyScores[bucket] = 0;
+          if (mappedBuckets.has(bucket)) {
+            updated.competencyScores[bucket] = 0;
+          }
+        }
+      }
+      if (updated.scores) {
+        for (const bucket of COMPETENCY_BUCKETS) {
+          if (mappedBuckets.has(bucket)) {
+            updated.scores[bucket] = 0;
+          }
         }
       }
       if (updated.assessmentProfile) {
@@ -551,6 +646,18 @@ export class InterviewResultsService {
     // First (and only) time results are computed for this session — tell
     // the candidate their report is ready. Non-fatal.
     this.notifyReportReady(session, results);
+
+    // If this session is part of a company-track attempt, sync progression
+    if (session.trackAttemptId || session.trackId) {
+      try {
+        const { updateTrackAttemptFromInterviewSession } = await import(
+          "../../modules/company-exams/companyExam.service.js"
+        );
+        await updateTrackAttemptFromInterviewSession(session, results);
+      } catch (err) {
+        logger.warn(`Failed to update company track progress from interview ${session.interviewId}: ${err.message}`);
+      }
+    }
 
     return results;
   }

@@ -222,9 +222,9 @@ export class InterviewAdminAnalyticsService {
         if (clean) weaknessTally.set(clean, (weaknessTally.get(clean) || 0) + 1);
       });
 
-      const compScores = s.resultsSummary?.competencyScores || {};
+      const compScores = s.resultsSummary?.competencyScores || s.resultsSummary?.scores || {};
       Object.keys(competencyBucketsTally).forEach((k) => {
-        if (typeof compScores[k] === "number" && compScores[k] > 0) {
+        if (typeof compScores[k] === "number" && !Number.isNaN(compScores[k])) {
           competencyBucketsTally[k].scores.push(compScores[k]);
           competencyBucketsTally[k].count += 1;
         }

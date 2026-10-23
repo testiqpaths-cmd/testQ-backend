@@ -3,6 +3,8 @@ import mongoose from "mongoose";
 import { ApiError } from "../../common/exceptions/ApiError.js";
 import Question from "../../models/question.model.js";
 import UserModel from "../../models/user.model.js";
+import Subject from "../../models/subject.model.js";
+import Topic from "../../models/topic.model.js";
 import { uploadBufferToCloudinary } from "../../common/utils/cloudinary.js";
 import { validateQuestion } from "./questions.validator.js";
 import {
@@ -21,6 +23,7 @@ import {
   normalizeDifficulty,
   normalizeQuestionType,
   parseOptions,
+  resolveOrCreateCompanyId,
   resolveOrCreateSubjectId,
   resolveOrCreateTopicId,
 } from "./utils/questions.utils.js";
@@ -115,6 +118,7 @@ export const uploadQuestionsExcelService = async ({
   subject: fallbackSubjectValue,
   topicId: formTopicValue,
   topic: fallbackTopicValue,
+  companyIds: formCompanyIds = [], // ✅ Added companyIds support
   excelBatchId: clientBatchId,
   excelBatchName: clientBatchName,
   user = null,
@@ -139,6 +143,13 @@ export const uploadQuestionsExcelService = async ({
     : null;
   const hasFormDefaults = Boolean(defaultSubjectId && defaultTopicId);
 
+  // Normalize companyIds list for all rows in this batch
+  const batchCompanyIds = Array.isArray(formCompanyIds)
+    ? formCompanyIds
+    : formCompanyIds
+    ? [formCompanyIds]
+    : [];
+
   const questions = [];
   const rowErrors = [];
 
@@ -153,6 +164,22 @@ export const uploadQuestionsExcelService = async ({
       "subjectName",
       "Subject Name",
     ]);
+
+    const companyValue = read([
+  "company",
+  "companyName",
+  "targetCompany",
+]);
+    // ✅ Resolve the row's own Company column — same as
+    // resolveOrCreateSubjectId/resolveOrCreateTopicId below, an unrecognized
+    // name creates a new Company rather than being silently dropped — and
+    // merge it into this row's companyIds alongside whatever batch-level
+    // companyIds were selected for the whole upload.
+    const rowCompanyId = await resolveOrCreateCompanyId(companyValue);
+    const rowCompanyIds =
+      rowCompanyId && !batchCompanyIds.map(String).includes(String(rowCompanyId))
+        ? [...batchCompanyIds, rowCompanyId]
+        : batchCompanyIds;
 
     const rowTopicRaw = read([
       "topicId",
@@ -219,6 +246,7 @@ export const uploadQuestionsExcelService = async ({
     const validationErrors = validateQuestion({
       subjectId,
       topicId,
+      companyIds: rowCompanyIds,
       questionText,
       type,
       options,
@@ -235,6 +263,7 @@ export const uploadQuestionsExcelService = async ({
       __row: rowNumber,
       subjectId,
       topicId,
+      companyIds: rowCompanyIds, // ✅ Attached company tags (batch-level + row's own Company column)
       questionText,
       type,
       options,
@@ -266,11 +295,19 @@ export const uploadQuestionsExcelService = async ({
     uniqueQuestions.push(question);
   }
 
-  const pairKeys = [...new Set(uniqueQuestions.map((q) => `${q.subjectId}|${q.topicId}`))];
-  const pairFilters = pairKeys.map((pair) => {
-    const [subjectId, topicId] = pair.split("|");
-    return { subjectId, topicId };
-  });
+  // Deduplicate on a Map (not a stringified-then-split key) so a missing
+  // subjectId/topicId — legitimate now that a question can be company-only —
+  // stays the real `null` here instead of round-tripping through the string
+  // "null", which Mongoose then rejects as an invalid ObjectId when this
+  // filter hits Question.find() below.
+  const pairFilterByKey = new Map();
+  for (const q of uniqueQuestions) {
+    const key = `${q.subjectId}|${q.topicId}`;
+    if (!pairFilterByKey.has(key)) {
+      pairFilterByKey.set(key, { subjectId: q.subjectId ?? null, topicId: q.topicId ?? null });
+    }
+  }
+  const pairFilters = [...pairFilterByKey.values()];
 
   const existingQuestions = pairFilters.length
     ? await Question.find({ $or: pairFilters })
@@ -388,12 +425,6 @@ export const getQuestionsByExcelBatchService = async ({ userId, batchId, quantit
   return query;
 };
 
-// The Question schema has no organizationId field — an organization's
-// question authorship can only be recovered by joining createdBy -> the
-// creator's own User.organizationId. Used to scope the "Questions" page
-// (mine=true) to only this organization's own uploaded/created questions,
-// without touching test-creation's question-picker, which must keep
-// drawing from the full shared bank.
 const resolveOwnOrgQuestionAuthorIds = async (requester) => {
   let orgId = requester.organizationId || null;
   if (!orgId) {
@@ -408,6 +439,7 @@ export const getAllQuestionsService = async (query = {}, requester = null) => {
   const {
     subjectId,
     topicId,
+    companyId, // ✅ Support companyId
     type,
     difficulty,
     page = 1,
@@ -419,20 +451,48 @@ export const getAllQuestionsService = async (query = {}, requester = null) => {
   const filters = {};
   const subjectIds = toQueryList(subjectId, query.subjectIds, query["subjectId[]"], query["subjectIds[]"]);
   const topicIds = toQueryList(topicId, query.topicIds, query["topicId[]"], query["topicIds[]"]);
+  // ✅ Parse company IDs from query
+  const companyIds = toQueryList(companyId, query.companyIds, query["companyId[]"], query["companyIds[]"]);
 
   if (subjectIds.length === 1) filters.subjectId = subjectIds[0];
   if (subjectIds.length > 1) filters.subjectId = { $in: subjectIds };
   if (topicIds.length === 1) filters.topicId = topicIds[0];
   if (topicIds.length > 1) filters.topicId = { $in: topicIds };
+  // ✅ Apply company filtering
+  if (companyIds.length > 0) filters.companyIds = { $in: companyIds };
+
   if (type) filters.type = type;
   if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
   if (query.search && String(query.search).trim()) {
     filters.questionText = { $regex: escapeRegex(String(query.search).trim()), $options: "i" };
   }
 
-  // Only the "Questions" management page sends mine=true — test creation's
-  // question picker calls this same endpoint without it and must keep
-  // seeing the full shared bank.
+  // ✅ Free-text search — matches everything the question-bank table
+  // actually shows a column for: question text, subject name, topic name,
+  // type, and difficulty. (The frontend was already sending `search`, but
+  // nothing here ever read it — every search request silently fell back to
+  // the unfiltered list.)
+  const search = normalizeText(query.search);
+  if (search) {
+    const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const regex = new RegExp(escaped, "i");
+
+    const [matchingSubjects, matchingTopics] = await Promise.all([
+      Subject.find({ name: regex }).select("_id").lean(),
+      Topic.find({ name: regex }).select("_id").lean(),
+    ]);
+
+    const orClauses = [{ questionText: regex }, { type: regex }, { difficulty: regex }];
+    if (matchingSubjects.length) {
+      orClauses.push({ subjectId: { $in: matchingSubjects.map((s) => s._id) } });
+    }
+    if (matchingTopics.length) {
+      orClauses.push({ topicId: { $in: matchingTopics.map((t) => t._id) } });
+    }
+    filters.$or = orClauses;
+  }
+
+  // Only the "Questions" management page sends mine=true
   if (String(query.mine) === "true" && requester?.role === "ORGANIZATION") {
     const authorIds = await resolveOwnOrgQuestionAuthorIds(requester);
     filters.createdBy = { $in: authorIds };
@@ -468,6 +528,7 @@ export const getQuestionsByUserIdService = async (userId) => {
   return Question.find({ createdBy: userId })
     .populate("subjectId", "name description")
     .populate("topicId", "name description")
+    .populate("companyIds", "name logo")
     .sort("-createdAt");
 };
 
@@ -523,6 +584,38 @@ export const getQuestionsByTopicService = async (topicId, query = {}) => {
 
   const { page = 1, limit = 10, sort = "-createdAt", type, difficulty } = query;
   const filters = { topicId };
+
+  if (type) filters.type = type;
+  if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
+
+  const pageNum = Math.max(1, Number(page));
+  const limitNum = Math.min(100, Math.max(1, Number(limit)));
+
+  const [items, total] = await Promise.all([
+    buildQuestionQuery(filters, {
+      page: pageNum,
+      limit: limitNum,
+      sort,
+    }),
+    Question.countDocuments(filters),
+  ]);
+
+  return {
+    items,
+    total,
+    page: pageNum,
+    limit: limitNum,
+  };
+};
+
+// ✅ New: Service to fetch questions by company ID
+export const getQuestionsByCompanyService = async (companyId, query = {}) => {
+  if (!mongoose.Types.ObjectId.isValid(companyId)) {
+    throw new ApiError(400, "Invalid companyId");
+  }
+
+  const { page = 1, limit = 10, sort = "-createdAt", type, difficulty } = query;
+  const filters = { companyIds: companyId };
 
   if (type) filters.type = type;
   if (difficulty) filters.difficulty = String(difficulty).toUpperCase();
