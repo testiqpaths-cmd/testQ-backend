@@ -280,7 +280,19 @@ export const getAssignedTests = async (req, res) => {
       return obj;
     });
 
-    return res.json({ success: true, data: enriched });
+    let assignedSeries = [];
+    try {
+      const testSeriesService = await import("./testSeries.service.js");
+      assignedSeries = await testSeriesService.getAssignedSeries({
+        studentId: userId,
+        userRole: req.user?.role,
+        search,
+      });
+    } catch (seriesErr) {
+      logger.error(`getAssignedTests getAssignedSeries error: ${seriesErr.message}`);
+    }
+
+    return res.json({ success: true, data: enriched, series: assignedSeries });
   } catch (err) {
     logger.error(`getAssignedTests error: ${err.message}`);
     return res.status(500).json({ success: false, message: err.message });

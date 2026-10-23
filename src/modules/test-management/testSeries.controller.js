@@ -249,6 +249,7 @@ export const createSeries = async (req, res, next) => {
       experienceLevel,
       targetRole,
       hiringRounds,
+      launchDate,
     } = req.body;
 
     if (!title?.trim()) {
@@ -312,6 +313,7 @@ export const createSeries = async (req, res, next) => {
         experienceLevel: experienceLevel || "ALL",
         targetRole: targetRole || null,
         hiringRounds: validatedHiringRounds,
+        launchDate,
       },
       req.user
     );
@@ -325,6 +327,39 @@ export const createSeries = async (req, res, next) => {
     logger.error(`createSeries error: ${err.message}`);
     const statusCode = err.statusCode || 500;
     return res.status(statusCode).json({
+      success: false,
+      message: err.message || "Internal Server Error",
+    });
+  }
+};
+
+export const launchSeries = async (req, res, next) => {
+  try {
+    if (!canManageSeries(req.series, req.user)) {
+      return res.status(403).json({ success: false, message: "Forbidden: You cannot manage this test series" });
+    }
+
+    const { launchDate, launchNow } = req.body || {};
+    const updated = await service.launchSeries(
+      req.series._id,
+      { launchDate, launchNow },
+      req.user
+    );
+
+    broadcastAssignedTestsChanged(req.user).catch((err) =>
+      logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
+    );
+
+    return res.json({
+      success: true,
+      message: updated.isLaunched
+        ? "Test series launched successfully"
+        : "Test series scheduled successfully",
+      data: updated,
+    });
+  } catch (err) {
+    logger.error(`launchSeries error: ${err.message}`);
+    return res.status(500).json({
       success: false,
       message: err.message || "Internal Server Error",
     });
@@ -523,6 +558,10 @@ export const acceptSeriesAssignment = async (req, res, next) => {
       );
     }
 
+    broadcastAssignedTestsChanged(req.user).catch((err) =>
+      logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
+    );
+
     res.json({ success: true, data: assignment });
   } catch (e) {
     next(e);
@@ -532,12 +571,32 @@ export const acceptSeriesAssignment = async (req, res, next) => {
 export const declineSeriesAssignment = async (req, res, next) => {
   try {
     const studentId = req.user?._id || req.user?.id;
-    const seriesId = req.series._id;
+    const series = req.series;
+    const seriesId = series._id;
 
     const assignment = await TestSeriesAssignment.findOneAndUpdate(
       { seriesId, studentId },
       { status: "DECLINED", declinedAt: new Date() },
       { new: true, upsert: true }
+    );
+
+    if (Array.isArray(series.tests) && series.tests.length) {
+      await TestAssignment.bulkWrite(
+        series.tests.map((testId) => ({
+          updateOne: {
+            filter: { testId, studentId },
+            update: {
+              $set: { status: "DECLINED", declinedAt: new Date() },
+              $setOnInsert: { testId, studentId },
+            },
+            upsert: true,
+          },
+        }))
+      );
+    }
+
+    broadcastAssignedTestsChanged(req.user).catch((err) =>
+      logger.error(`broadcastAssignedTestsChanged failed: ${err.message}`)
     );
 
     res.json({ success: true, data: assignment });

@@ -24,6 +24,38 @@ const emptyDifficultyBreakdown = () => ({
   Hard: { correct: 0, wrong: 0, skipped: 0 },
 });
 
+export const resolveSubjectName = (test) => {
+  if (!test) return "General";
+
+  // 1. Valid populated subjectIds subject name
+  if (Array.isArray(test.subjectIds) && test.subjectIds.length > 0) {
+    for (const sub of test.subjectIds) {
+      if (sub && typeof sub.name === "string" && sub.name.trim()) {
+        return sub.name.trim();
+      }
+    }
+  }
+
+  // 2. Valid populated subjectId name, only if supported by the actual schema
+  if (test.subjectId && typeof test.subjectId.name === "string" && test.subjectId.name.trim()) {
+    return test.subjectId.name.trim();
+  }
+
+  // 3. Valid nonempty test type, using the appropriate string value
+  if (Array.isArray(test.type) && test.type.length > 0) {
+    for (const t of test.type) {
+      if (typeof t === "string" && t.trim()) {
+        return t.trim();
+      }
+    }
+  } else if (typeof test.type === "string" && test.type.trim()) {
+    return test.type.trim();
+  }
+
+  // 4. Fallback to "General" when no valid subject is available
+  return "General";
+};
+
 export const getStudentDashboardData = async (studentId) => {
   // `test.status` is only (re)computed at create/publish/update time (see
   // computeTestStatus) — nothing recomputes it as real time passes, so a
@@ -81,10 +113,11 @@ export const getStudentDashboardData = async (studentId) => {
   })
     .populate({
       path: "testId",
-      select: "title visibility type duration topicIds subjectIds difficulty",
+      select: "title visibility type duration topicIds subjectIds subjectId difficulty",
       populate: [
         { path: "topicIds", select: "name" },
-        { path: "subjectIds", select: "name" }
+        { path: "subjectIds", select: "name" },
+        { path: "subjectId", select: "name" }
       ]
     })
     .sort({ submittedAt: 1 }) // Sort chronological to build timelines
@@ -216,15 +249,7 @@ export const getStudentDashboardData = async (studentId) => {
     const primaryTopic = topics.size > 0 ? Array.from(topics)[0] : "General";
 
     // We map test type to subject, or fallback to 'General'
-    let subject = "General";
-    if (attempt.testId && Array.isArray(attempt.testId.subjectIds) && attempt.testId.subjectIds.length > 0) {
-      const firstSubject = attempt.testId.subjectIds[0];
-      if (firstSubject && firstSubject.name) {
-        subject = firstSubject.name;
-      }
-    } else if (attempt.testId?.type) {
-      subject = attempt.testId.type;
-    }
+    const subject = resolveSubjectName(attempt.testId);
 
     // Real per-question difficulty breakdown for this attempt (Easy/Medium/
     // Hard), built from the actual Question docs rather than the test-level

@@ -126,6 +126,13 @@ const TestSeriesSchema = new mongoose.Schema(
         },
       },
     ],
+    launchDate: { type: Date, default: null },
+    isLaunched: { type: Boolean, default: false },
+    status: {
+      type: String,
+      enum: ["DRAFT", "SCHEDULED", "LAUNCHED"],
+      default: "DRAFT",
+    },
     isPublished: {
       type: Boolean,
       default: true,
@@ -146,5 +153,6 @@ TestSeriesSchema.index({ "createdBy.userId": 1 });
 TestSeriesSchema.index({ title: 1 });
 TestSeriesSchema.index({ category: 1, companyId: 1, createdAt: -1 });
 TestSeriesSchema.index({ category: 1, companyId: 1, experienceLevel: 1 });
+TestSeriesSchema.index({ isLaunched: 1, launchDate: 1 });
 
 export default mongoose.models.TestSeries || mongoose.model("TestSeries", TestSeriesSchema);

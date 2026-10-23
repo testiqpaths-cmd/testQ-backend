@@ -497,7 +497,7 @@ export class AiInterviewController {
         user: req.user,
         format: req.query.format,
       });
-      res.setHeader("Content-Disposition", `attachment; filename=${filename}`);
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
       res.setHeader("Content-Type", contentType);
       return res.send(buffer);
     } catch (error) {

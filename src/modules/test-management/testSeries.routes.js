@@ -15,6 +15,7 @@ import {
   pendingSeriesAssignment,
   hideSeriesAssignment,
   getSeriesStats,
+  launchSeries,
 } from "./testSeries.controller.js";
 import { createSeriesTest } from "./testSeries.controller.js";
 
@@ -52,6 +53,15 @@ router.put(
   roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
   loadSeries,
   updateSeries
+);
+
+// ✅ LAUNCH / SCHEDULE: PATCH /api/test-series/:id/launch
+router.patch(
+  "/:id/launch",
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"),
+  loadSeries,
+  launchSeries
 );
 
 // ✅ DELETE: DELETE /api/test-series/:id

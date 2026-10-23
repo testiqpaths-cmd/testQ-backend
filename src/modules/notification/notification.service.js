@@ -61,8 +61,11 @@ const resolveStudentAudience = async (creator, context = null) => {
     const orgId = creator.organizationId || creator._id;
     return listStudents({ organizationId: orgId });
   }
-  // If the creator is an Admin, notify all students
+  // If the creator is an Admin, notify all students or targeted orgs
   if (creator.role === "IQPATH_ADMIN") {
+    if (context?.visibility === "ORG_ONLY" && Array.isArray(context.allowedOrganizations) && context.allowedOrganizations.length) {
+      return UserModel.find({ organizationId: { $in: context.allowedOrganizations }, role: "STUDENT", isDeleted: false }).lean();
+    }
     return listStudents({});
   }
 
