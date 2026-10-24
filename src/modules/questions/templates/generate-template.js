@@ -9,9 +9,14 @@ const __dirname = path.dirname(__filename);
 /**
  * Generate the question template Excel file
  */
-export const generateQuestionTemplate = async () => {
+export const generateQuestionTemplate = async (force = false) => {
   try {
     const templatePath = path.join(__dirname, 'question_template.xlsx');
+
+    // If template already exists and force is false, return existing template without modifying tracked file
+    if (!force && fs.existsSync(templatePath)) {
+      return templatePath;
+    }
 
     // Delete existing template to regenerate with latest structure
     if (fs.existsSync(templatePath)) {
@@ -131,7 +136,7 @@ export const generateQuestionTemplate = async () => {
 // Generate template if this file is run directly
 const args = process.argv.slice(2);
 if (args[0] === '--generate' || process.argv[1] === fileURLToPath(import.meta.url)) {
-  generateQuestionTemplate().catch(err => {
+  generateQuestionTemplate(true).catch(err => {
     console.error('Failed to generate template:', err);
     process.exit(1);
   });
