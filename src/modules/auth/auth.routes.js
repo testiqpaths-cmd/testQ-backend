@@ -8,6 +8,9 @@ import {
   ssoVerifyController,
   ssoVerifyCredentialsController,
   setPasswordController,
+  forgotPasswordController,
+  verifyResetOtpController,
+  resetPasswordController,
   firebaseAuthController,
   logoutController,
   refreshTokenController,
@@ -24,6 +27,9 @@ const router = express.Router();
 router.post("/register", registerController);
 router.post("/check-user", checkUserController);
 router.post("/login", loginController);
+router.post("/forgot-password", forgotPasswordController);
+router.post("/verify-reset-otp", verifyResetOtpController);
+router.post("/reset-password", resetPasswordController);
 // No authMiddleware — establishes a session where none exists yet, same
 // reasoning as exam-browser's sessionId-bearer routes (see that module's
 // claim/heartbeat/security-event routes for the closest precedent).
