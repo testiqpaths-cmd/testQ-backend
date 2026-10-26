@@ -392,11 +392,14 @@ export const forgotPassword = async (email) => {
     logger.error(`Failed to send password reset OTP email to ${user.email}: ${err.message}`);
   }
 
+  if (!emailSent) {
+    throw new AuthError(`Failed to send password reset email: ${emailError}. Please check your email configuration or contact support.`);
+  }
+
   return {
     email: user.email,
-    emailSent,
+    emailSent: true,
     expiresIn: expiresInMinutes * 60,
-    devOtp: process.env.NODE_ENV !== "production" ? otp : undefined,
   };
 };
 
