@@ -9,6 +9,19 @@ import TestSeriesAssignment from "../../../models/testSeriesAssignment.model.js"
 import Question from "../../../models/question.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
+import StudentPerformanceSummary from "../../../models/studentPerformanceSummary.model.js";
+import DailyStudentActivity from "../../../models/dailyStudentActivity.model.js";
+import { isValidSnapshot } from "../../test-attempts/utils/attemptAnalyticsSnapshot.util.js";
+import {
+  recordDashboardRequest,
+  recordSnapshotFallback,
+  recordAnalyticsDiscrepancy,
+} from "./dashboardTelemetry.js";
+
+export const isAnalyticsSummariesEnabled = () => process.env.USE_ANALYTICS_SUMMARIES !== "false";
+export const isSummaryEngagementTrendEnabled = () => process.env.USE_SUMMARY_ENGAGEMENT_TREND !== "false";
+export const isAnalyticsSnapshotsEnabled = () => process.env.USE_ANALYTICS_SNAPSHOTS !== "false";
+
 
 const DIFFICULTY_LABELS = ["Easy", "Medium", "Hard"];
 
@@ -57,6 +70,7 @@ export const resolveSubjectName = (test) => {
 };
 
 export const getStudentDashboardData = async (studentId) => {
+  const _perfStartTime = performance.now();
   // `test.status` is only (re)computed at create/publish/update time (see
   // computeTestStatus) — nothing recomputes it as real time passes, so a
   // FIXED-schedule test whose window opened/closed since it was last saved
@@ -71,7 +85,9 @@ export const getStudentDashboardData = async (studentId) => {
   // zero documents for every student, every time, regardless of how many
   // assignments they actually had.
   const studentObjectId = new mongoose.Types.ObjectId(studentId);
-  const activeAssignedTestsCount = await TestAssignment.aggregate([
+
+  // 1. Independent query: Active assigned tests aggregation
+  const activeAssignedTestsPromise = TestAssignment.aggregate([
     {
       $match: {
         studentId: studentObjectId,
@@ -102,28 +118,58 @@ export const getStudentDashboardData = async (studentId) => {
       },
     },
     { $count: "count" },
-  ]);
+  ]).catch((error) => {
+    console.error("Failed to count active assigned tests:", error.message);
+    return [];
+  });
 
-  const activeAssignedTests = activeAssignedTestsCount[0]?.count || 0;
+  // 2. Independent query: Pre-aggregated KPI summary
+  const summaryPromise = isAnalyticsSummariesEnabled()
+    ? StudentPerformanceSummary.findOne({ studentId })
+        .lean()
+        .catch((error) => {
+          console.error(
+            "Failed to load student performance summary:",
+            error.message
+          );
+          return null;
+        })
+    : Promise.resolve(null);
 
-  // Fetch all completed/submitted attempts for the student
-  const attempts = await TestAttempt.find({
+  // 3. Independent query: Completed attempts history with field projection to avoid transmitting unused question texts and violation logs
+  const attemptsQuery = TestAttempt.find({
     studentId,
     status: { $in: ["SUBMITTED", "EVALUATED"] },
   })
-    .populate({
+    .select(
+      "-questionSnapshots.questionText -questionSnapshots.options -questionSnapshots.correctAnswer -questionSnapshots.imageUrl -violations"
+    )
+    .sort({ submittedAt: 1 }); // Sort chronological to build timelines
+
+  // If snapshot optimization is disabled, populate test metadata upfront
+  if (!isAnalyticsSnapshotsEnabled()) {
+    attemptsQuery.populate({
       path: "testId",
       select: "title visibility type duration topicIds subjectIds subjectId difficulty",
       populate: [
         { path: "topicIds", select: "name" },
         { path: "subjectIds", select: "name" },
-        { path: "subjectId", select: "name" }
-      ]
-    })
-    .sort({ submittedAt: 1 }) // Sort chronological to build timelines
-    .lean();
+        { path: "subjectId", select: "name" },
+      ],
+    });
+  }
+
+  // Execute all independent database operations concurrently
+  const [activeAssignedTestsResult, summary, attempts] = await Promise.all([
+    activeAssignedTestsPromise,
+    summaryPromise,
+    attemptsQuery.lean(),
+  ]);
+
+  const activeAssignedTests = activeAssignedTestsResult[0]?.count || 0;
 
   if (!attempts || attempts.length === 0) {
+    recordDashboardRequest(performance.now() - _perfStartTime);
     return {
       totalTestsAttempted: 0,
       percentageAchieved: 0,
@@ -137,25 +183,64 @@ export const getStudentDashboardData = async (studentId) => {
     };
   }
 
-  // "Difficulty Analysis" used to read Test.difficulty — an optional
-  // whole-test tag that's almost never set by test creators, so it silently
-  // defaulted every test to "Medium" and made the chart meaningless (every
-  // student's questions appeared to be Medium regardless of reality). Real
-  // difficulty lives per-QUESTION on the Question doc, so batch-fetch it
-  // once here and look it up per answer below instead.
-  const allQuestionIds = new Set();
-  attempts.forEach((attempt) => {
-    (attempt.answers || []).forEach((a) => {
-      if (a.questionId) allQuestionIds.add(String(a.questionId));
-    });
-  });
+  // Verify whether all attempts have a complete, valid analytics snapshot
+  const allSnapshotsValid =
+    isAnalyticsSnapshotsEnabled() &&
+    attempts.every((a) => isValidSnapshot(a.analyticsSnapshot));
 
-  const questions = await Question.find({ _id: { $in: Array.from(allQuestionIds) } })
-    .select("difficulty")
-    .lean();
-  const questionDifficultyMap = new Map(
-    questions.map((q) => [String(q._id), toDifficultyLabel(q.difficulty)])
-  );
+  let questionDifficultyMap = null;
+
+  // Fallback path: If any attempt lacks a valid snapshot, populate test & fetch question difficulties
+  if (!allSnapshotsValid) {
+    if (isAnalyticsSnapshotsEnabled()) {
+      let missingCount = 0;
+      let malformedCount = 0;
+      attempts.forEach((a) => {
+        if (!a.analyticsSnapshot) missingCount++;
+        else if (!isValidSnapshot(a.analyticsSnapshot)) malformedCount++;
+      });
+      recordSnapshotFallback({
+        studentId,
+        missingCount,
+        malformedCount,
+        totalAttempts: attempts.length,
+        reason:
+          missingCount > 0 && malformedCount > 0
+            ? "MISSING_AND_MALFORMED"
+            : missingCount > 0
+            ? "MISSING_SNAPSHOTS"
+            : "MALFORMED_SNAPSHOTS",
+      });
+    }
+    const needsTestPopulate = attempts.some(
+      (a) => !a.testId || typeof a.testId !== "object" || !a.testId.title
+    );
+    if (needsTestPopulate) {
+      await TestAttempt.populate(attempts, {
+        path: "testId",
+        select: "title visibility type duration topicIds subjectIds subjectId difficulty",
+        populate: [
+          { path: "topicIds", select: "name" },
+          { path: "subjectIds", select: "name" },
+          { path: "subjectId", select: "name" },
+        ],
+      });
+    }
+
+    const allQuestionIds = new Set();
+    attempts.forEach((attempt) => {
+      (attempt.answers || []).forEach((a) => {
+        if (a.questionId) allQuestionIds.add(String(a.questionId));
+      });
+    });
+
+    const questions = await Question.find({ _id: { $in: Array.from(allQuestionIds) } })
+      .select("difficulty")
+      .lean();
+    questionDifficultyMap = new Map(
+      questions.map((q) => [String(q._id), toDifficultyLabel(q.difficulty)])
+    );
+  }
 
   let totalQuestionsAttempted = 0;
   let totalCorrectAnswers = 0;
@@ -180,7 +265,12 @@ export const getStudentDashboardData = async (studentId) => {
   };
 
   attempts.forEach((attempt) => {
-    const testName = attempt.testId?.title || "Untitled Test";
+    const hasSnapshot = allSnapshotsValid && isValidSnapshot(attempt.analyticsSnapshot);
+    const snapshot = hasSnapshot ? attempt.analyticsSnapshot : null;
+
+    const testName = snapshot
+      ? snapshot.testName || "Untitled Test"
+      : attempt.testId?.title || "Untitled Test";
     const percentage = attempt.percentage || 0;
     const submittedAt = attempt.submittedAt || new Date();
 
@@ -200,7 +290,13 @@ export const getStudentDashboardData = async (studentId) => {
 
     // Subject/Topic Wise tests count
     const topics = new Set();
-    if (attempt.testId && Array.isArray(attempt.testId.topicIds)) {
+    if (snapshot && Array.isArray(snapshot.topics) && snapshot.topics.length > 0) {
+      snapshot.topics.forEach((t) => {
+        if (t && typeof t === "string" && t.trim()) topics.add(t.trim());
+      });
+    } else if (snapshot && snapshot.topic) {
+      topics.add(snapshot.topic);
+    } else if (attempt.testId && Array.isArray(attempt.testId.topicIds)) {
       attempt.testId.topicIds.forEach((topic) => {
         if (topic && topic.name) topics.add(topic.name);
       });
@@ -209,7 +305,7 @@ export const getStudentDashboardData = async (studentId) => {
     // Default subject if no topics found
     if (topics.size === 0) topics.add("General");
 
-    topics.forEach(topic => {
+    topics.forEach((topic) => {
       subjectCountMap[topic] = (subjectCountMap[topic] || 0) + 1;
     });
 
@@ -229,12 +325,15 @@ export const getStudentDashboardData = async (studentId) => {
 
     // Recent Tests format (Dashboard small table)
     const totalQ = attempt.questionSnapshots?.length || answers.length || 0;
+    const testCategory = snapshot
+      ? snapshot.category || "Standard"
+      : attempt.testId?.type || "Standard";
 
     recentTests.push({
       id: attempt.testId?._id || attempt.testId,
       resultId: attempt._id,
       name: testName,
-      category: attempt.testId?.type || "Standard",
+      category: testCategory,
       difficulty: "Medium", // Not always strictly defined
       attemptedAt: submittedAt,
       totalQuestions: totalQ,
@@ -246,22 +345,22 @@ export const getStudentDashboardData = async (studentId) => {
     });
 
     // Detailed allTests array for advanced frontend filtering
-    const primaryTopic = topics.size > 0 ? Array.from(topics)[0] : "General";
+    const primaryTopic = snapshot?.topic || (topics.size > 0 ? Array.from(topics)[0] : "General");
+    const subject = snapshot?.subject || resolveSubjectName(attempt.testId);
 
-    // We map test type to subject, or fallback to 'General'
-    const subject = resolveSubjectName(attempt.testId);
-
-    // Real per-question difficulty breakdown for this attempt (Easy/Medium/
-    // Hard), built from the actual Question docs rather than the test-level
-    // tag above.
-    const difficultyBreakdown = emptyDifficultyBreakdown();
-    answers.forEach((a) => {
-      const label = questionDifficultyMap.get(String(a.questionId)) || "Medium";
-      const bucket = difficultyBreakdown[label];
-      if (a.isCorrect) bucket.correct += 1;
-      else if (a.selectedOption) bucket.wrong += 1;
-      else bucket.skipped += 1;
-    });
+    let difficultyBreakdown;
+    if (snapshot && snapshot.difficultyBreakdown) {
+      difficultyBreakdown = snapshot.difficultyBreakdown;
+    } else {
+      difficultyBreakdown = emptyDifficultyBreakdown();
+      answers.forEach((a) => {
+        const label = (questionDifficultyMap && questionDifficultyMap.get(String(a.questionId))) || "Medium";
+        const bucket = difficultyBreakdown[label];
+        if (a.isCorrect) bucket.correct += 1;
+        else if (a.selectedOption) bucket.wrong += 1;
+        else bucket.skipped += 1;
+      });
+    }
 
     allTests.push({
       id: attempt.testId?._id || attempt.testId,
@@ -276,20 +375,42 @@ export const getStudentDashboardData = async (studentId) => {
       skipped: skippedQ,
       score: attempt.totalScore || 0,
       maxScore: attempt.maxScore || 0,
-      // Score as a percentage of that test's max — what "Average Score" on
-      // the dashboard actually needs; averaging raw `score` across tests
-      // with different max scores produces a meaningless number.
       percentage,
       accuracy: attemptedQ > 0 ? Math.round((correctQ / attemptedQ) * 100) : 0,
       timeTaken: attempt.duration || 0,
-      date: submittedAt
+      date: submittedAt,
     });
   });
 
   // Calculate Aggregates
-  const totalTestsAttempted = attempts.length;
-  const percentageAchieved = totalTestsAttempted > 0 ? Math.round(totalPercentageSum / totalTestsAttempted) : 0;
-  const accuracy = totalQuestionsAttempted > 0 ? Math.round((totalCorrectAnswers / totalQuestionsAttempted) * 100) : 0;
+  const totalTestsAttempted = summary?.totalTestsAttempted ?? attempts.length;
+
+  if (summary && summary.totalTestsAttempted > 0 && Math.abs(summary.totalTestsAttempted - attempts.length) > 0) {
+    recordAnalyticsDiscrepancy({
+      studentId,
+      metric: "totalTestsAttempted",
+      summaryValue: summary.totalTestsAttempted,
+      computedValue: attempts.length,
+    });
+  }
+
+  const percentageAchieved =
+    totalTestsAttempted > 0
+      ? Math.round(
+          summary &&
+            summary.totalTestsAttempted > 0 &&
+            summary.scoredAttemptCount > 0
+            ? summary.totalPercentageSum / summary.scoredAttemptCount
+            : totalPercentageSum / attempts.length
+        )
+      : 0;
+
+  // Keep the existing raw calculation for now.
+  // The summary denominator must be aligned and backfilled first.
+  const accuracy =
+    totalQuestionsAttempted > 0
+      ? Math.round((totalCorrectAnswers / totalQuestionsAttempted) * 100)
+      : 0;
 
   // Format arrays
   const subjectWiseTests = Object.entries(subjectCountMap).map(([subject, count]) => ({
@@ -302,6 +423,8 @@ export const getStudentDashboardData = async (studentId) => {
 
   // Return tests sorted newest first
   recentTests.sort((a, b) => new Date(b.attemptedAt) - new Date(a.attemptedAt));
+
+  recordDashboardRequest(performance.now() - _perfStartTime);
 
   return {
     totalTestsAttempted,
@@ -409,6 +532,51 @@ const buildEngagementTrend = (events, categories) => {
       return row;
     });
   });
+
+  return result;
+};
+
+const buildTrendFromDailyActivity = (activities, categories) => {
+  const result = {};
+
+  for (const period of ["weekly", "monthly", "yearly"]) {
+    const buckets = new Map();
+
+    for (const activity of activities) {
+      if (!activity.studentId || !activity.sourceCategory) continue;
+
+      const date = new Date(`${activity.dateKey}T00:00:00`);
+      if (Number.isNaN(date.getTime())) continue;
+
+      const { key, label } = getTrendBucketKey(date, period);
+
+      if (!buckets.has(key)) {
+        buckets.set(key, { label, sets: {} });
+      }
+
+      const bucket = buckets.get(key);
+
+      if (!bucket.sets[activity.sourceCategory]) {
+        bucket.sets[activity.sourceCategory] = new Set();
+      }
+
+      bucket.sets[activity.sourceCategory].add(String(activity.studentId));
+    }
+
+    result[period] = Array.from(buckets.keys())
+      .sort()
+      .slice(-TREND_BUCKET_CAPS[period])
+      .map((key) => {
+        const { label, sets } = buckets.get(key);
+        const row = { label };
+
+        for (const category of categories) {
+          row[category] = sets[category]?.size ?? 0;
+        }
+
+        return row;
+      });
+  }
 
   return result;
 };
@@ -565,6 +733,7 @@ const buildEngagementMetrics = (attempts) => {
 };
 
 const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, isAdmin = false } = {}) => {
+  const _adminStartTime = performance.now();
   const { start, end } = getTodayRange();
   const studentFilter = {
     role: "STUDENT",
@@ -624,27 +793,28 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
   monthStart.setDate(1);
   monthStart.setHours(0, 0, 0, 0);
 
-  const [
-    totalStudents,
-    totalOrganizations,
-    activeTests,
-    activeAdminTests,
-    activeOrgTests,
-    totalTestsCount,
-    completedTests,
-    todayTests,
-    scheduledTests,
-    supportTotal,
-    supportPending,
-    supportCompleted,
-    scopedTests,
-    scopedStudents,
-    planDistributionRaw,
-    draftTestsCount,
-    publishedTestsCount,
-    totalTestSeries,
-    newStudentsThisMonth,
-  ] = await Promise.all([
+  // For Organization scope, resolve scoped test and student IDs first if not admin
+  const [scopedTests, scopedStudents] = isAdmin
+    ? [[], []]
+    : await Promise.all([
+        Test.find(testFilter).select("_id").lean(),
+        User.find(studentFilter).select("_id createdAt").lean(),
+      ]);
+
+  const testIds = scopedTests.map((test) => test._id);
+  const studentIds = scopedStudents.map((student) => student._id);
+
+  const assignmentFilter = isAdmin
+    ? {}
+    : { testId: { $in: testIds }, studentId: { $in: studentIds } };
+
+  const attemptFilter = {
+    status: { $in: ["SUBMITTED", "EVALUATED"] },
+    ...(isAdmin ? {} : { testId: { $in: testIds }, studentId: { $in: studentIds } }),
+  };
+
+  // Stream 1: Overview and KPI counts
+  const countsPromise = Promise.all([
     User.countDocuments(studentFilter),
     isAdmin ? Organization.countDocuments() : Promise.resolve(0),
     Test.countDocuments(withTestFilter(liveActiveCondition)),
@@ -663,12 +833,6 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     HelpSupport.countDocuments(supportFilter),
     HelpSupport.countDocuments({ ...supportFilter, status: "pending" }),
     HelpSupport.countDocuments({ ...supportFilter, status: "resolved" }),
-    // Only the org branch actually uses these id lists (to scope
-    // assignments/attempts to "this org's tests/students") — for the admin
-    // branch they're discarded below, so skip fetching every test/student
-    // id on the whole platform just to throw it away.
-    isAdmin ? Promise.resolve([]) : Test.find(testFilter).select("_id").lean(),
-    isAdmin ? Promise.resolve([]) : User.find(studentFilter).select("_id createdAt").lean(),
     UserSubscription.aggregate([
       { $match: { status: "ACTIVE" } },
       {
@@ -699,37 +863,19 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     Test.countDocuments({ ...testFilter, isPublished: false }),
     Test.countDocuments({ ...testFilter, isPublished: true }),
     TestSeries.countDocuments(isAdmin ? {} : seriesFilter),
-    // A direct count, not derived from scopedStudents — that list is
-    // deliberately left empty for the admin branch above (nothing else
-    // used it there), which silently made this always read 0 on the admin
-    // dashboard regardless of how many students had actually signed up.
     User.countDocuments({ ...studentFilter, createdAt: { $gte: monthStart } }),
   ]);
 
-  const testIds = scopedTests.map((test) => test._id);
-  const studentIds = scopedStudents.map((student) => student._id);
-
-  const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
-  const assignmentFilter = isAdmin
-    ? {}
-    : { testId: { $in: testIds }, studentId: { $in: studentIds } };
-
-  const [
-    acceptedAssignments,
-    declinedAssignments,
-    missedAssignments,
-  ] = await Promise.all([
+  // Stream 2: Assignment counts
+  const assignmentsPromise = Promise.all([
     TestAssignment.countDocuments({ ...assignmentFilter, status: "ACCEPTED" }),
     TestAssignment.countDocuments({ ...assignmentFilter, status: "DECLINED" }),
     TestAssignment.countDocuments({ ...assignmentFilter, status: "MISSED" }),
   ]);
 
-  const attemptFilter = {
-    status: { $in: ["SUBMITTED", "EVALUATED"] },
-    ...(isAdmin ? {} : { testId: { $in: testIds }, studentId: { $in: studentIds } }),
-  };
-
-  const attempts = await TestAttempt.find(attemptFilter)
+  // Stream 3: Recent 100 attempts with projection (excluding questionSnapshots and violations)
+  const attemptsPromise = TestAttempt.find(attemptFilter)
+    .select("-questionSnapshots -violations")
     .populate("studentId", "firstName lastName email")
     .populate({
       path: "testId",
@@ -740,98 +886,203 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     .limit(100)
     .lean();
 
-  const todayAttempts = await TestAttempt.countDocuments({
+  // Stream 4: Today attempts count
+  const todayAttemptsPromise = TestAttempt.countDocuments({
     ...attemptFilter,
     submittedAt: { $gte: start, $lt: end },
   });
 
-  const { performanceOverTime, subjectWiseTests, averageScoreOverTime } = buildEngagementMetrics(attempts);
-
-  // Student Engagement Trend — distinct-student counts over time, but two
-  // different questions depending on the audience:
-  //  - Org: how many of ITS OWN students created a self-practice test, vs
-  //    how many gave (attempted) a test the org itself published. These are
-  //    two different event types (creation vs attempt), not one metric split
-  //    two ways.
-  //  - Admin: how many students gave a test, broken down by who made the
-  //    test they gave (themselves / an organization / IQPATH_ADMIN / an IQ
-  //    Room). All four are the same event type (an attempt), just
-  //    categorized by test origin.
-  let studentEngagementTrend;
-  if (isAdmin) {
-    const allAttempts = await TestAttempt.find({ status: { $in: ["SUBMITTED", "EVALUATED"] } })
-      .select("studentId submittedAt updatedAt createdAt testId")
-      .populate({ path: "testId", select: "createdBy isIQRoomTest" })
+  // Stream 5: Series overview data
+  const seriesPromise = (async () => {
+    const series = await TestSeries.find(isAdmin ? {} : seriesFilter)
+      .select("title tests")
+      .sort({ createdAt: -1 })
       .lean();
+    const seriesAssignments = await TestSeriesAssignment.aggregate([
+      {
+        $match: {
+          seriesId: { $in: series.map((item) => item._id) },
+          status: "ACCEPTED",
+        },
+      },
+      { $group: { _id: "$seriesId", students: { $sum: 1 } } },
+    ]);
+    return { series, seriesAssignments };
+  })();
 
-    const categoryForAttempt = (attempt) => {
-      if (attempt.testId?.isIQRoomTest) return "iqRoom";
-      const role = attempt.testId?.createdBy?.role;
-      if (role === "STUDENT") return "selfCreated";
-      if (role === "ORGANIZATION") return "organization";
-      if (role === "IQPATH_ADMIN") return "admin";
-      return null;
-    };
-
-    const engagementEvents = allAttempts.map((attempt) => ({
-      studentId: attempt.studentId,
-      date: new Date(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
-      category: categoryForAttempt(attempt),
-    }));
-
-    studentEngagementTrend = {
-      series: [
+  // Stream 6: Student Engagement Trend
+  const engagementTrendPromise = (async () => {
+    if (isAdmin) {
+      const adminCategories = ["selfCreated", "organization", "admin", "iqRoom"];
+      const adminSeries = [
         { key: "selfCreated", label: "Self-Created Tests" },
         { key: "organization", label: "Organization Tests" },
         { key: "admin", label: "Admin Tests" },
         { key: "iqRoom", label: "IQ Room Tests" },
-      ],
-      ...buildEngagementTrend(engagementEvents, ["selfCreated", "organization", "admin", "iqRoom"]),
-    };
-  } else {
-    const [selfCreatedTests, ownOrgTests] = await Promise.all([
-      Test.find({ "createdBy.role": "STUDENT", "createdBy.userId": { $in: studentIds }, isDeleted: { $ne: 1 } })
-        .select("createdBy.userId createdAt")
-        .lean(),
-      adminUserId
-        ? Test.find({ "createdBy.role": "ORGANIZATION", "createdBy.userId": adminUserId, isDeleted: { $ne: 1 } })
-            .select("_id")
-            .lean()
-        : Promise.resolve([]),
-    ]);
+      ];
 
-    const ownOrgTestIds = ownOrgTests.map((t) => t._id);
-    const orgAttempts = ownOrgTestIds.length
-      ? await TestAttempt.find({
-          testId: { $in: ownOrgTestIds },
-          studentId: { $in: studentIds },
-          status: { $in: ["SUBMITTED", "EVALUATED"] },
-        })
-          .select("studentId submittedAt updatedAt createdAt")
-          .lean()
-      : [];
+      if (isSummaryEngagementTrendEnabled()) {
+        try {
+          const minDate = new Date();
+          minDate.setFullYear(minDate.getFullYear() - 6);
+          const minimumDateKey = minDate.toISOString().slice(0, 10);
 
-    const engagementEvents = [
-      ...selfCreatedTests.map((test) => ({
-        studentId: test.createdBy?.userId,
-        date: new Date(test.createdAt),
-        category: "selfCreated",
-      })),
-      ...orgAttempts.map((attempt) => ({
+          // Bounded queries: only today's attempts for hourly trend, and daily activities for longer buckets
+          const [todayAttempts, activities] = await Promise.all([
+            TestAttempt.find({
+              status: { $in: ["SUBMITTED", "EVALUATED"] },
+              submittedAt: { $gte: start, $lt: end },
+            })
+              .select("studentId submittedAt updatedAt createdAt testId")
+              .populate({ path: "testId", select: "createdBy isIQRoomTest" })
+              .lean(),
+            DailyStudentActivity.find({
+              dateKey: { $gte: minimumDateKey },
+            })
+              .select("dateKey studentId sourceCategory")
+              .lean(),
+          ]);
+
+          const categoryForAttempt = (attempt) => {
+            if (attempt.testId?.isIQRoomTest) return "iqRoom";
+            const role = attempt.testId?.createdBy?.role;
+            if (role === "STUDENT") return "selfCreated";
+            if (role === "ORGANIZATION") return "organization";
+            if (role === "IQPATH_ADMIN") return "admin";
+            return null;
+          };
+
+          const todayEvents = todayAttempts.map((attempt) => ({
+            studentId: attempt.studentId,
+            date: new Date(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
+            category: categoryForAttempt(attempt),
+          }));
+          const todayTrend = buildEngagementTrend(todayEvents, adminCategories);
+          const longRangeTrends = buildTrendFromDailyActivity(activities, adminCategories);
+
+          return {
+            series: adminSeries,
+            today: todayTrend.today,
+            weekly: longRangeTrends.weekly,
+            monthly: longRangeTrends.monthly,
+            yearly: longRangeTrends.yearly,
+          };
+        } catch (summaryErr) {
+          console.error(
+            "Failed to build admin trend from summaries, falling back to raw:",
+            summaryErr.message
+          );
+        }
+      }
+
+      // Raw Fallback for Admin Trend
+      const allAttempts = await TestAttempt.find({ status: { $in: ["SUBMITTED", "EVALUATED"] } })
+        .select("studentId submittedAt updatedAt createdAt testId")
+        .populate({ path: "testId", select: "createdBy isIQRoomTest" })
+        .lean();
+
+      const categoryForAttempt = (attempt) => {
+        if (attempt.testId?.isIQRoomTest) return "iqRoom";
+        const role = attempt.testId?.createdBy?.role;
+        if (role === "STUDENT") return "selfCreated";
+        if (role === "ORGANIZATION") return "organization";
+        if (role === "IQPATH_ADMIN") return "admin";
+        return null;
+      };
+
+      const engagementEvents = allAttempts.map((attempt) => ({
         studentId: attempt.studentId,
         date: new Date(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
-        category: "organization",
-      })),
-    ];
+        category: categoryForAttempt(attempt),
+      }));
 
-    studentEngagementTrend = {
-      series: [
-        { key: "selfCreated", label: "Self-Created Tests" },
-        { key: "organization", label: "Organization Tests Taken" },
-      ],
-      ...buildEngagementTrend(engagementEvents, ["selfCreated", "organization"]),
-    };
-  }
+      return {
+        series: adminSeries,
+        ...buildEngagementTrend(engagementEvents, adminCategories),
+      };
+    } else {
+      // Organization Trend
+      const [selfCreatedTests, ownOrgTests] = await Promise.all([
+        Test.find({ "createdBy.role": "STUDENT", "createdBy.userId": { $in: studentIds }, isDeleted: { $ne: 1 } })
+          .select("createdBy.userId createdAt")
+          .lean(),
+        adminUserId
+          ? Test.find({ "createdBy.role": "ORGANIZATION", "createdBy.userId": adminUserId, isDeleted: { $ne: 1 } })
+              .select("_id")
+              .lean()
+          : Promise.resolve([]),
+      ]);
+
+      const ownOrgTestIds = ownOrgTests.map((t) => t._id);
+      const orgAttempts = ownOrgTestIds.length
+        ? await TestAttempt.find({
+            testId: { $in: ownOrgTestIds },
+            studentId: { $in: studentIds },
+            status: { $in: ["SUBMITTED", "EVALUATED"] },
+          })
+            .select("studentId submittedAt updatedAt createdAt")
+            .lean()
+        : [];
+
+      const engagementEvents = [
+        ...selfCreatedTests.map((test) => ({
+          studentId: test.createdBy?.userId,
+          date: new Date(test.createdAt),
+          category: "selfCreated",
+        })),
+        ...orgAttempts.map((attempt) => ({
+          studentId: attempt.studentId,
+          date: new Date(attempt.submittedAt || attempt.updatedAt || attempt.createdAt),
+          category: "organization",
+        })),
+      ];
+
+      return {
+        series: [
+          { key: "selfCreated", label: "Self-Created Tests" },
+          { key: "organization", label: "Organization Tests Taken" },
+        ],
+        ...buildEngagementTrend(engagementEvents, ["selfCreated", "organization"]),
+      };
+    }
+  })();
+
+  // Execute all independent database streams concurrently
+  const [
+    [
+      totalStudents,
+      totalOrganizations,
+      activeTests,
+      activeAdminTests,
+      activeOrgTests,
+      totalTestsCount,
+      completedTests,
+      todayTests,
+      scheduledTests,
+      supportTotal,
+      supportPending,
+      supportCompleted,
+      planDistributionRaw,
+      draftTestsCount,
+      publishedTestsCount,
+      totalTestSeries,
+      newStudentsThisMonth,
+    ],
+    [acceptedAssignments, declinedAssignments, missedAssignments],
+    attempts,
+    todayAttempts,
+    { series, seriesAssignments },
+    studentEngagementTrend,
+  ] = await Promise.all([
+    countsPromise,
+    assignmentsPromise,
+    attemptsPromise,
+    todayAttemptsPromise,
+    seriesPromise,
+    engagementTrendPromise,
+  ]);
+
+  const { performanceOverTime, subjectWiseTests, averageScoreOverTime } = buildEngagementMetrics(attempts);
 
   const recentTests = attempts.slice(0, 10).map((attempt) => ({
     id: attempt._id,
@@ -841,19 +1092,6 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
     date: attempt.submittedAt || attempt.updatedAt || attempt.createdAt,
   }));
 
-  const series = await TestSeries.find(isAdmin ? {} : seriesFilter)
-    .select("title tests")
-    .sort({ createdAt: -1 })
-    .lean();
-  const seriesAssignments = await TestSeriesAssignment.aggregate([
-    {
-      $match: {
-        seriesId: { $in: series.map((item) => item._id) },
-        status: "ACCEPTED",
-      },
-    },
-    { $group: { _id: "$seriesId", students: { $sum: 1 } } },
-  ]);
   const assignmentCountBySeries = new Map(
     seriesAssignments.map((item) => [String(item._id), item.students]),
   );
@@ -901,6 +1139,8 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       planDistribution.organizations.push(planInfo);
     }
   });
+
+  recordDashboardRequest(performance.now() - _adminStartTime, isAdmin ? "ADMIN" : "ORGANIZATION");
 
   return {
     students: {

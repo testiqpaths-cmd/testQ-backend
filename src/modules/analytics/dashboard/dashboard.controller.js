@@ -63,3 +63,18 @@ export const getOrganizationDashboardController = async (req, res, next) => {
     next(err);
   }
 };
+
+export const getDashboardTelemetryController = async (req, res, next) => {
+  try {
+    const { getDashboardTelemetryStats } = await import("./dashboardTelemetry.js");
+    const stats = getDashboardTelemetryStats();
+    return res.status(200).json({
+      success: true,
+      message: "Dashboard telemetry stats fetched successfully",
+      data: stats,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+

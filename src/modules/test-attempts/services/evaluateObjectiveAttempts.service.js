@@ -2,6 +2,7 @@ import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js";
 import Notification from "../../../modules/notification/notification.model.js";
 import Test from "../../../models/test.model.js";
+import { buildAttemptAnalyticsSnapshot } from "../utils/attemptAnalyticsSnapshot.util.js";
 
 const PASS_PERCENTAGE = 40;
 
@@ -52,7 +53,11 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
 
-  const test = await Test.findById(attempt.testId).lean();
+  const test = await Test.findById(attempt.testId)
+    .populate("topicIds", "name")
+    .populate("subjectIds", "name")
+    .populate("subjectId", "name")
+    .lean();
 
   // only run after submission (or re-run if already evaluated or expired)
   if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED" && attempt.status !== "EXPIRED") {
@@ -66,6 +71,11 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     updateAttemptStats(attempt);
     // keep it SUBMITTED so manual evaluation can happen if needed
     attempt.status = "SUBMITTED";
+    attempt.analyticsSnapshot = buildAttemptAnalyticsSnapshot({
+      attempt,
+      test,
+      questionDifficultyMap: new Map(),
+    });
     await attempt.save();
     return attempt;
   }
@@ -74,7 +84,10 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
   const qIds = attempt.answers.map((a) => a.questionId);
   const questions = await Question.find({ _id: { $in: qIds } }).select(
-    "_id type correctAnswer"
+    "_id type correctAnswer difficulty"
+  );
+  const questionDifficultyMap = new Map(
+    questions.map((q) => [String(q._id), q.difficulty])
   );
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
@@ -148,6 +161,13 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     attempt.isPassed = attempt.resultStatus === "PASS";
   }
 
+  // Generate display-ready analytics snapshot for fast dashboard access
+  attempt.analyticsSnapshot = buildAttemptAnalyticsSnapshot({
+    attempt,
+    test,
+    questionDifficultyMap,
+  });
+
   if (!attempt.iqRoomId) {
     try {
       const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
@@ -178,5 +198,14 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     }
   }
 
+  // Record attempt in pre-aggregated analytics summaries (idempotent & non-blocking)
+  try {
+    const { processCompletedAttemptAnalytics } = await import("../../../services/analyticsSummary.service.js");
+    await processCompletedAttemptAnalytics(attempt._id);
+  } catch (err) {
+    console.error("Failed to process analytics summary for attempt:", attempt._id, err);
+  }
+
   return attempt;
 };
+

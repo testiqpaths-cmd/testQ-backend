@@ -2,6 +2,7 @@ import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js"; // adjust to your actual path
 import Notification from "../../../modules/notification/notification.model.js";
 import Test from "../../../models/test.model.js";
+import { buildAttemptAnalyticsSnapshot } from "../utils/attemptAnalyticsSnapshot.util.js";
 
 const answerHasValue = (answer) =>
   (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
@@ -112,6 +113,24 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
   // ✅ final status
   attempt.status = "EVALUATED";
 
+  try {
+    const test = await Test.findById(attempt.testId)
+      .populate("topicIds", "name")
+      .populate("subjectIds", "name")
+      .populate("subjectId", "name")
+      .lean();
+    const qIds = (attempt.answers || []).map((a) => a.questionId).filter(Boolean);
+    const questions = await Question.find({ _id: { $in: qIds } }).select("_id difficulty").lean();
+    const questionDifficultyMap = new Map(questions.map((q) => [String(q._id), q.difficulty]));
+    attempt.analyticsSnapshot = buildAttemptAnalyticsSnapshot({
+      attempt,
+      test,
+      questionDifficultyMap,
+    });
+  } catch (snapshotErr) {
+    console.error("Failed to refresh analyticsSnapshot during manual evaluation:", snapshotErr);
+  }
+
   await attempt.save();
 
   if (attempt.testCategory === "COMPANY" || attempt.companyTrackAttemptId || attempt.companyTrackId) {
@@ -121,6 +140,14 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
     } catch (err) {
       console.error("Failed to update company track progress in manualEvaluateAttempt:", err);
     }
+  }
+
+  // Record attempt in pre-aggregated analytics summaries (delta-aware & idempotent)
+  try {
+    const { processCompletedAttemptAnalytics } = await import("../../../services/analyticsSummary.service.js");
+    await processCompletedAttemptAnalytics(attempt._id);
+  } catch (err) {
+    console.error("Failed to process analytics summary for manual attempt:", attempt._id, err);
   }
 
   // Dispatch notification to the student about the evaluation

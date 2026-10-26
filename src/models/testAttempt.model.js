@@ -44,7 +44,6 @@ const testAttemptSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "CompanyTrackAttempt",
       default: null,
-      index: true,
     },
 
     companyTrackId: {
@@ -263,6 +262,50 @@ const testAttemptSchema = new mongoose.Schema(
       type: String,
       enum: ["TIME_EXPIRED", "MANUAL_SUBMIT", "TIME_EXPIRED_AUTO_SUBMIT", "CHEATING", null],
       default: null,
+    },
+
+    analyticsSnapshot: {
+      testName: {
+        type: String,
+        default: null,
+      },
+      subject: {
+        type: String,
+        default: null,
+      },
+      topic: {
+        type: String,
+        default: null,
+      },
+      topics: {
+        type: [String],
+        default: [],
+      },
+      category: {
+        type: mongoose.Schema.Types.Mixed,
+        default: "Standard",
+      },
+      difficultyBreakdown: {
+        Easy: {
+          correct: { type: Number, default: 0 },
+          wrong: { type: Number, default: 0 },
+          skipped: { type: Number, default: 0 },
+        },
+        Medium: {
+          correct: { type: Number, default: 0 },
+          wrong: { type: Number, default: 0 },
+          skipped: { type: Number, default: 0 },
+        },
+        Hard: {
+          correct: { type: Number, default: 0 },
+          wrong: { type: Number, default: 0 },
+          skipped: { type: Number, default: 0 },
+        },
+      },
+      computedAt: {
+        type: Date,
+        default: null,
+      },
     },
   },
   { timestamps: true },
