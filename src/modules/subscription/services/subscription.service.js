@@ -37,7 +37,7 @@ export const getUserSubscription = async (userId) => {
 
   let sub = await UserSubscription.findOne({ userId, status: "ACTIVE" }).populate("planId");
 
-  if (!sub) {
+  if (!sub || !sub.planId) {
     // Map user.role string to Role document
     const roleDoc = await Role.findOne({ name: user.role.toUpperCase() });
     if (!roleDoc) {
@@ -51,13 +51,19 @@ export const getUserSubscription = async (userId) => {
       return null;
     }
 
-    sub = new UserSubscription({
-      userId: user._id,
-      planId: defaultPlan._id,
-      status: "ACTIVE",
-    });
-    await sub.save();
-    sub = await UserSubscription.findById(sub._id).populate("planId");
+    if (sub) {
+      sub.planId = defaultPlan._id;
+      await sub.save();
+      sub = await UserSubscription.findById(sub._id).populate("planId");
+    } else {
+      sub = new UserSubscription({
+        userId: user._id,
+        planId: defaultPlan._id,
+        status: "ACTIVE",
+      });
+      await sub.save();
+      sub = await UserSubscription.findById(sub._id).populate("planId");
+    }
   }
 
   return sub;
@@ -87,11 +93,11 @@ export const getPaidAccessStatus = async (userId) => {
   }
 
   const sub = await getUserSubscription(userId);
-  if (!sub || sub.status !== "ACTIVE") {
+  if (!sub || sub.status !== "ACTIVE" || !sub.planId) {
     return { hasActivePaidAccess: false, planName: sub?.planId?.name ?? null, subscriptionExpiresAt: sub?.expiresAt ?? null };
   }
   if (sub.expiresAt && sub.expiresAt <= new Date()) {
-    return { hasActivePaidAccess: false, planName: sub.planId.name, subscriptionExpiresAt: sub.expiresAt };
+    return { hasActivePaidAccess: false, planName: sub.planId?.name, subscriptionExpiresAt: sub.expiresAt };
   }
 
   // Access is governed purely by the RESUME_BUILDER PlanFeature toggle
@@ -114,7 +120,7 @@ export const getPaidAccessStatus = async (userId) => {
 
   return {
     hasActivePaidAccess: resumeBuilderEnabled,
-    planName: sub.planId.name,
+    planName: sub.planId?.name,
     subscriptionExpiresAt: sub.expiresAt,
   };
 };
@@ -164,7 +170,7 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
 
   // 2. Resolve Subscription
   const sub = await getUserSubscription(userId);
-  if (!sub) return true; // If no sub system configured for user, fallback allow
+  if (!sub || !sub.planId) return true; // If no sub system configured for user, fallback allow
 
   const planId = sub.planId._id ? sub.planId._id : sub.planId;
 
@@ -235,15 +241,17 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
  */
 export const getUserUsageDetails = async (userId) => {
   const sub = await getUserSubscription(userId);
-  if (!sub) return null;
+  if (!sub || !sub.planId) return null;
 
   // usageRecords only needs userId (already known) — it doesn't depend on
   // `plan`, so fetch it in parallel instead of after. planFeatures does
   // depend on plan._id, so it still has to wait for that one.
+  const targetPlanId = sub.planId._id ? sub.planId._id : sub.planId;
   const [plan, usageRecords] = await Promise.all([
-    Plan.findById(sub.planId._id ? sub.planId._id : sub.planId).populate("roleId"),
+    Plan.findById(targetPlanId).populate("roleId"),
     UserFeatureUsage.find({ userId }),
   ]);
+  if (!plan) return null;
   const planFeatures = await PlanFeature.find({ planId: plan._id }).populate("featureId");
 
   const featureDetails = await Promise.all(

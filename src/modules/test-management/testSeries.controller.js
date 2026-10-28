@@ -6,6 +6,7 @@ import TestSeriesAssignment from "../../models/testSeriesAssignment.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 import UserModel from "../../models/user.model.js";
+import { hasTestEnded } from "./utils/status.js";
 
 // Fall back to a DB lookup for tokens issued before organizationId was
 // embedded in the JWT payload.
@@ -537,15 +538,39 @@ export const acceptSeriesAssignment = async (req, res, next) => {
     const series = req.series;
     const seriesId = series._id;
 
+    const now = new Date();
+    const childTests = Array.isArray(series.tests) && series.tests.length
+      ? await Test.find({ _id: { $in: series.tests }, isDeleted: 0, isPublished: true })
+          .select("_id scheduleType startTime endTime isPublished")
+          .lean()
+      : [];
+
+    if (childTests.length > 0) {
+      const allExpired = childTests.every(
+        (t) => hasTestEnded(t, now) || (t.endTime && now > new Date(t.endTime))
+      );
+      if (allExpired) {
+        return res.status(400).json({
+          success: false,
+          message: "This test series has already ended and can no longer be accepted.",
+        });
+      }
+    }
+
     const assignment = await TestSeriesAssignment.findOneAndUpdate(
       { seriesId, studentId },
       { status: "ACCEPTED", acceptedAt: new Date() },
       { new: true, upsert: true }
     );
 
-    if (Array.isArray(series.tests) && series.tests.length) {
+    // Rule E: When accepting the series, do not newly accept already-expired child tests
+    const eligibleTestIds = childTests
+      .filter((t) => !hasTestEnded(t, now) && !(t.endTime && now > new Date(t.endTime)))
+      .map((t) => t._id);
+
+    if (eligibleTestIds.length) {
       await TestAssignment.bulkWrite(
-        series.tests.map((testId) => ({
+        eligibleTestIds.map((testId) => ({
           updateOne: {
             filter: { testId, studentId },
             update: {
@@ -573,6 +598,25 @@ export const declineSeriesAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const series = req.series;
     const seriesId = series._id;
+
+    const now = new Date();
+    const childTests = Array.isArray(series.tests) && series.tests.length
+      ? await Test.find({ _id: { $in: series.tests }, isDeleted: 0, isPublished: true })
+          .select("_id scheduleType startTime endTime isPublished")
+          .lean()
+      : [];
+
+    if (childTests.length > 0) {
+      const allExpired = childTests.every(
+        (t) => hasTestEnded(t, now) || (t.endTime && now > new Date(t.endTime))
+      );
+      if (allExpired) {
+        return res.status(400).json({
+          success: false,
+          message: "This test series has already ended and can no longer be declined.",
+        });
+      }
+    }
 
     const assignment = await TestSeriesAssignment.findOneAndUpdate(
       { seriesId, studentId },

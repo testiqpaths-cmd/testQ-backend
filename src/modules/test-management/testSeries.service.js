@@ -576,7 +576,7 @@ export const getAssignedSeries = async ({ studentId = null, userRole = null, sea
   const seriesList = await TestSeries.find(filters)
     .populate({
       path: "tests",
-      select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status",
+      select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status companyStageOrder maxAttempts totalMarks",
     })
     .sort({ createdAt: -1 })
     .lean();
@@ -610,12 +610,18 @@ export const getAssignedSeries = async ({ studentId = null, userRole = null, sea
         orgName = orgNameMap.get(String(s.allowedOrganizations[0]));
       }
       const assignmentStatus = seriesAssignmentMap.get(String(s._id)) || "PENDING";
+      const publishedTests = Array.isArray(s.tests) ? s.tests.filter((t) => t && t.isPublished !== false) : [];
+      const now = new Date();
+      const isExpired = publishedTests.length > 0 && publishedTests.every(
+        (t) => (t.scheduleType === "FIXED" && t.endTime && now > new Date(t.endTime)) || (t.endTime && now > new Date(t.endTime))
+      );
       return {
         ...s,
         id: String(s._id),
         organizationName: orgName || null,
         testsCount: Array.isArray(s.tests) ? s.tests.length : 0,
         assignmentStatus,
+        isExpired,
       };
     })
     .filter((s) => userRole === "IQPATH_ADMIN" || (s.assignmentStatus !== "DECLINED" && s.assignmentStatus !== "HIDDEN"));
