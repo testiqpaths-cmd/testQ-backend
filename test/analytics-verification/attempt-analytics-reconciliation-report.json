@@ -1,0 +1,2039 @@
+{
+  "reportType": "ATTEMPT_ANALYTICS_RECONCILIATION_DRY_RUN",
+  "generatedAt": "2026-10-27T08:58:52.867Z",
+  "safety": {
+    "mode": "DRY_RUN",
+    "databaseWritesAttempted": false,
+    "databaseWritesAllowed": false,
+    "targetAttemptCount": 9,
+    "foundAttemptCount": 9,
+    "missingAttemptIds": []
+  },
+  "metricDefinitions": {
+    "correct": "Answered questions with isCorrect === true.",
+    "wrong": "Answered questions with isCorrect === false.",
+    "skipped": "Questions without a non-empty selected option or text answer.",
+    "pending": "Answered questions without a true/false evaluation.",
+    "accuracy": "correct / (correct + wrong) * 100.",
+    "difficultyFallback": "Medium"
+  },
+  "attemptReports": [
+    {
+      "attemptId": "6a622d45e63c0d5942732bf5",
+      "studentId": "6a4a12d9e0e39456cabb3738",
+      "testId": "6a60c3e2597a907f90b65e39",
+      "status": "EVALUATED",
+      "startedAt": "2026-07-23T15:03:33.984Z",
+      "submittedAt": "2026-07-23T15:06:22.568Z",
+      "stored": {
+        "correct": 0,
+        "wrong": 1,
+        "skipped": 8,
+        "totalScore": 0,
+        "percentage": 0,
+        "timeTakenSeconds": 148
+      },
+      "recalculated": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 8,
+        "pending": 0,
+        "answeredCount": 0,
+        "evaluatedCount": 0,
+        "totalQuestions": 8,
+        "accuracy": 0,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "Medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": -1,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 8,
+        "pending": 0,
+        "totalQuestions": 8,
+        "answeredCount": 0,
+        "evaluatedCount": 0,
+        "score": 0,
+        "percentage": 0,
+        "timeSpentSeconds": 148,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 0,
+        "storedPercentage": 0,
+        "storedProcessedAt": "2026-10-26T15:34:41.271Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 1
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a1a89545a7178af23f45a94",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "STORED_COUNTER_DISCREPANCY",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a62374be63c0d5942733855",
+      "studentId": "6a6235d7e63c0d5942732e4e",
+      "testId": "6a6235dde63c0d5942732e55",
+      "status": "EVALUATED",
+      "startedAt": "2026-07-23T15:46:19.887Z",
+      "submittedAt": "2026-07-23T16:20:00.002Z",
+      "stored": {
+        "correct": 0,
+        "wrong": 1,
+        "skipped": 30,
+        "totalScore": 0,
+        "percentage": 0,
+        "timeTakenSeconds": 109
+      },
+      "recalculated": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 30,
+        "pending": 0,
+        "answeredCount": 0,
+        "evaluatedCount": 0,
+        "totalQuestions": 30,
+        "accuracy": 0,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 15
+          },
+          "Medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 10
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 5
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": -1,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 30,
+        "pending": 0,
+        "totalQuestions": 30,
+        "answeredCount": 0,
+        "evaluatedCount": 0,
+        "score": 0,
+        "percentage": 0,
+        "timeSpentSeconds": 109,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 15
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 10
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 5
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 0,
+        "storedPercentage": 0,
+        "storedProcessedAt": "2026-10-26T15:35:32.249Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 1
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 15
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 10
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 5
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a5b929d47329a05d06d3c22",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "STORED_COUNTER_DISCREPANCY",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a623768e63c0d59427343e3",
+      "studentId": "6a1a92d5d16ff8d60649a349",
+      "testId": "6a6235dde63c0d5942732e55",
+      "status": "EVALUATED",
+      "startedAt": "2026-07-23T15:46:48.955Z",
+      "submittedAt": "2026-07-23T15:56:37.266Z",
+      "stored": {
+        "correct": 6,
+        "wrong": 12,
+        "skipped": 13,
+        "totalScore": 6,
+        "percentage": 20,
+        "timeTakenSeconds": 671
+      },
+      "recalculated": {
+        "correct": 6,
+        "wrong": 11,
+        "skipped": 13,
+        "pending": 0,
+        "answeredCount": 17,
+        "evaluatedCount": 17,
+        "totalQuestions": 30,
+        "accuracy": 35.2941,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 2,
+            "wrong": 6,
+            "skipped": 6
+          },
+          "Medium": {
+            "correct": 4,
+            "wrong": 4,
+            "skipped": 7
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 0
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": -1,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 6,
+        "wrong": 11,
+        "skipped": 13,
+        "pending": 0,
+        "totalQuestions": 30,
+        "answeredCount": 17,
+        "evaluatedCount": 17,
+        "score": 6,
+        "percentage": 20,
+        "timeSpentSeconds": 671,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 2,
+            "wrong": 6,
+            "skipped": 6
+          },
+          "medium": {
+            "correct": 4,
+            "wrong": 4,
+            "skipped": 7
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 0
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 6,
+        "storedPercentage": 20,
+        "storedProcessedAt": "2026-10-26T15:35:00.348Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 2,
+            "wrong": 6,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 4,
+            "wrong": 4,
+            "skipped": 1
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 2,
+            "wrong": 6,
+            "skipped": 6
+          },
+          "medium": {
+            "correct": 4,
+            "wrong": 4,
+            "skipped": 7
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 0
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a5b929d47329a05d06d3c22",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "STORED_COUNTER_DISCREPANCY",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a623b86e63c0d5942749f25",
+      "studentId": "6a608d6f597a907f90b646d7",
+      "testId": "6a6235dde63c0d5942732e55",
+      "status": "EVALUATED",
+      "startedAt": "2026-07-23T16:04:22.138Z",
+      "submittedAt": "2026-07-23T16:11:41.043Z",
+      "stored": {
+        "correct": 5,
+        "wrong": 16,
+        "skipped": 11,
+        "totalScore": 5,
+        "percentage": 17,
+        "timeTakenSeconds": 408
+      },
+      "recalculated": {
+        "correct": 5,
+        "wrong": 14,
+        "skipped": 11,
+        "pending": 0,
+        "answeredCount": 19,
+        "evaluatedCount": 19,
+        "totalQuestions": 30,
+        "accuracy": 26.3158,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 4,
+            "wrong": 7,
+            "skipped": 4
+          },
+          "Medium": {
+            "correct": 1,
+            "wrong": 6,
+            "skipped": 6
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": -2,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 5,
+        "wrong": 14,
+        "skipped": 11,
+        "pending": 0,
+        "totalQuestions": 30,
+        "answeredCount": 19,
+        "evaluatedCount": 19,
+        "score": 5,
+        "percentage": 17,
+        "timeSpentSeconds": 408,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 4,
+            "wrong": 7,
+            "skipped": 4
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 6,
+            "skipped": 6
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 5,
+        "storedPercentage": 17,
+        "storedProcessedAt": "2026-10-26T15:35:26.249Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 4,
+            "wrong": 7,
+            "skipped": 1
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 6,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 4,
+            "wrong": 7,
+            "skipped": 4
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 6,
+            "skipped": 6
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a5b929d47329a05d06d3c22",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "STORED_COUNTER_DISCREPANCY",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a648d927971b3b0b7e4dd5f",
+      "studentId": "6a58fcec24446ef390bf4cf5",
+      "testId": "6a648d267971b3b0b7e4dcc6",
+      "status": "EVALUATED",
+      "startedAt": "2026-07-25T10:18:58.243Z",
+      "submittedAt": "2026-07-25T10:19:57.076Z",
+      "stored": {
+        "correct": 1,
+        "wrong": 4,
+        "skipped": 16,
+        "totalScore": 1,
+        "percentage": 5,
+        "timeTakenSeconds": 57
+      },
+      "recalculated": {
+        "correct": 1,
+        "wrong": 3,
+        "skipped": 16,
+        "pending": 0,
+        "answeredCount": 4,
+        "evaluatedCount": 4,
+        "totalQuestions": 20,
+        "accuracy": 25,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 1,
+            "wrong": 3,
+            "skipped": 11
+          },
+          "Medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 3
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 2
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": -1,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 1,
+        "wrong": 3,
+        "skipped": 16,
+        "pending": 0,
+        "totalQuestions": 20,
+        "answeredCount": 4,
+        "evaluatedCount": 4,
+        "score": 1,
+        "percentage": 5,
+        "timeSpentSeconds": 57,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 1,
+            "wrong": 3,
+            "skipped": 11
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 3
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 2
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 1,
+        "storedPercentage": 5,
+        "storedProcessedAt": "2026-10-26T15:36:13.440Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 1,
+            "wrong": 3,
+            "skipped": 1
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 1,
+            "wrong": 3,
+            "skipped": 11
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 3
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 2
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a1ea0cff89d6e0ecad0a05c",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "STORED_COUNTER_DISCREPANCY",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a73f850e972feee804d8bd8",
+      "studentId": "6a73f850e972feee804d8bca",
+      "testId": "6a73f850e972feee804d8bcc",
+      "status": "SUBMITTED",
+      "startedAt": "2026-08-06T02:58:24.468Z",
+      "submittedAt": "2026-08-06T02:57:24.464Z",
+      "stored": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 0,
+        "totalScore": 35,
+        "percentage": 87.5,
+        "timeTakenSeconds": 0
+      },
+      "recalculated": {
+        "correct": 9,
+        "wrong": 1,
+        "skipped": 0,
+        "pending": 0,
+        "answeredCount": 10,
+        "evaluatedCount": 10,
+        "totalQuestions": 10,
+        "accuracy": 90,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "Medium": {
+            "correct": 9,
+            "wrong": 1,
+            "skipped": 0
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 9,
+        "wrong": 1,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 9,
+        "wrong": 1,
+        "skipped": 0,
+        "pending": 0,
+        "totalQuestions": 10,
+        "answeredCount": 10,
+        "evaluatedCount": 10,
+        "score": 35,
+        "percentage": 87.5,
+        "timeSpentSeconds": 0,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 9,
+            "wrong": 1,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 35,
+        "storedPercentage": 87.5,
+        "storedProcessedAt": "2026-10-26T15:37:03.499Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 9,
+            "wrong": 1,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 9,
+            "wrong": 1,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a1a894b5a7178af23f45a80",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "UNPOPULATED_STORED_COUNTERS",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a73f850e972feee804d8be5",
+      "studentId": "6a73f850e972feee804d8bca",
+      "testId": "6a73f850e972feee804d8bcd",
+      "status": "SUBMITTED",
+      "startedAt": "2026-08-06T02:58:24.501Z",
+      "submittedAt": "2026-08-06T02:58:24.499Z",
+      "stored": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 0,
+        "totalScore": -2,
+        "percentage": 0,
+        "timeTakenSeconds": 0
+      },
+      "recalculated": {
+        "correct": 0,
+        "wrong": 2,
+        "skipped": 0,
+        "pending": 0,
+        "answeredCount": 2,
+        "evaluatedCount": 2,
+        "totalQuestions": 2,
+        "accuracy": 0,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "Medium": {
+            "correct": 0,
+            "wrong": 2,
+            "skipped": 0
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": 2,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 0,
+        "wrong": 2,
+        "skipped": 0,
+        "pending": 0,
+        "totalQuestions": 2,
+        "answeredCount": 2,
+        "evaluatedCount": 2,
+        "score": -2,
+        "percentage": 0,
+        "timeSpentSeconds": 0,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 2,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": -2,
+        "storedPercentage": 0,
+        "storedProcessedAt": "2026-10-26T15:37:05.368Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 0,
+            "wrong": 2,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "medium": {
+            "correct": 0,
+            "wrong": 2,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a1a894b5a7178af23f45a80",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "UNPOPULATED_STORED_COUNTERS",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a93c64016a484fd00cf5e21",
+      "studentId": "6a58fcec24446ef390bf4cf5",
+      "testId": "6a93c59716a484fd00cf5aa0",
+      "status": "EVALUATED",
+      "startedAt": "2026-08-30T05:57:20.286Z",
+      "submittedAt": "2026-08-30T05:58:07.187Z",
+      "stored": {
+        "correct": 1,
+        "wrong": 1,
+        "skipped": 19,
+        "totalScore": 1,
+        "percentage": 5,
+        "timeTakenSeconds": 40
+      },
+      "recalculated": {
+        "correct": 1,
+        "wrong": 0,
+        "skipped": 19,
+        "pending": 0,
+        "answeredCount": 1,
+        "evaluatedCount": 1,
+        "totalQuestions": 20,
+        "accuracy": 100,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 2
+          },
+          "Medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 13
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": -1,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 1,
+        "wrong": 0,
+        "skipped": 19,
+        "pending": 0,
+        "totalQuestions": 20,
+        "answeredCount": 1,
+        "evaluatedCount": 1,
+        "score": 1,
+        "percentage": 5,
+        "timeSpentSeconds": 40,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 2
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 13
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 1,
+        "storedPercentage": 5,
+        "storedProcessedAt": "2026-10-26T15:38:59.769Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 1
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 2
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 4
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 0,
+            "skipped": 13
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a1a89745a7178af23f45adf",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "STORED_COUNTER_DISCREPANCY",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    },
+    {
+      "attemptId": "6a982aaccc0c59832224097d",
+      "studentId": "6a4a12d9e0e39456cabb3738",
+      "testId": "6a96484d4db6497d9a1f5464",
+      "status": "EVALUATED",
+      "startedAt": "2026-09-02T13:54:52.747Z",
+      "submittedAt": "2026-09-02T13:56:48.190Z",
+      "stored": {
+        "correct": 1,
+        "wrong": 6,
+        "skipped": 4,
+        "totalScore": 1,
+        "percentage": 10,
+        "timeTakenSeconds": 205
+      },
+      "recalculated": {
+        "correct": 1,
+        "wrong": 5,
+        "skipped": 4,
+        "pending": 0,
+        "answeredCount": 6,
+        "evaluatedCount": 6,
+        "totalQuestions": 10,
+        "accuracy": 16.6667,
+        "difficultyBreakdown": {
+          "Easy": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          },
+          "Medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "Hard": {
+            "correct": 0,
+            "wrong": 4,
+            "skipped": 3
+          }
+        }
+      },
+      "candidateCounterDeltas": {
+        "correct": 0,
+        "wrong": -1,
+        "skipped": 0
+      },
+      "candidateCanonicalMetrics": {
+        "correct": 1,
+        "wrong": 5,
+        "skipped": 4,
+        "pending": 0,
+        "totalQuestions": 10,
+        "answeredCount": 6,
+        "evaluatedCount": 6,
+        "score": 1,
+        "percentage": 10,
+        "timeSpentSeconds": 205,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 4,
+            "skipped": 3
+          }
+        }
+      },
+      "processingRecord": {
+        "exists": true,
+        "ledgerState": "LEGACY_BASELINE_REQUIRED",
+        "metricsVersion": null,
+        "hasCanonicalMetrics": false,
+        "storedScore": 1,
+        "storedPercentage": 10,
+        "storedProcessedAt": "2026-10-26T15:39:08.850Z"
+      },
+      "canonicalBaselineParity": {
+        "historicalDiffAppliedToSummary": {
+          "easy": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 4,
+            "skipped": 0
+          }
+        },
+        "currentUtilityDiffRecalculated": {
+          "easy": {
+            "correct": 0,
+            "wrong": 1,
+            "skipped": 1
+          },
+          "medium": {
+            "correct": 1,
+            "wrong": 0,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 0,
+            "wrong": 4,
+            "skipped": 3
+          }
+        },
+        "difficultyParityMatches": false,
+        "scopeParityMatches": false,
+        "promotionPermitted": false,
+        "promotionDecision": "BLOCKED_MUST_REMAIN_LEGACY_BASELINE_REQUIRED",
+        "promotionBlockerReason": "Historical difficulty contribution in StudentPerformanceSummary differs from current utility recalculation. Promoting record with new breakdown would cause incorrect delta subtractions during future re-evaluations.",
+        "recommendedReconciliationAction": "RECONCILE_ATTEMPT_AND_STUDENT_SCALARS_ONLY__KEEP_PROCESSING_RECORD_AS_LEGACY_BASELINE_REQUIRED"
+      },
+      "scopeCandidates": {
+        "attempt": {
+          "subject": null,
+          "subjectId": null,
+          "organizationId": null,
+          "sourceCategory": null
+        },
+        "test": {
+          "subject": null,
+          "subjectId": "6a1a894b5a7178af23f45a80",
+          "organizationId": null,
+          "sourceCategory": null,
+          "createdBy": "[object Object]",
+          "createdByRole": null
+        },
+        "existingLedger": {
+          "subjectKey": null,
+          "subjectName": null,
+          "organizationId": null,
+          "dateKey": null,
+          "sourceCategory": null
+        }
+      },
+      "classification": "STORED_COUNTER_DISCREPANCY",
+      "safeForAutomaticReconciliation": false,
+      "reconciliationBlockers": [
+        "Legacy processing record has no canonical historical metrics.",
+        "Canonical baseline promotion blocked: difficulty/scope disparity with existing aggregates.",
+        "Aggregate contribution deltas require a verified historical baseline.",
+        "No database writes are permitted by this dry-run."
+      ]
+    }
+  ],
+  "studentSummaries": [
+    {
+      "studentId": "6a4a12d9e0e39456cabb3738",
+      "exists": true,
+      "currentSummary": {
+        "studentId": "6a4a12d9e0e39456cabb3738",
+        "totalTestsAttempted": 38,
+        "totalQuestionsAnswered": 126,
+        "totalCorrectAnswers": 73,
+        "totalIncorrectAnswers": 53,
+        "totalUnattemptedQuestions": 504,
+        "totalScoreSum": 71.75,
+        "totalPercentageSum": 460,
+        "scoredAttemptCount": 38,
+        "totalTimeSpentSeconds": 6132,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 43,
+            "skipped": 1,
+            "wrong": 24
+          },
+          "hard": {
+            "correct": 1,
+            "skipped": 0,
+            "wrong": 6
+          },
+          "medium": {
+            "correct": 29,
+            "skipped": 1,
+            "wrong": 21
+          }
+        },
+        "subjectStats": {
+          "6a1a896d5a7178af23f45acd": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 203
+          },
+          "6a1a899b5a7178af23f45af1": {
+            "attemptCount": 1,
+            "scoreSum": 69,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 220
+          },
+          "6a1a894b5a7178af23f45a80": {
+            "attemptCount": 13,
+            "scoreSum": 133,
+            "scoredAttemptCount": 13,
+            "timeSpentSeconds": 2283
+          },
+          "6a1a895c5a7178af23f45aa7": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 0
+          },
+          "6a1a89545a7178af23f45a94": {
+            "attemptCount": 17,
+            "scoreSum": 114,
+            "scoredAttemptCount": 17,
+            "timeSpentSeconds": 1652
+          },
+          "6a5b92a547329a05d06d3c93": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 40
+          },
+          "6a60ff18aeed0ace9b84ae7a": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 116
+          },
+          "6a1ea0cff89d6e0ecad0a05c": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 229
+          },
+          "6a5b929d47329a05d06d3c22": {
+            "attemptCount": 1,
+            "scoreSum": 73,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 1167
+          },
+          "general": {
+            "attemptCount": 1,
+            "scoreSum": 71,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 222
+          }
+        }
+      }
+    },
+    {
+      "studentId": "6a6235d7e63c0d5942732e4e",
+      "exists": true,
+      "currentSummary": {
+        "studentId": "6a6235d7e63c0d5942732e4e",
+        "totalTestsAttempted": 1,
+        "totalQuestionsAnswered": 1,
+        "totalCorrectAnswers": 0,
+        "totalIncorrectAnswers": 1,
+        "totalUnattemptedQuestions": 30,
+        "totalScoreSum": 0,
+        "totalPercentageSum": 0,
+        "scoredAttemptCount": 1,
+        "totalTimeSpentSeconds": 109,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 0,
+            "skipped": 1,
+            "wrong": 0
+          },
+          "hard": {
+            "correct": 0,
+            "skipped": 0,
+            "wrong": 0
+          },
+          "medium": {
+            "correct": 0,
+            "skipped": 0,
+            "wrong": 0
+          }
+        },
+        "subjectStats": {
+          "6a5b929d47329a05d06d3c22": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 109
+          }
+        }
+      }
+    },
+    {
+      "studentId": "6a1a92d5d16ff8d60649a349",
+      "exists": true,
+      "currentSummary": {
+        "studentId": "6a1a92d5d16ff8d60649a349",
+        "totalTestsAttempted": 1,
+        "totalQuestionsAnswered": 18,
+        "totalCorrectAnswers": 6,
+        "totalIncorrectAnswers": 12,
+        "totalUnattemptedQuestions": 13,
+        "totalScoreSum": 6,
+        "totalPercentageSum": 20,
+        "scoredAttemptCount": 1,
+        "totalTimeSpentSeconds": 671,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 2,
+            "skipped": 0,
+            "wrong": 6
+          },
+          "hard": {
+            "correct": 0,
+            "skipped": 0,
+            "wrong": 1
+          },
+          "medium": {
+            "correct": 4,
+            "skipped": 1,
+            "wrong": 4
+          }
+        },
+        "subjectStats": {
+          "6a5b929d47329a05d06d3c22": {
+            "attemptCount": 1,
+            "scoreSum": 20,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 671
+          }
+        }
+      }
+    },
+    {
+      "studentId": "6a608d6f597a907f90b646d7",
+      "exists": true,
+      "currentSummary": {
+        "studentId": "6a608d6f597a907f90b646d7",
+        "totalTestsAttempted": 2,
+        "totalQuestionsAnswered": 34,
+        "totalCorrectAnswers": 14,
+        "totalIncorrectAnswers": 20,
+        "totalUnattemptedQuestions": 23,
+        "totalScoreSum": 14,
+        "totalPercentageSum": 53,
+        "scoredAttemptCount": 2,
+        "totalTimeSpentSeconds": 638,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 10,
+            "skipped": 1,
+            "wrong": 7
+          },
+          "hard": {
+            "correct": 0,
+            "skipped": 1,
+            "wrong": 2
+          },
+          "medium": {
+            "correct": 4,
+            "skipped": 0,
+            "wrong": 9
+          }
+        },
+        "subjectStats": {
+          "6a5b929d47329a05d06d3c22": {
+            "attemptCount": 1,
+            "scoreSum": 17,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 408
+          },
+          "6a1a895c5a7178af23f45aa7": {
+            "attemptCount": 1,
+            "scoreSum": 36,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 230
+          }
+        }
+      }
+    },
+    {
+      "studentId": "6a58fcec24446ef390bf4cf5",
+      "exists": true,
+      "currentSummary": {
+        "studentId": "6a58fcec24446ef390bf4cf5",
+        "totalTestsAttempted": 59,
+        "totalQuestionsAnswered": 475,
+        "totalCorrectAnswers": 356,
+        "totalIncorrectAnswers": 119,
+        "totalUnattemptedQuestions": 734,
+        "totalScoreSum": 355.5,
+        "totalPercentageSum": 2063,
+        "scoredAttemptCount": 59,
+        "totalTimeSpentSeconds": 5440,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 169,
+            "wrong": 49,
+            "skipped": 2
+          },
+          "medium": {
+            "correct": 80,
+            "wrong": 32,
+            "skipped": 0
+          },
+          "hard": {
+            "correct": 107,
+            "wrong": 36,
+            "skipped": 0
+          }
+        },
+        "subjectStats": {
+          "general": {
+            "attemptCount": 5,
+            "scoreSum": 157,
+            "scoredAttemptCount": 5,
+            "timeSpentSeconds": 516
+          },
+          "6a1a896d5a7178af23f45acd": {
+            "attemptCount": 2,
+            "scoreSum": 40,
+            "scoredAttemptCount": 2,
+            "timeSpentSeconds": 111
+          },
+          "6a1a899b5a7178af23f45af1": {
+            "attemptCount": 4,
+            "scoreSum": 338,
+            "scoredAttemptCount": 4,
+            "timeSpentSeconds": 591
+          },
+          "6a1a89545a7178af23f45a94": {
+            "attemptCount": 12,
+            "scoreSum": 323,
+            "scoredAttemptCount": 12,
+            "timeSpentSeconds": 967
+          },
+          "6a1a89645a7178af23f45aba": {
+            "attemptCount": 8,
+            "scoreSum": 240,
+            "scoredAttemptCount": 8,
+            "timeSpentSeconds": 994
+          },
+          "6a1ea0cff89d6e0ecad0a05c": {
+            "attemptCount": 9,
+            "scoreSum": 375,
+            "scoredAttemptCount": 9,
+            "timeSpentSeconds": 612
+          },
+          "6a60ff18aeed0ace9b84ae7a": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 57
+          },
+          "6a1a89745a7178af23f45adf": {
+            "attemptCount": 2,
+            "scoreSum": 105,
+            "scoredAttemptCount": 2,
+            "timeSpentSeconds": 117
+          },
+          "6a3fafc4883c345d4d686b5a": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 0
+          },
+          "6a5b92a547329a05d06d3c93": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 15
+          },
+          "6a8d535d3044d97bf81eafa3": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 123
+          },
+          "6a1a894b5a7178af23f45a80": {
+            "attemptCount": 2,
+            "scoreSum": 20,
+            "scoredAttemptCount": 2,
+            "timeSpentSeconds": 189
+          },
+          "6aaf83684e284caf93f55870": {
+            "attemptCount": 5,
+            "scoreSum": 275,
+            "scoredAttemptCount": 5,
+            "timeSpentSeconds": 533
+          },
+          "6a1a895c5a7178af23f45aa7": {
+            "attemptCount": 1,
+            "scoreSum": 15,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 124
+          },
+          "6a7eade5b18556aaa71eb339": {
+            "attemptCount": 1,
+            "scoreSum": 15,
+            "scoredAttemptCount": 1,
+            "timeSpentSeconds": 40
+          },
+          "6a58ddbeae3f8f8a81813426": {
+            "attemptCount": 4,
+            "scoreSum": 160,
+            "scoredAttemptCount": 4,
+            "timeSpentSeconds": 451
+          }
+        }
+      }
+    },
+    {
+      "studentId": "6a73f850e972feee804d8bca",
+      "exists": true,
+      "currentSummary": {
+        "studentId": "6a73f850e972feee804d8bca",
+        "totalTestsAttempted": 2,
+        "totalQuestionsAnswered": 0,
+        "totalCorrectAnswers": 0,
+        "totalIncorrectAnswers": 0,
+        "totalUnattemptedQuestions": 0,
+        "totalScoreSum": 33,
+        "totalPercentageSum": 87.5,
+        "scoredAttemptCount": 2,
+        "totalTimeSpentSeconds": 0,
+        "difficultyBreakdown": {
+          "easy": {
+            "correct": 9,
+            "skipped": 0,
+            "wrong": 3
+          },
+          "hard": {
+            "correct": 0,
+            "skipped": 0,
+            "wrong": 0
+          },
+          "medium": {
+            "correct": 0,
+            "skipped": 0,
+            "wrong": 0
+          }
+        },
+        "subjectStats": {
+          "6a1a894b5a7178af23f45a80": {
+            "attemptCount": 2,
+            "scoreSum": 87.5,
+            "scoredAttemptCount": 2,
+            "timeSpentSeconds": 0
+          }
+        }
+      }
+    }
+  ],
+  "dailySummaryInspection": {
+    "dateKeyBasis": "UTC candidate derived from submittedAt",
+    "candidateDateKeys": [
+      "2026-07-23",
+      "2026-07-25",
+      "2026-08-06",
+      "2026-08-30",
+      "2026-09-02"
+    ],
+    "matchedDocuments": [
+      {
+        "dateKey": "2026-07-23",
+        "organizationId": null,
+        "totalAttempts": 44,
+        "scoreSum": 1552,
+        "scoredAttemptCount": 44,
+        "sourceCounts": {
+          "admin": 44
+        },
+        "subjectStats": {
+          "6a1ea0cff89d6e0ecad0a05c": {
+            "attemptCount": 3,
+            "scoreSum": 105,
+            "scoredAttemptCount": 3,
+            "subjectName": "DBMS"
+          },
+          "6a1a89545a7178af23f45a94": {
+            "attemptCount": 7,
+            "scoreSum": 76,
+            "scoredAttemptCount": 7,
+            "subjectName": "MongoDB"
+          },
+          "6a5b92a547329a05d06d3c93": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "subjectName": "Cyber Security"
+          },
+          "6a60ff18aeed0ace9b84ae7a": {
+            "attemptCount": 2,
+            "scoreSum": 0,
+            "scoredAttemptCount": 2,
+            "subjectName": "Compiler Design"
+          },
+          "6a5b929d47329a05d06d3c22": {
+            "attemptCount": 31,
+            "scoreSum": 1371,
+            "scoredAttemptCount": 31,
+            "subjectName": "Logical Reasoning"
+          }
+        },
+        "activeStudentCount": 33
+      },
+      {
+        "dateKey": "2026-07-25",
+        "organizationId": null,
+        "totalAttempts": 4,
+        "scoreSum": 178,
+        "scoredAttemptCount": 4,
+        "sourceCounts": {
+          "admin": 2,
+          "selfCreated": 2
+        },
+        "subjectStats": {
+          "6a1ea0cff89d6e0ecad0a05c": {
+            "attemptCount": 3,
+            "scoreSum": 95,
+            "scoredAttemptCount": 3,
+            "subjectName": "DBMS"
+          },
+          "6a1a894b5a7178af23f45a80": {
+            "attemptCount": 1,
+            "scoreSum": 83,
+            "scoredAttemptCount": 1,
+            "subjectName": "SQL"
+          }
+        },
+        "activeStudentCount": 2
+      },
+      {
+        "dateKey": "2026-08-06",
+        "organizationId": null,
+        "totalAttempts": 2,
+        "scoreSum": 87.5,
+        "scoredAttemptCount": 2,
+        "sourceCounts": {
+          "selfCreated": 2
+        },
+        "subjectStats": {
+          "6a1a894b5a7178af23f45a80": {
+            "attemptCount": 2,
+            "scoreSum": 87.5,
+            "scoredAttemptCount": 2,
+            "subjectName": "SQL"
+          }
+        },
+        "activeStudentCount": 1
+      },
+      {
+        "dateKey": "2026-08-30",
+        "organizationId": null,
+        "totalAttempts": 2,
+        "scoreSum": 5,
+        "scoredAttemptCount": 2,
+        "sourceCounts": {
+          "selfCreated": 2
+        },
+        "subjectStats": {
+          "6a1a89745a7178af23f45adf": {
+            "attemptCount": 1,
+            "scoreSum": 5,
+            "scoredAttemptCount": 1,
+            "subjectName": "Node.js"
+          },
+          "6a1a89645a7178af23f45aba": {
+            "attemptCount": 1,
+            "scoreSum": 0,
+            "scoredAttemptCount": 1,
+            "subjectName": "HTML"
+          }
+        },
+        "activeStudentCount": 1
+      },
+      {
+        "dateKey": "2026-09-02",
+        "organizationId": null,
+        "totalAttempts": 2,
+        "scoreSum": 110,
+        "scoredAttemptCount": 2,
+        "sourceCounts": {
+          "admin": 1,
+          "organization": 1
+        },
+        "subjectStats": {
+          "6a1a894b5a7178af23f45a80": {
+            "attemptCount": 1,
+            "scoreSum": 10,
+            "scoredAttemptCount": 1,
+            "subjectName": "SQL"
+          },
+          "6a1ea0cff89d6e0ecad0a05c": {
+            "attemptCount": 1,
+            "scoreSum": 100,
+            "scoredAttemptCount": 1,
+            "subjectName": "DBMS"
+          }
+        },
+        "activeStudentCount": 2
+      },
+      {
+        "dateKey": "2026-09-02",
+        "organizationId": "6a7af213142ff44023fff19b",
+        "totalAttempts": 1,
+        "scoreSum": 100,
+        "scoredAttemptCount": 1,
+        "sourceCounts": {
+          "organization": 1
+        },
+        "subjectStats": {
+          "6a1ea0cff89d6e0ecad0a05c": {
+            "attemptCount": 1,
+            "scoreSum": 100,
+            "scoredAttemptCount": 1,
+            "subjectName": "DBMS"
+          }
+        },
+        "activeStudentCount": 1
+      }
+    ],
+    "warning": "This is an inspection of existing documents for candidate dates. It does not establish the correct historical date or organization scope."
+  },
+  "overallAssessment": {
+    "allAttemptsRequireReview": true,
+    "automaticReconciliationAllowed": false,
+    "canonicalBaselineParitySummary": {
+      "totalTargetAttempts": 9,
+      "attemptsWithParityMatch": 0,
+      "attemptsBlockedFromPromotion": 9,
+      "promotionToCanonicalAllowed": false,
+      "parityFinding": "Zero of nine attempts pass baseline parity. Historical difficulty breakdown in StudentPerformanceSummary differs from current utility recalculation (due to historical EASY fallback and answer-only iteration), and legacy ledgers lack scope fields. Upgrading these records to canonical would cause incorrect delta subtractions during future re-evaluations.",
+      "safeActionPlan": "1. Correct scalar counters on the 9 testattempts documents.\n2. Correct scalar counters on the 6 affected StudentPerformanceSummary documents.\n3. Leave StudentPerformanceSummary difficultyBreakdown 100% untouched.\n4. Leave PlatformDailySummary 100% untouched.\n5. Keep all 9 processing records as LEGACY_BASELINE_REQUIRED (do not promote to metricsVersion: 1) so Phase B4 continues to safely block them from aggregate re-evaluation."
+    },
+    "nextSteps": [
+      "Review the canonical baseline parity audit.",
+      "Confirm that legacy processing records will NOT be promoted to canonical.",
+      "Authorize the transactional scalar-only reconciliation script."
+    ]
+  }
+}
