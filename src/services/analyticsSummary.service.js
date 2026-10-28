@@ -4,10 +4,13 @@ import Test from "../models/test.model.js";
 import Question from "../models/question.model.js";
 import Subject from "../models/subject.model.js";
 import User from "../models/user.model.js";
-import AnalyticsProcessingRecord from "../models/analyticsProcessingRecord.model.js";
+import AnalyticsProcessingRecord, {
+  getAnalyticsRecordState,
+} from "../models/analyticsProcessingRecord.model.js";
 import DailyStudentActivity from "../models/dailyStudentActivity.model.js";
 import PlatformDailySummary from "../models/platformDailySummary.model.js";
 import StudentPerformanceSummary from "../models/studentPerformanceSummary.model.js";
+import { calculateAttemptQuestionMetrics } from "../modules/test-attempts/utils/attemptQuestionMetrics.util.js";
 
 /**
  * Resolves analytics source category matching dashboard convention:
@@ -23,6 +26,120 @@ export const resolveSourceCategory = (test) => {
   if (role === "ORGANIZATION") return "organization";
   if (role === "IQPATH_ADMIN") return "admin";
   return "selfCreated";
+};
+
+export const ANALYTICS_METRICS_VERSION = 1;
+
+export const getCanonicalMetrics = (metadata) => ({
+  correct: metadata.correctAnswersCount,
+  wrong: metadata.incorrectAnswersCount,
+  skipped: metadata.unattemptedQuestionsCount,
+  pending: metadata.pendingAnswersCount,
+  totalQuestions: metadata.totalQuestionsCount,
+  answeredCount: metadata.answeredQuestionsCount,
+  evaluatedCount: metadata.evaluatedQuestionsCount,
+  score: metadata.score,
+  percentage: metadata.percentage,
+  timeSpentSeconds: metadata.timeSpentSeconds,
+  difficultyBreakdown: {
+    easy: { ...metadata.diffCounts.easy },
+    medium: { ...metadata.diffCounts.medium },
+    hard: { ...metadata.diffCounts.hard },
+  },
+});
+
+export const normalizeId = (value) =>
+  value == null ? null : String(value);
+
+export const getCanonicalScope = (metadata) => ({
+  subjectKey: String(metadata.subjectKey),
+  subjectName: metadata.subjectName,
+  organizationId: normalizeId(metadata.organizationId),
+  dateKey: metadata.dateKey,
+  sourceCategory: metadata.sourceCategory,
+});
+
+export const getStoredCanonicalScope = (record) => ({
+  subjectKey: record.subjectKey,
+  subjectName: record.subjectName,
+  organizationId: normalizeId(record.organizationId),
+  dateKey: record.dateKey,
+  sourceCategory: record.sourceCategory,
+});
+
+export const areScopesEqual = (a, b) =>
+  Boolean(a && b) &&
+  a.subjectKey === b.subjectKey &&
+  a.subjectName === b.subjectName &&
+  a.organizationId === b.organizationId &&
+  a.dateKey === b.dateKey &&
+  a.sourceCategory === b.sourceCategory;
+
+export const areMetricsEqual = (a, b) => {
+  if (!a || !b) return false;
+
+  const scalarKeys = [
+    "correct",
+    "wrong",
+    "skipped",
+    "pending",
+    "totalQuestions",
+    "answeredCount",
+    "evaluatedCount",
+    "score",
+    "percentage",
+    "timeSpentSeconds",
+  ];
+
+  for (const key of scalarKeys) {
+    if (a[key] !== b[key]) return false;
+  }
+
+  for (const difficulty of ["easy", "medium", "hard"]) {
+    for (const key of ["correct", "wrong", "skipped"]) {
+      if (
+        a.difficultyBreakdown?.[difficulty]?.[key] !==
+        b.difficultyBreakdown?.[difficulty]?.[key]
+      ) {
+        return false;
+      }
+    }
+  }
+
+  return true;
+};
+
+export const subtractMetrics = (next, previous) => {
+  const delta = {};
+
+  for (const key of [
+    "correct",
+    "wrong",
+    "skipped",
+    "pending",
+    "totalQuestions",
+    "answeredCount",
+    "evaluatedCount",
+    "score",
+    "percentage",
+    "timeSpentSeconds",
+  ]) {
+    delta[key] = next[key] - previous[key];
+  }
+
+  delta.difficultyBreakdown = {};
+
+  for (const difficulty of ["easy", "medium", "hard"]) {
+    delta.difficultyBreakdown[difficulty] = {};
+
+    for (const key of ["correct", "wrong", "skipped"]) {
+      delta.difficultyBreakdown[difficulty][key] =
+        next.difficultyBreakdown[difficulty][key] -
+        previous.difficultyBreakdown[difficulty][key];
+    }
+  }
+
+  return delta;
 };
 
 /**
@@ -107,33 +224,21 @@ export const resolveAttemptAnalyticsMetadata = async (attempt, session) => {
     if (session) qQuery.session(session);
     const questions = await qQuery.lean();
     difficultyMap = new Map(
-      questions.map((q) => [String(q._id), String(q.difficulty || "EASY").toUpperCase()])
+      questions.map((q) => [String(q._id), q.difficulty])
     );
   }
 
+  const questionMetrics = calculateAttemptQuestionMetrics({
+    answers: attempt.answers,
+    questionSnapshots: attempt.questionSnapshots,
+    questionDifficultyMap: difficultyMap,
+  });
+
   const diffCounts = {
-    easy: { correct: 0, wrong: 0, skipped: 0 },
-    medium: { correct: 0, wrong: 0, skipped: 0 },
-    hard: { correct: 0, wrong: 0, skipped: 0 },
+    easy: questionMetrics.difficultyBreakdown.Easy,
+    medium: questionMetrics.difficultyBreakdown.Medium,
+    hard: questionMetrics.difficultyBreakdown.Hard,
   };
-
-  const answers = Array.isArray(attempt.answers) ? attempt.answers : [];
-  for (const ans of answers) {
-    const rawDiff = difficultyMap.get(String(ans.questionId)) || "EASY";
-    const bucketKey =
-      rawDiff === "HARD" ? "hard" : rawDiff === "MEDIUM" ? "medium" : "easy";
-
-    if (ans.isCorrect === true) {
-      diffCounts[bucketKey].correct += 1;
-    } else if (
-      (ans.selectedOption !== null && ans.selectedOption !== undefined) ||
-      (ans.textAnswer !== null && ans.textAnswer !== undefined && String(ans.textAnswer).trim() !== "")
-    ) {
-      diffCounts[bucketKey].wrong += 1;
-    } else {
-      diffCounts[bucketKey].skipped += 1;
-    }
-  }
 
   const score = Number.isFinite(attempt.totalScore) ? attempt.totalScore : 0;
   const percentage = Number.isFinite(attempt.percentage) ? attempt.percentage : 0;
@@ -154,6 +259,14 @@ export const resolveAttemptAnalyticsMetadata = async (attempt, session) => {
     score,
     percentage,
     timeSpentSeconds,
+    correctAnswersCount: questionMetrics.correct,
+    incorrectAnswersCount: questionMetrics.wrong,
+    unattemptedQuestionsCount: questionMetrics.skipped,
+    pendingAnswersCount: questionMetrics.pending,
+    totalQuestionsCount: questionMetrics.totalQuestions,
+    answeredQuestionsCount: questionMetrics.answeredCount,
+    evaluatedQuestionsCount: questionMetrics.evaluatedCount,
+    difficultyBreakdown: questionMetrics.difficultyBreakdown,
   };
 };
 
@@ -213,61 +326,150 @@ export const processCompletedAttemptAnalytics = async (attemptId, options = {}) 
         timeSpentSeconds,
       } = metadata;
 
-      // 1b. Check if already processed: handle re-evaluation score delta or skip if identical
-      if (existingRecord) {
-        const scoreDelta = score - (existingRecord.score || 0);
-        const percentageDelta = percentage - (existingRecord.percentage || 0);
+      const nextMetrics = getCanonicalMetrics(metadata);
+      const nextScope = getCanonicalScope(metadata);
 
-        if (scoreDelta === 0 && percentageDelta === 0) {
-          return { success: true, attemptId, skipped: true, reason: "ALREADY_PROCESSED_NO_CHANGE" };
+      // 1b. Check if already processed: handle re-evaluation delta or skip if identical
+      if (existingRecord) {
+        const recordState = getAnalyticsRecordState(existingRecord);
+
+        if (recordState === "LEGACY_BASELINE_REQUIRED") {
+          return {
+            success: false,
+            attemptId,
+            skipped: true,
+            reason: "LEGACY_BASELINE_REQUIRED",
+          };
         }
 
-        // Apply delta update to StudentPerformanceSummary
-        await StudentPerformanceSummary.updateOne(
+        const previousMetrics = existingRecord.canonicalMetrics;
+        const previousScope = getStoredCanonicalScope(existingRecord);
+
+        if (!areScopesEqual(previousScope, nextScope)) {
+          return {
+            success: false,
+            attemptId,
+            skipped: true,
+            reason: "SCOPE_MIGRATION_REQUIRES_RECONCILIATION",
+            previousScope,
+            nextScope,
+          };
+        }
+
+        if (areMetricsEqual(previousMetrics, nextMetrics)) {
+          return {
+            success: true,
+            attemptId,
+            skipped: true,
+            reason: "ALREADY_PROCESSED_NO_CHANGE",
+          };
+        }
+
+        const delta = subtractMetrics(nextMetrics, previousMetrics);
+
+        // Apply metric deltas to the existing student-wide summary.
+        const studentInc = {
+          totalQuestionsAnswered:
+            delta.correct + delta.wrong,
+          totalCorrectAnswers: delta.correct,
+          totalIncorrectAnswers: delta.wrong,
+          totalUnattemptedQuestions: delta.skipped,
+          totalScoreSum: delta.score,
+          totalPercentageSum: delta.percentage,
+          totalTimeSpentSeconds: delta.timeSpentSeconds,
+
+          "difficultyBreakdown.easy.correct":
+            delta.difficultyBreakdown.easy.correct,
+          "difficultyBreakdown.easy.wrong":
+            delta.difficultyBreakdown.easy.wrong,
+          "difficultyBreakdown.easy.skipped":
+            delta.difficultyBreakdown.easy.skipped,
+
+          "difficultyBreakdown.medium.correct":
+            delta.difficultyBreakdown.medium.correct,
+          "difficultyBreakdown.medium.wrong":
+            delta.difficultyBreakdown.medium.wrong,
+          "difficultyBreakdown.medium.skipped":
+            delta.difficultyBreakdown.medium.skipped,
+
+          "difficultyBreakdown.hard.correct":
+            delta.difficultyBreakdown.hard.correct,
+          "difficultyBreakdown.hard.wrong":
+            delta.difficultyBreakdown.hard.wrong,
+          "difficultyBreakdown.hard.skipped":
+            delta.difficultyBreakdown.hard.skipped,
+
+          [`subjectStats.${nextScope.subjectKey}.scoreSum`]:
+            delta.percentage,
+          [`subjectStats.${nextScope.subjectKey}.timeSpentSeconds`]:
+            delta.timeSpentSeconds,
+        };
+
+        const studentSummaryUpdateResult = await StudentPerformanceSummary.updateOne(
           { studentId: attempt.studentId },
-          {
-            $inc: {
-              totalScoreSum: scoreDelta,
-              totalPercentageSum: percentageDelta,
-              [`subjectStats.${subjectKey}.scoreSum`]: percentageDelta,
-            },
-          },
+          { $inc: studentInc },
           { session: txSession }
         );
 
+        if (studentSummaryUpdateResult.matchedCount === 0) {
+          return {
+            success: false,
+            attemptId,
+            skipped: true,
+            reason: "STUDENT_SUMMARY_MISSING_REQUIRES_RECONCILIATION",
+          };
+        }
+
         // Apply delta update to PlatformDailySummary (platform-wide)
+        const platformFilter = {
+          dateKey: nextScope.dateKey,
+          organizationId: null,
+        };
+
         await PlatformDailySummary.updateOne(
-          { dateKey, organizationId: null },
+          platformFilter,
           {
             $inc: {
-              scoreSum: percentageDelta,
-              [`subjectStats.${subjectKey}.scoreSum`]: percentageDelta,
+              scoreSum: delta.percentage,
+              [`subjectStats.${nextScope.subjectKey}.scoreSum`]:
+                delta.percentage,
             },
           },
           { session: txSession }
         );
 
         // Apply delta update to PlatformDailySummary (organization scope, if applicable)
-        if (organizationId) {
+        if (metadata.organizationId) {
           await PlatformDailySummary.updateOne(
-            { dateKey, organizationId },
+            {
+              dateKey: nextScope.dateKey,
+              organizationId: metadata.organizationId,
+            },
             {
               $inc: {
-                scoreSum: percentageDelta,
-                [`subjectStats.${subjectKey}.scoreSum`]: percentageDelta,
+                scoreSum: delta.percentage,
+                [`subjectStats.${nextScope.subjectKey}.scoreSum`]:
+                  delta.percentage,
               },
             },
             { session: txSession }
           );
         }
 
-        // Update the processing ledger with the latest scores
+        // Update the processing ledger with the latest canonical metrics
         await AnalyticsProcessingRecord.updateOne(
           { _id: existingRecord._id },
           {
             $set: {
-              score,
-              percentage,
+              score: nextMetrics.score,
+              percentage: nextMetrics.percentage,
+              metricsVersion: ANALYTICS_METRICS_VERSION,
+              canonicalMetrics: nextMetrics,
+              subjectKey: nextScope.subjectKey,
+              subjectName: nextScope.subjectName,
+              organizationId: metadata.organizationId ?? null,
+              dateKey: nextScope.dateKey,
+              sourceCategory: nextScope.sourceCategory,
               processedAt: new Date(),
             },
           },
@@ -279,7 +481,7 @@ export const processCompletedAttemptAnalytics = async (attemptId, options = {}) 
           attemptId,
           updated: true,
           reason: "RE_EVALUATION_APPLIED",
-          deltas: { scoreDelta, percentageDelta },
+          deltas: delta,
         };
       }
 
@@ -375,32 +577,45 @@ export const processCompletedAttemptAnalytics = async (attemptId, options = {}) 
       // 7. Update StudentPerformanceSummary
       const studentInc = {
         totalTestsAttempted: 1,
+
         totalQuestionsAnswered:
-          (attempt.correctAnswersCount || 0) + (attempt.incorrectAnswersCount || 0),
-        totalCorrectAnswers: attempt.correctAnswersCount || 0,
-        totalIncorrectAnswers: attempt.incorrectAnswersCount || 0,
-        totalUnattemptedQuestions: attempt.unattemptedCount || 0,
-        totalScoreSum: score,
-        totalPercentageSum: percentage,
+          nextMetrics.correct + nextMetrics.wrong,
+        totalCorrectAnswers: nextMetrics.correct,
+        totalIncorrectAnswers: nextMetrics.wrong,
+        totalUnattemptedQuestions: nextMetrics.skipped,
+
+        totalScoreSum: nextMetrics.score,
+        totalPercentageSum: nextMetrics.percentage,
         scoredAttemptCount: 1,
-        totalTimeSpentSeconds: timeSpentSeconds,
+        totalTimeSpentSeconds: nextMetrics.timeSpentSeconds,
 
-        "difficultyBreakdown.easy.correct": diffCounts.easy.correct,
-        "difficultyBreakdown.easy.wrong": diffCounts.easy.wrong,
-        "difficultyBreakdown.easy.skipped": diffCounts.easy.skipped,
+        "difficultyBreakdown.easy.correct":
+          nextMetrics.difficultyBreakdown.easy.correct,
+        "difficultyBreakdown.easy.wrong":
+          nextMetrics.difficultyBreakdown.easy.wrong,
+        "difficultyBreakdown.easy.skipped":
+          nextMetrics.difficultyBreakdown.easy.skipped,
 
-        "difficultyBreakdown.medium.correct": diffCounts.medium.correct,
-        "difficultyBreakdown.medium.wrong": diffCounts.medium.wrong,
-        "difficultyBreakdown.medium.skipped": diffCounts.medium.skipped,
+        "difficultyBreakdown.medium.correct":
+          nextMetrics.difficultyBreakdown.medium.correct,
+        "difficultyBreakdown.medium.wrong":
+          nextMetrics.difficultyBreakdown.medium.wrong,
+        "difficultyBreakdown.medium.skipped":
+          nextMetrics.difficultyBreakdown.medium.skipped,
 
-        "difficultyBreakdown.hard.correct": diffCounts.hard.correct,
-        "difficultyBreakdown.hard.wrong": diffCounts.hard.wrong,
-        "difficultyBreakdown.hard.skipped": diffCounts.hard.skipped,
+        "difficultyBreakdown.hard.correct":
+          nextMetrics.difficultyBreakdown.hard.correct,
+        "difficultyBreakdown.hard.wrong":
+          nextMetrics.difficultyBreakdown.hard.wrong,
+        "difficultyBreakdown.hard.skipped":
+          nextMetrics.difficultyBreakdown.hard.skipped,
 
         [`subjectStats.${subjectKey}.attemptCount`]: 1,
-        [`subjectStats.${subjectKey}.scoreSum`]: percentage,
+        [`subjectStats.${subjectKey}.scoreSum`]:
+          nextMetrics.percentage,
         [`subjectStats.${subjectKey}.scoredAttemptCount`]: 1,
-        [`subjectStats.${subjectKey}.timeSpentSeconds`]: timeSpentSeconds,
+        [`subjectStats.${subjectKey}.timeSpentSeconds`]:
+          nextMetrics.timeSpentSeconds,
       };
 
       await StudentPerformanceSummary.updateOne(
@@ -417,10 +632,20 @@ export const processCompletedAttemptAnalytics = async (attemptId, options = {}) 
             studentId: attempt.studentId,
             testId: attempt.testId,
             status: "PROCESSED",
-            score,
-            percentage,
+
+            score: nextMetrics.score,
+            percentage: nextMetrics.percentage,
             submittedAt: attemptDate,
             processedAt: new Date(),
+
+            metricsVersion: ANALYTICS_METRICS_VERSION,
+            canonicalMetrics: nextMetrics,
+
+            subjectKey: nextScope.subjectKey,
+            subjectName: nextScope.subjectName,
+            organizationId: metadata.organizationId ?? null,
+            dateKey: nextScope.dateKey,
+            sourceCategory: nextScope.sourceCategory,
           },
         ],
         { session: txSession }
@@ -459,4 +684,12 @@ export default {
   resolveSourceCategory,
   resolveAttemptAnalyticsMetadata,
   processCompletedAttemptAnalytics,
+  ANALYTICS_METRICS_VERSION,
+  getCanonicalMetrics,
+  normalizeId,
+  getCanonicalScope,
+  getStoredCanonicalScope,
+  areScopesEqual,
+  areMetricsEqual,
+  subtractMetrics,
 };

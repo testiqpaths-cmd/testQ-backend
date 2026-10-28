@@ -1,16 +1,13 @@
-export const DIFFICULTY_LABELS = ["Easy", "Medium", "Hard"];
+import {
+  calculateAttemptQuestionMetrics,
+  normalizeDifficulty,
+  createEmptyDifficultyBreakdown,
+  DIFFICULTY_LABELS,
+} from "./attemptQuestionMetrics.util.js";
 
-export const toDifficultyLabel = (value) => {
-  const normalized = String(value || "MEDIUM").toLowerCase();
-  const label = normalized.charAt(0).toUpperCase() + normalized.slice(1);
-  return DIFFICULTY_LABELS.includes(label) ? label : "Medium";
-};
-
-export const emptyDifficultyBreakdown = () => ({
-  Easy: { correct: 0, wrong: 0, skipped: 0 },
-  Medium: { correct: 0, wrong: 0, skipped: 0 },
-  Hard: { correct: 0, wrong: 0, skipped: 0 },
-});
+export { DIFFICULTY_LABELS };
+export const toDifficultyLabel = normalizeDifficulty;
+export const emptyDifficultyBreakdown = createEmptyDifficultyBreakdown;
 
 export const resolveSubjectName = (test) => {
   if (!test) return "General";
@@ -78,23 +75,13 @@ export const buildAttemptAnalyticsSnapshot = ({
   const primaryTopic = topics[0] || "General";
   const category = test?.type || "Standard";
 
-  const difficultyBreakdown = emptyDifficultyBreakdown();
-  const answers = Array.isArray(attempt?.answers) ? attempt.answers : [];
-
-  answers.forEach((ans) => {
-    const qId = ans?.questionId ? String(ans.questionId) : null;
-    const rawDiff = qId && questionDifficultyMap ? questionDifficultyMap.get(qId) : null;
-    const label = toDifficultyLabel(rawDiff);
-    const bucket = difficultyBreakdown[label] || difficultyBreakdown.Medium;
-
-    if (ans.isCorrect === true) {
-      bucket.correct += 1;
-    } else if (ans.selectedOption) {
-      bucket.wrong += 1;
-    } else {
-      bucket.skipped += 1;
-    }
+  const metrics = calculateAttemptQuestionMetrics({
+    answers: attempt?.answers,
+    questionSnapshots: attempt?.questionSnapshots,
+    questionDifficultyMap,
   });
+
+  const difficultyBreakdown = metrics.difficultyBreakdown;
 
   return {
     testName,

@@ -4,29 +4,60 @@ import Notification from "../../../modules/notification/notification.model.js";
 import Test from "../../../models/test.model.js";
 import { buildAttemptAnalyticsSnapshot } from "../utils/attemptAnalyticsSnapshot.util.js";
 
-const PASS_PERCENTAGE = 40;
-
 const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
 
-const answerHasValue = (answer) =>
-  (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
-  (answer?.textAnswer !== undefined && answer?.textAnswer !== null);
+const answerHasValue = (answer) => {
+  const hasSelectedOption =
+    answer?.selectedOption !== undefined &&
+    answer?.selectedOption !== null &&
+    String(answer.selectedOption).trim() !== "";
+
+  const hasTextAnswer =
+    answer?.textAnswer !== undefined &&
+    answer?.textAnswer !== null &&
+    String(answer.textAnswer).trim() !== "";
+
+  return hasSelectedOption || hasTextAnswer;
+};
 
 const updateAttemptStats = (attempt) => {
   const answers = attempt.answers || [];
-  const totalQuestions = attempt.questionSnapshots?.length || answers.length;
+  const totalQuestions =
+    attempt.questionSnapshots?.length || answers.length;
+
   const attemptedCount = answers.filter(answerHasValue).length;
-  const correctAnswersCount = answers.filter((answer) => answer.isCorrect === true).length;
-  const incorrectAnswersCount = answers.filter((answer) => answer.isCorrect === false).length;
+
+  const correctAnswersCount = answers.filter(
+    (answer) =>
+      answerHasValue(answer) && answer.isCorrect === true
+  ).length;
+
+  const incorrectAnswersCount = answers.filter(
+    (answer) =>
+      answerHasValue(answer) && answer.isCorrect === false
+  ).length;
+
   const timeSpentMs = (attempt.questionSnapshots || []).reduce(
     (sum, question) => sum + (question.timeSpentMs || 0),
     0,
   );
 
+  const evaluatedObjectiveCount =
+    correctAnswersCount + incorrectAnswersCount;
+
   attempt.correctAnswersCount = correctAnswersCount;
   attempt.incorrectAnswersCount = incorrectAnswersCount;
-  attempt.unattemptedCount = Math.max(0, totalQuestions - attemptedCount);
-  attempt.accuracy = attemptedCount > 0 ? (correctAnswersCount / attemptedCount) * 100 : 0;
+
+  attempt.unattemptedCount = Math.max(
+    0,
+    totalQuestions - attemptedCount,
+  );
+
+  attempt.accuracy =
+    evaluatedObjectiveCount > 0
+      ? (correctAnswersCount / evaluatedObjectiveCount) * 100
+      : 0;
+
   attempt.timeTakenSeconds = Math.round(timeSpentMs / 1000);
 };
 
@@ -140,11 +171,17 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   });
 
   attempt.totalScore = totalScore;
-  attempt.percentage =
+  const rawPercentage =
     attempt.maxScore && attempt.maxScore > 0
-      ? Math.round((totalScore / attempt.maxScore) * 100)
+      ? (totalScore / attempt.maxScore) * 100
       : 0;
+  attempt.percentage = Math.round(rawPercentage);
   updateAttemptStats(attempt);
+
+  const passingThreshold =
+    typeof test?.passingPercentage === "number"
+      ? test.passingPercentage
+      : 50;
 
   if (hasSubjective) {
     attempt.status = "SUBMITTED";
@@ -156,7 +193,9 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     attempt.resultStatus =
       attempt.expireReason === "CHEATING"
         ? "FAIL"
-        : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+        : rawPercentage >= passingThreshold
+          ? "PASS"
+          : "FAIL";
     attempt.isCompleted = true;
     attempt.isPassed = attempt.resultStatus === "PASS";
   }

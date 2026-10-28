@@ -4,25 +4,58 @@ import Notification from "../../../modules/notification/notification.model.js";
 import Test from "../../../models/test.model.js";
 import { buildAttemptAnalyticsSnapshot } from "../utils/attemptAnalyticsSnapshot.util.js";
 
-const answerHasValue = (answer) =>
-  (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
-  (answer?.textAnswer !== undefined && answer?.textAnswer !== null);
+const answerHasValue = (answer) => {
+  const hasSelectedOption =
+    answer?.selectedOption !== undefined &&
+    answer?.selectedOption !== null &&
+    String(answer.selectedOption).trim() !== "";
+
+  const hasTextAnswer =
+    answer?.textAnswer !== undefined &&
+    answer?.textAnswer !== null &&
+    String(answer.textAnswer).trim() !== "";
+
+  return hasSelectedOption || hasTextAnswer;
+};
 
 const updateAttemptStats = (attempt) => {
   const answers = attempt.answers || [];
-  const totalQuestions = attempt.questionSnapshots?.length || answers.length;
+  const totalQuestions =
+    attempt.questionSnapshots?.length || answers.length;
+
   const attemptedCount = answers.filter(answerHasValue).length;
-  const correctAnswersCount = answers.filter((answer) => answer.isCorrect === true).length;
-  const incorrectAnswersCount = answers.filter((answer) => answer.isCorrect === false).length;
+
+  const correctAnswersCount = answers.filter(
+    (answer) =>
+      answerHasValue(answer) && answer.isCorrect === true
+  ).length;
+
+  const incorrectAnswersCount = answers.filter(
+    (answer) =>
+      answerHasValue(answer) && answer.isCorrect === false
+  ).length;
+
   const timeSpentMs = (attempt.questionSnapshots || []).reduce(
     (sum, question) => sum + (question.timeSpentMs || 0),
     0,
   );
 
+  const evaluatedObjectiveCount =
+    correctAnswersCount + incorrectAnswersCount;
+
   attempt.correctAnswersCount = correctAnswersCount;
   attempt.incorrectAnswersCount = incorrectAnswersCount;
-  attempt.unattemptedCount = Math.max(0, totalQuestions - attemptedCount);
-  attempt.accuracy = attemptedCount > 0 ? (correctAnswersCount / attemptedCount) * 100 : 0;
+
+  attempt.unattemptedCount = Math.max(
+    0,
+    totalQuestions - attemptedCount,
+  );
+
+  attempt.accuracy =
+    evaluatedObjectiveCount > 0
+      ? (correctAnswersCount / evaluatedObjectiveCount) * 100
+      : 0;
+
   attempt.timeTakenSeconds = Math.round(timeSpentMs / 1000);
 };
 
@@ -37,6 +70,12 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
       status: 409,
     };
   }
+
+  const test = await Test.findById(attempt.testId)
+    .populate("topicIds", "name")
+    .populate("subjectIds", "name")
+    .populate("subjectId", "name")
+    .lean();
 
 
 
@@ -97,28 +136,29 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
 
   attempt.totalScore = totalScore;
 
-  attempt.percentage =
+  const rawPercentage =
     attempt.maxScore && attempt.maxScore > 0
-      ? Math.round((totalScore / attempt.maxScore) * 100)
+      ? (totalScore / attempt.maxScore) * 100
       : 0;
+  attempt.percentage = Math.round(rawPercentage);
   updateAttemptStats(attempt);
 
-  // ✅ SCRUM-23: PASS/FAIL
-  const PASS_PERCENTAGE = 40; // change if your company rule is different
+  const passingThreshold =
+    typeof test?.passingPercentage === "number"
+      ? test.passingPercentage
+      : 50;
+
   attempt.resultStatus =
     attempt.expireReason === "CHEATING"
       ? "FAIL"
-      : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+      : rawPercentage >= passingThreshold
+        ? "PASS"
+        : "FAIL";
 
-  // ✅ final status
+  attempt.isPassed = attempt.resultStatus === "PASS";
   attempt.status = "EVALUATED";
 
   try {
-    const test = await Test.findById(attempt.testId)
-      .populate("topicIds", "name")
-      .populate("subjectIds", "name")
-      .populate("subjectId", "name")
-      .lean();
     const qIds = (attempt.answers || []).map((a) => a.questionId).filter(Boolean);
     const questions = await Question.find({ _id: { $in: qIds } }).select("_id difficulty").lean();
     const questionDifficultyMap = new Map(questions.map((q) => [String(q._id), q.difficulty]));
@@ -152,7 +192,6 @@ export const manualEvaluateAttempt = async (attemptId, evaluations) => {
 
   // Dispatch notification to the student about the evaluation
   if (attempt.studentId) {
-    const test = await Test.findById(attempt.testId).select("title");
     await Notification.create({
       userId: attempt.studentId,
       title: "Test Evaluated",
