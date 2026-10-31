@@ -226,60 +226,6 @@ export const getAssignedTests = async (req, res) => {
 
     const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId, userRole: req.user?.role });
 
-    // Attach current user's attempt count so the UI can hide Start when
-    // attempts are exhausted, and link to their latest result if any — one
-    // batched query for the whole list instead of two per test.
-    const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
-    const testIds = tests.map((test) => test.id || test._id);
-    const relevantAttempts = userId && testIds.length
-      ? await TestAttempt.find({ testId: { $in: testIds }, studentId: userId })
-          .select("testId status submittedAt")
-          .sort({ submittedAt: -1 })
-          .lean()
-      : [];
-
-    const attemptsCountByTest = new Map();
-    const latestAttemptIdByTest = new Map();
-    const latestAttemptStatuses = new Set(['SUBMITTED', 'EVALUATED', 'MISSED']);
-    // relevantAttempts is sorted submittedAt desc, so the first entry seen
-    // per testId that matches the status filter is the most recent one —
-    // same as the original per-test `.findOne().sort({submittedAt:-1})`.
-    for (const attempt of relevantAttempts) {
-      const key = String(attempt.testId);
-      // Only a real, consumed attempt (submitted/evaluated/missed) counts
-      // against maxAttempts — an IN_PROGRESS or PENDING attempt isn't "made"
-      // yet. Without this filter, a freshly-created IN_PROGRESS attempt
-      // (e.g. right after startTestAttemptAPI, before the student has even
-      // finished identity verification) immediately satisfies
-      // maxAttempts<=1 below and flips status to COMPLETED — steering the
-      // UI to "View Results" for a test that was never actually started.
-      if (latestAttemptStatuses.has(attempt.status)) {
-        attemptsCountByTest.set(key, (attemptsCountByTest.get(key) || 0) + 1);
-        if (!latestAttemptIdByTest.has(key)) {
-          latestAttemptIdByTest.set(key, attempt._id);
-        }
-      }
-    }
-
-    const enriched = tests.map((test) => {
-      const testId = String(test.id || test._id);
-      const attemptsMade = attemptsCountByTest.get(testId) || 0;
-
-      // So the UI can link straight to this student's own result (e.g. the
-      // "Results" button, or a stale "New Test Assigned" notification click
-      // after the test's been completed) instead of a generic list/instructions
-      // page that doesn't know which attempt to show.
-      const obj = { ...test };
-      obj.attemptsMade = attemptsMade;
-      obj.latestAttemptId = latestAttemptIdByTest.get(testId) || null;
-
-      if (Number(obj.maxAttempts || 1) <= attemptsMade) {
-        obj.status = "COMPLETED";
-      }
-
-      return obj;
-    });
-
     let assignedSeries = [];
     try {
       const testSeriesService = await import("./testSeries.service.js");
@@ -290,6 +236,98 @@ export const getAssignedTests = async (req, res) => {
       });
     } catch (seriesErr) {
       logger.error(`getAssignedTests getAssignedSeries error: ${seriesErr.message}`);
+    }
+
+    // Attach current user's attempt count, latest completed attempt score and percentage,
+    // so the UI can hide Start when attempts are exhausted, and link to their latest result
+    // and show actual score/progress in the test series tracker.
+    const TestAttempt = (await import("../../models/testAttempt.model.js")).default;
+    const testIds = tests.map((test) => test.id || test._id);
+    const seriesTestIds = assignedSeries.flatMap((s) =>
+      Array.isArray(s.tests) ? s.tests.map((t) => t._id || t.id || t) : []
+    ).filter(Boolean);
+    const allTestIds = [...new Set([...testIds.map(String), ...seriesTestIds.map(String)])];
+
+    const relevantAttempts = userId && allTestIds.length
+      ? await TestAttempt.find({ testId: { $in: allTestIds }, studentId: userId })
+          .select("testId status totalScore maxScore percentage submittedAt createdAt")
+          .sort({ submittedAt: -1, createdAt: -1 })
+          .lean()
+      : [];
+
+    const attemptsCountByTest = new Map();
+    const latestAttemptIdByTest = new Map();
+    const latestAttemptByTest = new Map();
+    const inProgressTestIds = new Set();
+    const latestAttemptStatuses = new Set(['SUBMITTED', 'EVALUATED', 'MISSED']);
+
+    // relevantAttempts is sorted submittedAt desc, so the first entry seen
+    // per testId that matches the status filter is the most recent one.
+    for (const attempt of relevantAttempts) {
+      const key = String(attempt.testId);
+      if (attempt.status === 'IN_PROGRESS') {
+        inProgressTestIds.add(key);
+      }
+      if (latestAttemptStatuses.has(attempt.status)) {
+        attemptsCountByTest.set(key, (attemptsCountByTest.get(key) || 0) + 1);
+        if (!latestAttemptIdByTest.has(key)) {
+          latestAttemptIdByTest.set(key, attempt._id);
+          latestAttemptByTest.set(key, attempt);
+        }
+      }
+    }
+
+    const enriched = tests.map((test) => {
+      const testId = String(test.id || test._id);
+      const attemptsMade = attemptsCountByTest.get(testId) || 0;
+      const latestAttempt = latestAttemptByTest.get(testId);
+
+      const obj = { ...test };
+      obj.attemptsMade = attemptsMade;
+      obj.latestAttemptId = latestAttemptIdByTest.get(testId) || null;
+
+      if (Number(obj.maxAttempts || 1) <= attemptsMade) {
+        obj.status = "COMPLETED";
+      }
+
+      if (latestAttempt) {
+        obj.score = typeof latestAttempt.totalScore === "number" ? latestAttempt.totalScore : null;
+        obj.maxScore = typeof latestAttempt.maxScore === "number" ? latestAttempt.maxScore : null;
+        obj.percentage = typeof latestAttempt.percentage === "number" ? latestAttempt.percentage : null;
+        obj.attemptStatus = latestAttempt.status;
+      }
+      obj.hasInProgress = inProgressTestIds.has(testId);
+
+      return obj;
+    });
+
+    if (assignedSeries.length) {
+      assignedSeries = assignedSeries.map((s) => {
+        if (!Array.isArray(s.tests) || s.tests.length === 0) return s;
+        const enrichedTests = s.tests.map((t) => {
+          const tId = String(t._id || t.id || t);
+          const attemptsMade = attemptsCountByTest.get(tId) || 0;
+          const latestAttempt = latestAttemptByTest.get(tId);
+          const hasCompleted = attemptsMade > 0 && latestAttempt && ['SUBMITTED', 'EVALUATED'].includes(latestAttempt.status);
+
+          const testObj = typeof t === "object" ? { ...t } : { _id: t, id: t };
+          testObj.attemptsMade = attemptsMade;
+          testObj.latestAttemptId = latestAttempt?._id || null;
+          testObj.score = typeof latestAttempt?.totalScore === "number" ? latestAttempt.totalScore : null;
+          testObj.maxScore = typeof latestAttempt?.maxScore === "number" ? latestAttempt.maxScore : null;
+          testObj.percentage = typeof latestAttempt?.percentage === "number" ? latestAttempt.percentage : null;
+          testObj.attemptStatus = latestAttempt?.status || (inProgressTestIds.has(tId) ? "IN_PROGRESS" : null);
+          testObj.hasInProgress = inProgressTestIds.has(tId);
+          if (hasCompleted) {
+            testObj.status = "COMPLETED";
+          }
+          return testObj;
+        });
+        return {
+          ...s,
+          tests: enrichedTests,
+        };
+      });
     }
 
     return res.json({ success: true, data: enriched, series: assignedSeries });
@@ -374,6 +412,19 @@ export const acceptTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
+    const test = await Test.findById(testId).select("scheduleType startTime endTime isPublished isDeleted").lean();
+    if (!test || test.isDeleted === 1 || !test.isPublished) {
+      return res.status(404).json({ success: false, message: "Test not found or not published" });
+    }
+
+    const now = new Date();
+    if (hasTestEnded(test, now) || (test.endTime && now > new Date(test.endTime))) {
+      return res.status(400).json({
+        success: false,
+        message: "This test has already ended and can no longer be accepted.",
+      });
+    }
+
     const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
     const assignment = await TestAssignment.findOneAndUpdate(
       { testId, studentId },
@@ -392,8 +443,20 @@ export const declineTestAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const testId = req.params.id;
 
+    const test = await Test.findById(testId).select("scheduleType startTime endTime isPublished isDeleted createdBy").lean();
+    if (!test || test.isDeleted === 1) {
+      return res.status(404).json({ success: false, message: "Test not found" });
+    }
+
+    const now = new Date();
+    if (hasTestEnded(test, now) || (test.endTime && now > new Date(test.endTime))) {
+      return res.status(400).json({
+        success: false,
+        message: "This test has already ended and can no longer be declined.",
+      });
+    }
+
     if (req.user?.role === "STUDENT") {
-      const test = await Test.findById(testId).select("createdBy").lean();
       const organizationId = await resolveOrganizationId(req.user);
       if (await isTestMandatoryForStudent(test, organizationId)) {
         return res.status(400).json({

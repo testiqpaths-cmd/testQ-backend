@@ -26,4 +26,7 @@ testAssignmentSchema.index({ testId: 1, studentId: 1 }, { unique: true });
 // can serve.
 testAssignmentSchema.index({ status: 1 });
 
+// Backs student dashboard's activeAssignedTestsCount and student assignment status lookups
+testAssignmentSchema.index({ studentId: 1, status: 1 });
+
 export default model("TestAssignment", testAssignmentSchema);

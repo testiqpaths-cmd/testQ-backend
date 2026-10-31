@@ -8,6 +8,7 @@
   "main": "src/server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "test:subscription": "node --test-concurrency=1 --test tests/subscription/entitlement.test.js tests/subscription/usage-concurrency.test.js tests/subscription/payment-idempotency.test.js tests/subscription/subscription-lifecycle.test.js",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "build": "esbuild src/server.js --bundle --platform=node --outfile=dist/server.js --target=node16"

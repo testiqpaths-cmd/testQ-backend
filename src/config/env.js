@@ -27,6 +27,11 @@ const env = {
   BREVO_API_KEY: process.env.BREVO_API_KEY,
   BREVO_SENDER_EMAIL: process.env.BREVO_SENDER_EMAIL,
   BREVO_SENDER_NAME: process.env.BREVO_SENDER_NAME,
+  SMTP_HOST: process.env.SMTP_HOST,
+  SMTP_PORT: Number(process.env.SMTP_PORT) || 587,
+  SMTP_SECURE: process.env.SMTP_SECURE === "true",
+  SMTP_USER: process.env.SMTP_USER,
+  SMTP_PASS: process.env.SMTP_PASS,
 
   // Cookies
   COOKIE_SECURE: process.env.COOKIE_SECURE === "true",

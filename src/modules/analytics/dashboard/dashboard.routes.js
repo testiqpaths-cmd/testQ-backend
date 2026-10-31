@@ -2,7 +2,8 @@ import express from "express";
 import { 
   getStudentDashboardController, 
   getAdminDashboardController, 
-  getOrganizationDashboardController 
+  getOrganizationDashboardController,
+  getDashboardTelemetryController,
 } from "./dashboard.controller.js";
 import { authMiddleware } from "../../../common/middlewares/auth.middleware.js";
 import { roleMiddleware } from "../../../common/middlewares/role.middleware.js";
@@ -34,4 +35,13 @@ router.get(
   getOrganizationDashboardController
 );
 
+// Admin-only telemetry endpoint for monitoring dashboard performance and fallback rates
+router.get(
+  "/telemetry",
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN"),
+  getDashboardTelemetryController
+);
+
 export default router;
+

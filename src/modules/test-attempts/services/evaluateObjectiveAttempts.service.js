@@ -2,30 +2,62 @@ import TestAttempt from "../../../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js";
 import Notification from "../../../modules/notification/notification.model.js";
 import Test from "../../../models/test.model.js";
-
-const PASS_PERCENTAGE = 40;
+import { buildAttemptAnalyticsSnapshot } from "../utils/attemptAnalyticsSnapshot.util.js";
 
 const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
 
-const answerHasValue = (answer) =>
-  (answer?.selectedOption !== undefined && answer?.selectedOption !== null) ||
-  (answer?.textAnswer !== undefined && answer?.textAnswer !== null);
+const answerHasValue = (answer) => {
+  const hasSelectedOption =
+    answer?.selectedOption !== undefined &&
+    answer?.selectedOption !== null &&
+    String(answer.selectedOption).trim() !== "";
+
+  const hasTextAnswer =
+    answer?.textAnswer !== undefined &&
+    answer?.textAnswer !== null &&
+    String(answer.textAnswer).trim() !== "";
+
+  return hasSelectedOption || hasTextAnswer;
+};
 
 const updateAttemptStats = (attempt) => {
   const answers = attempt.answers || [];
-  const totalQuestions = attempt.questionSnapshots?.length || answers.length;
+  const totalQuestions =
+    attempt.questionSnapshots?.length || answers.length;
+
   const attemptedCount = answers.filter(answerHasValue).length;
-  const correctAnswersCount = answers.filter((answer) => answer.isCorrect === true).length;
-  const incorrectAnswersCount = answers.filter((answer) => answer.isCorrect === false).length;
+
+  const correctAnswersCount = answers.filter(
+    (answer) =>
+      answerHasValue(answer) && answer.isCorrect === true
+  ).length;
+
+  const incorrectAnswersCount = answers.filter(
+    (answer) =>
+      answerHasValue(answer) && answer.isCorrect === false
+  ).length;
+
   const timeSpentMs = (attempt.questionSnapshots || []).reduce(
     (sum, question) => sum + (question.timeSpentMs || 0),
     0,
   );
 
+  const evaluatedObjectiveCount =
+    correctAnswersCount + incorrectAnswersCount;
+
   attempt.correctAnswersCount = correctAnswersCount;
   attempt.incorrectAnswersCount = incorrectAnswersCount;
-  attempt.unattemptedCount = Math.max(0, totalQuestions - attemptedCount);
-  attempt.accuracy = attemptedCount > 0 ? (correctAnswersCount / attemptedCount) * 100 : 0;
+
+  attempt.unattemptedCount = Math.max(
+    0,
+    totalQuestions - attemptedCount,
+  );
+
+  attempt.accuracy =
+    evaluatedObjectiveCount > 0
+      ? (correctAnswersCount / evaluatedObjectiveCount) * 100
+      : 0;
+
   attempt.timeTakenSeconds = Math.round(timeSpentMs / 1000);
 };
 
@@ -52,7 +84,11 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
 
-  const test = await Test.findById(attempt.testId).lean();
+  const test = await Test.findById(attempt.testId)
+    .populate("topicIds", "name")
+    .populate("subjectIds", "name")
+    .populate("subjectId", "name")
+    .lean();
 
   // only run after submission (or re-run if already evaluated or expired)
   if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED" && attempt.status !== "EXPIRED") {
@@ -66,6 +102,11 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     updateAttemptStats(attempt);
     // keep it SUBMITTED so manual evaluation can happen if needed
     attempt.status = "SUBMITTED";
+    attempt.analyticsSnapshot = buildAttemptAnalyticsSnapshot({
+      attempt,
+      test,
+      questionDifficultyMap: new Map(),
+    });
     await attempt.save();
     return attempt;
   }
@@ -74,7 +115,10 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
   const qIds = attempt.answers.map((a) => a.questionId);
   const questions = await Question.find({ _id: { $in: qIds } }).select(
-    "_id type correctAnswer"
+    "_id type correctAnswer difficulty"
+  );
+  const questionDifficultyMap = new Map(
+    questions.map((q) => [String(q._id), q.difficulty])
   );
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
@@ -127,11 +171,17 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   });
 
   attempt.totalScore = totalScore;
-  attempt.percentage =
+  const rawPercentage =
     attempt.maxScore && attempt.maxScore > 0
-      ? Math.round((totalScore / attempt.maxScore) * 100)
+      ? (totalScore / attempt.maxScore) * 100
       : 0;
+  attempt.percentage = Math.round(rawPercentage);
   updateAttemptStats(attempt);
+
+  const passingThreshold =
+    typeof test?.passingPercentage === "number"
+      ? test.passingPercentage
+      : 50;
 
   if (hasSubjective) {
     attempt.status = "SUBMITTED";
@@ -143,10 +193,19 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     attempt.resultStatus =
       attempt.expireReason === "CHEATING"
         ? "FAIL"
-        : attempt.percentage >= PASS_PERCENTAGE ? "PASS" : "FAIL";
+        : rawPercentage >= passingThreshold
+          ? "PASS"
+          : "FAIL";
     attempt.isCompleted = true;
     attempt.isPassed = attempt.resultStatus === "PASS";
   }
+
+  // Generate display-ready analytics snapshot for fast dashboard access
+  attempt.analyticsSnapshot = buildAttemptAnalyticsSnapshot({
+    attempt,
+    test,
+    questionDifficultyMap,
+  });
 
   if (!attempt.iqRoomId) {
     try {
@@ -178,5 +237,14 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     }
   }
 
+  // Record attempt in pre-aggregated analytics summaries (idempotent & non-blocking)
+  try {
+    const { processCompletedAttemptAnalytics } = await import("../../../services/analyticsSummary.service.js");
+    await processCompletedAttemptAnalytics(attempt._id);
+  } catch (err) {
+    console.error("Failed to process analytics summary for attempt:", attempt._id, err);
+  }
+
   return attempt;
 };
+

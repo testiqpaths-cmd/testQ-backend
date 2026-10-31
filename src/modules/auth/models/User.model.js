@@ -139,6 +139,17 @@ const userSchema = new Schema(
       },
     },
 
+    resetPasswordOtp: {
+      code: {
+        type: String,
+        default: null,
+      },
+      expiresAt: {
+        type: Date,
+        default: null,
+      },
+    },
+
     // Soft Delete Fields
     isDeleted: { type: Boolean, default: false },
     deletedAt: { type: Date, default: null },

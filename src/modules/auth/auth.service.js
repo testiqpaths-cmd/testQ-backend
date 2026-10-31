@@ -13,6 +13,9 @@ import { AuthError } from "../../common/exceptions/AuthError.js";
 import { passwordService } from "./services/password.service.js";
 import { dispatchNotificationToAdminsAndOrgs } from "../notification/notification.service.js";
 import { getPaidAccessStatus } from "../subscription/services/subscription.service.js";
+import sendEmail from "../../config/email.js";
+import { resetPasswordOtpTemplate } from "../../template/resetPasswordOtp.template.js";
+import logger from "../../config/logger.js";
 import env from "../../config/env.js";
 
 const normalizeRequiredString = (value) => {
@@ -332,6 +335,140 @@ export const setPassword = async (userId, newPassword) => {
   );
   if (!user) throw new AuthError("User not found");
   return user;
+};
+
+/**
+ * Generates a 6-digit OTP and sends it via email for password reset
+ */
+export const forgotPassword = async (email) => {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    throw new AuthError("Email address is required");
+  }
+
+  const user = await findUserByEmail(normalizedEmail);
+  if (!user) {
+    throw new AuthError("No account found with this email address");
+  }
+
+  if (user.status === "SUSPENDED") {
+    throw new AuthError("Your account is suspended. Please contact admin.");
+  }
+
+  const otp = String(Math.floor(100000 + Math.random() * 900000));
+  const expiresInMinutes = 10;
+  const expiresAt = new Date(Date.now() + expiresInMinutes * 60 * 1000);
+
+  user.resetPasswordOtp = {
+    code: otp,
+    expiresAt,
+  };
+  await user.save();
+
+  logger.info(`Password reset OTP generated for ${normalizedEmail}: ${otp}`);
+
+  const emailHtml = resetPasswordOtpTemplate({
+    firstName: user.firstName,
+    email: user.email,
+    otp,
+    expiresInMinutes,
+  });
+  const textContent = `Hi ${user.firstName || "User"},\n\nYour TestQ password reset OTP is: ${otp}\nThis code will expire in ${expiresInMinutes} minutes.\n\nIf you did not request this, please ignore this email.`;
+
+  let emailSent = false;
+  let emailError = null;
+
+  try {
+    await sendEmail({
+      to: user.email,
+      subject: "TestQ - Password Reset OTP",
+      html: emailHtml,
+      textContent,
+    });
+    emailSent = true;
+    logger.info(`Password reset OTP email sent successfully to ${user.email}`);
+  } catch (err) {
+    emailError = err.message || "Failed to send email";
+    logger.error(`Failed to send password reset OTP email to ${user.email}: ${err.message}`);
+  }
+
+  if (!emailSent) {
+    throw new AuthError(`Failed to send password reset email: ${emailError}. Please check your email configuration or contact support.`);
+  }
+
+  return {
+    email: user.email,
+    emailSent: true,
+    expiresIn: expiresInMinutes * 60,
+  };
+};
+
+/**
+ * Validates the password reset OTP without resetting password yet
+ */
+export const verifyResetOtp = async (email, otp) => {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedOtp = normalizeRequiredString(otp);
+
+  if (!normalizedEmail || !normalizedOtp) {
+    throw new AuthError("Email and OTP code are required");
+  }
+
+  const user = await findUserByEmail(normalizedEmail);
+  if (!user) {
+    throw new AuthError("No account found with this email address");
+  }
+
+  if (!user.resetPasswordOtp?.code || user.resetPasswordOtp.code !== normalizedOtp) {
+    throw new AuthError("Invalid OTP code. Please check and try again.");
+  }
+
+  if (new Date() > new Date(user.resetPasswordOtp.expiresAt)) {
+    throw new AuthError("OTP code has expired. Please request a new one.");
+  }
+
+  return { valid: true, email: user.email };
+};
+
+/**
+ * Verifies OTP and resets the user's password
+ */
+export const resetPassword = async (email, otp, newPassword) => {
+  const normalizedEmail = normalizeEmail(email);
+  const normalizedOtp = normalizeRequiredString(otp);
+  const normalizedPassword = normalizeRequiredString(newPassword);
+
+  if (!normalizedEmail || !normalizedOtp || !normalizedPassword) {
+    throw new AuthError("Email, OTP code, and new password are required");
+  }
+
+  if (normalizedPassword.length < 8) {
+    throw new AuthError("Password must be at least 8 characters long");
+  }
+
+  const user = await findUserByEmail(normalizedEmail);
+  if (!user) {
+    throw new AuthError("No account found with this email address");
+  }
+
+  if (!user.resetPasswordOtp?.code || user.resetPasswordOtp.code !== normalizedOtp) {
+    throw new AuthError("Invalid OTP code. Please check and try again.");
+  }
+
+  if (new Date() > new Date(user.resetPasswordOtp.expiresAt)) {
+    throw new AuthError("OTP code has expired. Please request a new one.");
+  }
+
+  const hashedPassword = await passwordService.hash(normalizedPassword);
+
+  user.password = hashedPassword;
+  user.hasSetPassword = true;
+  user.resetPasswordOtp = { code: null, expiresAt: null };
+  await user.save();
+
+  logger.info(`Password successfully reset for ${user.email}`);
+
+  return { success: true, email: user.email };
 };
 
 export const firebaseAuth = async ({
