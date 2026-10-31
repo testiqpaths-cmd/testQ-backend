@@ -8,6 +8,7 @@ import UserSubscription from "../models/UserSubscription.model.js";
 import UserFeatureUsage from "../models/UserFeatureUsage.model.js";
 import Payment from "../models/Payment.model.js";
 import User from "../../../modules/auth/models/User.model.js"; // Existing user model
+import Organization from "../../../models/organization.model.js";
 import { ApiError } from "../../../common/exceptions/ApiError.js";
 import { getRazorpayClient } from "./razorpay.client.js";
 import env from "../../../config/env.js";
@@ -125,6 +126,17 @@ export const getPaidAccessStatus = async (userId) => {
   };
 };
 
+const addOneMonthSafe = (date) => {
+  const d = new Date(date);
+  const currentMonth = d.getMonth();
+  d.setMonth(currentMonth + 1);
+  // Month rollover guard (e.g. Jan 31 -> Mar 3 rolled back to Feb 28/29)
+  if (d.getMonth() !== (currentMonth + 1) % 12) {
+    d.setDate(0);
+  }
+  return d;
+};
+
 /**
  * Ensures feature reset logic is applied based on resetType
  */
@@ -133,13 +145,13 @@ const handleResetLogic = async (usageRecord, resetType) => {
 
   const now = new Date();
   
-  if (usageRecord.periodEnd && now > usageRecord.periodEnd) {
-    // Reset needed
+  if (usageRecord.periodEnd && now >= usageRecord.periodEnd) {
+    // Reset needed (boundary: now >= periodEnd)
     usageRecord.usedCount = 0;
     usageRecord.periodStart = now;
 
-    const nextEnd = new Date(now);
-    if (resetType === "MONTHLY") nextEnd.setMonth(nextEnd.getMonth() + 1);
+    let nextEnd = new Date(now);
+    if (resetType === "MONTHLY") nextEnd = addOneMonthSafe(now);
     else if (resetType === "YEARLY") nextEnd.setFullYear(nextEnd.getFullYear() + 1);
     else if (resetType === "WEEKLY") nextEnd.setDate(nextEnd.getDate() + 7);
     else if (resetType === "DAILY") nextEnd.setDate(nextEnd.getDate() + 1);
@@ -148,8 +160,8 @@ const handleResetLogic = async (usageRecord, resetType) => {
   } else if (!usageRecord.periodEnd) {
     // Initialize period
     usageRecord.periodStart = now;
-    const nextEnd = new Date(now);
-    if (resetType === "MONTHLY") nextEnd.setMonth(nextEnd.getMonth() + 1);
+    let nextEnd = new Date(now);
+    if (resetType === "MONTHLY") nextEnd = addOneMonthSafe(now);
     else if (resetType === "YEARLY") nextEnd.setFullYear(nextEnd.getFullYear() + 1);
     else if (resetType === "WEEKLY") nextEnd.setDate(nextEnd.getDate() + 7);
     else if (resetType === "DAILY") nextEnd.setDate(nextEnd.getDate() + 1);
@@ -159,78 +171,206 @@ const handleResetLogic = async (usageRecord, resetType) => {
 };
 
 /**
+ * Centralized plan eligibility validation:
+ * Ensures the user exists, is active, is an independent student,
+ * and that the target plan exists, is active, and is intended for students.
+ */
+export const validatePlanEligibility = async (userId, planId) => {
+  const user = await User.findById(userId).select("role organizationId status");
+  if (!user || user.status === "SUSPENDED") {
+    throw new ApiError(403, "Account suspended or not found");
+  }
+
+  // Only independent students are eligible to subscribe to individual plans
+  if (user.role !== "STUDENT" || user.organizationId) {
+    throw new ApiError(
+      403,
+      user.organizationId
+        ? "Organization students have full access and do not need individual subscriptions."
+        : "Only independent students can subscribe to individual plans."
+    );
+  }
+
+  const plan = await Plan.findById(planId).populate("roleId");
+  if (!plan || !plan.active) {
+    throw new ApiError(404, "Plan not found or inactive");
+  }
+
+  // Plan must belong to STUDENT role
+  if (plan.roleId?.name !== "STUDENT") {
+    throw new ApiError(403, "This plan is not available for students.");
+  }
+
+  return { user, plan };
+};
+
+/**
  * Checks if a user has access to a specific feature.
  * For USAGE features, incrementBy will increment the usage record (default 0).
  * For CAPACITY features, incrementBy represents the new items being added, ensuring currentCount + incrementBy <= limit.
  */
 export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) => {
-  // 1. Resolve Feature
-  const feature = await Feature.findOne({ key: featureKey, active: true });
-  if (!feature) return true; // If feature doesn't exist or is inactive, assume it's unmanaged (allow)
+  // 0. Validate incrementBy parameter
+  if (typeof incrementBy !== "number" || isNaN(incrementBy) || incrementBy < 0) {
+    throw new ApiError(400, "incrementBy must be a non-negative number.");
+  }
 
-  // 2. Resolve Subscription
+  // 1. Resolve Feature (FAIL-CLOSED: unconfigured / unrecognized feature throws 402)
+  const feature = await Feature.findOne({ key: featureKey, active: true });
+  if (!feature) {
+    throw new ApiError(402, `Feature '${featureKey}' is not configured or recognized.`);
+  }
+
+  // 2. Resolve User & Access Policy
+  const user = await User.findById(userId).select("role organizationId status");
+  if (!user || user.status === "SUSPENDED") {
+    throw new ApiError(403, "Account suspended or not found.");
+  }
+
+  // Superuser bypass: IQPATH_ADMIN has unrestricted access
+  if (user.role === "IQPATH_ADMIN") {
+    return true;
+  }
+
+  // Organization-affiliated student bypass: students under an organization have full feature access
+  if (user.role === "STUDENT" && user.organizationId) {
+    return true;
+  }
+
+  // Organization accounts: full feature access, BUT CAPACITY limits (e.g. MAX_STUDENTS) are enforced
+  if (user.role === "ORGANIZATION") {
+    if (feature.type === "CAPACITY") {
+      let currentCount = 0;
+      if (feature.key === "MAX_STUDENTS") {
+        const org = await Organization.findById(userId).select("studentLimit name").lean();
+        if (org && org.studentLimit !== null && org.studentLimit !== undefined) {
+          currentCount = await User.countDocuments({
+            organizationId: userId,
+            role: "STUDENT",
+            status: "ACTIVE",
+          });
+          if (currentCount + incrementBy > org.studentLimit) {
+            throw new ApiError(
+              402,
+              `Student limit reached for ${org.name || "this organization"}. You can add at most ${Math.max(
+                0,
+                org.studentLimit - currentCount
+              )} more student(s) (limit: ${org.studentLimit}).`
+            );
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  // 3. Resolve Subscription for Independent Student
   const sub = await getUserSubscription(userId);
-  if (!sub || !sub.planId) return true; // If no sub system configured for user, fallback allow
+  if (!sub || sub.status !== "ACTIVE" || !sub.planId) {
+    throw new ApiError(402, "No active subscription found. Please subscribe to access this feature.");
+  }
+
+  if (sub.expiresAt && sub.expiresAt <= new Date()) {
+    sub.status = "EXPIRED";
+    await sub.save();
+    throw new ApiError(402, "Your subscription has expired. Please renew or upgrade to continue.");
+  }
 
   const planId = sub.planId._id ? sub.planId._id : sub.planId;
 
-  // 3. Resolve Plan Feature Config
+  // 4. Resolve Plan Feature Config (FAIL-CLOSED)
   const planFeature = await PlanFeature.findOne({ planId, featureId: feature._id });
   
-  if (!planFeature) return true; // Feature not mapped in plan -> unlimited
+  if (!planFeature) {
+    throw new ApiError(402, `Access to ${feature.displayName} is not included in your current plan.`);
+  }
 
   if (!planFeature.enabled) {
     throw new ApiError(402, `Access to ${feature.displayName} is disabled on your current plan.`);
   }
 
   const limit = planFeature.limit;
-  if (limit === null) { // Unlimited
-    return true; 
+  if (limit === null) {
+    return true; // Unlimited
   }
 
   if (limit === 0) {
     throw new ApiError(402, `Access to ${feature.displayName} is not available in your current plan.`);
   }
 
-  // 4. Handle based on feature type
+  // 5. Handle based on feature type
+  if (feature.type === "BOOLEAN") {
+    return true;
+  }
+
   if (feature.type === "CAPACITY") {
     let currentCount = 0;
     if (feature.key === "MAX_STUDENTS") {
       currentCount = await User.countDocuments({ organizationId: userId, status: "ACTIVE" });
     }
-    // Add other capacity logic here if needed (e.g. MAX_TESTS, MAX_ROOMS)
     
     if (currentCount + incrementBy > limit) {
       throw new ApiError(402, `Limit exceeded! You can only add ${limit - currentCount} more ${feature.displayName} on your current plan. Please upgrade to continue.`);
     }
-    // Capacity features do not save usage records
     return true;
   }
 
-  // 5. Handle USAGE / BOOLEAN Features
-  let usageRecord = await UserFeatureUsage.findOne({ userId, featureId: feature._id });
-  
-  if (!usageRecord) {
-    usageRecord = new UserFeatureUsage({
-      userId,
-      featureId: feature._id,
-      usedCount: 0,
-      lastUsedAt: new Date(),
-    });
+  // 6. Handle USAGE Features: atomic upsert / retrieval to prevent concurrent first-use E11000 race
+  let usageRecord;
+  try {
+    usageRecord = await UserFeatureUsage.findOneAndUpdate(
+      { userId, featureId: feature._id },
+      {
+        $setOnInsert: {
+          userId,
+          featureId: feature._id,
+          usedCount: 0,
+          periodStart: new Date(),
+          periodEnd: null,
+          lastUsedAt: new Date(),
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } catch (err) {
+    // In rare race where unique index collides before upsert commits, retrieve existing doc
+    if (err.code === 11000) {
+      usageRecord = await UserFeatureUsage.findOne({ userId, featureId: feature._id });
+    } else {
+      throw err;
+    }
   }
 
-  await handleResetLogic(usageRecord, planFeature.resetType);
-
-  // Enforce Limit (if we are trying to add/use more)
-  if (usageRecord.usedCount + incrementBy > limit) {
-    throw new ApiError(402, `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`);
-  }
-
-  // Increment Usage
-  if (incrementBy > 0) {
-    usageRecord.usedCount += incrementBy;
-    usageRecord.lastUsedAt = new Date();
+  const now = new Date();
+  const neededReset = (usageRecord.periodEnd && now >= usageRecord.periodEnd) || !usageRecord.periodEnd;
+  if (neededReset) {
+    await handleResetLogic(usageRecord, planFeature.resetType);
     await usageRecord.save();
+  }
+
+  // If incrementBy === 0, just check access without consuming usage
+  if (incrementBy === 0) {
+    if (usageRecord.usedCount >= limit) {
+      throw new ApiError(402, `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`);
+    }
+    return true;
+  }
+
+  // Atomic conditional increment: guarantees concurrency safety at the database level
+  const updatedUsage = await UserFeatureUsage.findOneAndUpdate(
+    {
+      _id: usageRecord._id,
+      usedCount: { $lte: limit - incrementBy },
+    },
+    {
+      $inc: { usedCount: incrementBy },
+      $set: { lastUsedAt: new Date() },
+    },
+    { new: true }
+  );
+
+  if (!updatedUsage) {
+    throw new ApiError(402, `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`);
   }
 
   return true;
@@ -279,6 +419,7 @@ export const getUserUsageDetails = async (userId) => {
         key: feature.key,
         displayName: feature.displayName,
         description: feature.description,
+        type: feature.type,
         enabled: pf.enabled,
         limit: pf.limit,
         used: usedCount,
@@ -377,8 +518,7 @@ const safeCompare = (a, b) => {
  * be able to originate a ₹0/$0 Razorpay order.
  */
 export const createRazorpayOrder = async (userId, planId) => {
-  const plan = await Plan.findById(planId);
-  if (!plan || !plan.active) throw new ApiError(404, "Plan not found");
+  const { plan } = await validatePlanEligibility(userId, planId);
   if (plan.price === 0) {
     throw new ApiError(400, "Free plans do not require checkout — use the upgrade endpoint instead.");
   }
