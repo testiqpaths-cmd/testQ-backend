@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import { ApiError } from "../exceptions/ApiError.js";
 import { checkFeatureAccess } from "../../modules/subscription/services/subscription.service.js";
 
@@ -15,8 +16,25 @@ export const featureMiddleware = (featureKey, incrementUsage = false) => {
         throw new ApiError(401, "Unauthorized access. User not found.");
       }
 
+      const reservationId = incrementUsage ? crypto.randomUUID() : null;
+
       // Check if user has access (will throw ApiError 402 if denied/limit reached)
-      await checkFeatureAccess(userId, featureKey, incrementUsage ? 1 : 0);
+      await checkFeatureAccess(
+        userId,
+        featureKey,
+        incrementUsage ? 1 : 0,
+        reservationId
+      );
+
+      if (reservationId) {
+        req.featureReservation = {
+          reservationId,
+          featureKey,
+          userId,
+          count: 1,
+          released: false,
+        };
+      }
 
       next();
     } catch (error) {

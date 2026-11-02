@@ -210,7 +210,7 @@ export const validatePlanEligibility = async (userId, planId) => {
  * For USAGE features, incrementBy will increment the usage record (default 0).
  * For CAPACITY features, incrementBy represents the new items being added, ensuring currentCount + incrementBy <= limit.
  */
-export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) => {
+export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0, reservationId = null) => {
   // 0. Validate incrementBy parameter
   if (typeof incrementBy !== "number" || isNaN(incrementBy) || incrementBy < 0) {
     throw new ApiError(400, "incrementBy must be a non-negative number.");
@@ -445,15 +445,33 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   }
 
   // Atomic conditional increment: guarantees concurrency safety at the database level
+  const updateOp = {
+    $inc: { usedCount: incrementBy },
+    $set: { lastUsedAt: new Date() },
+  };
+
+  if (reservationId) {
+    updateOp.$push = {
+      reservations: {
+        $each: [
+          {
+            reservationId,
+            count: incrementBy,
+            status: "ACTIVE",
+            createdAt: new Date(),
+          },
+        ],
+        $slice: -50,
+      },
+    };
+  }
+
   const updatedUsage = await UserFeatureUsage.findOneAndUpdate(
     {
       _id: usageRecord._id,
       usedCount: { $lte: limit - incrementBy },
     },
-    {
-      $inc: { usedCount: incrementBy },
-      $set: { lastUsedAt: new Date() },
-    },
+    updateOp,
     { new: true }
   );
 
@@ -478,20 +496,71 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
 
 /**
  * Safely releases (refunds) a previously reserved feature usage slot if downstream
- * operation fails before completion.
+ * operation fails before completion. Guaranteed idempotent against duplicate refunds.
  */
-export const releaseFeatureUsage = async (userId, featureKey, count = 1) => {
-  if (!userId || !featureKey || typeof count !== "number" || count <= 0) return;
+export const releaseFeatureUsage = async (
+  target,
+  featureKey = null,
+  count = 1,
+  reservationId = null
+) => {
+  let userId = target;
+  let resId = reservationId;
+  let targetCount = count;
+  let key = featureKey;
+
+  // Request context polymorphism: supports passing `req` directly
+  if (target && typeof target === "object" && target.featureReservation) {
+    if (target.featureReservation.released) {
+      return; // Already released for this request (idempotent in-memory)
+    }
+    target.featureReservation.released = true;
+    userId = target.featureReservation.userId;
+    key = key || target.featureReservation.featureKey;
+    resId = resId || target.featureReservation.reservationId;
+    targetCount = target.featureReservation.count || 1;
+  }
+
+  if (!userId || !key || typeof targetCount !== "number" || targetCount <= 0)
+    return;
+
   try {
-    const feature = await Feature.findOne({ key: featureKey, active: true });
+    const feature = await Feature.findOne({ key: key, active: true });
     if (!feature || feature.type !== "USAGE") return;
 
+    // 1. If reservationId is present, perform exact-once release against the ACTIVE reservation
+    if (resId) {
+      const releasedDoc = await UserFeatureUsage.findOneAndUpdate(
+        {
+          userId,
+          featureId: feature._id,
+          usedCount: { $gte: targetCount },
+          reservations: {
+            $elemMatch: { reservationId: resId, status: "ACTIVE" },
+          },
+        },
+        {
+          $inc: { usedCount: -targetCount },
+          $set: { "reservations.$.status": "RELEASED" },
+        },
+        { new: true }
+      );
+
+      if (releasedDoc) {
+        return; // Exactly once release confirmed
+      }
+
+      // If reservation was already released or not found, return to avoid duplicate decrement
+      return;
+    }
+
+    // 2. Fallback for calls without a specific reservationId
     await UserFeatureUsage.findOneAndUpdate(
-      { userId, featureId: feature._id, usedCount: { $gte: count } },
-      { $inc: { usedCount: -count } }
+      { userId, featureId: feature._id, usedCount: { $gte: targetCount } },
+      { $inc: { usedCount: -targetCount } }
     );
   } catch (err) {
-    logger.warn(`Failed to release feature usage for ${featureKey}: ${err.message}`);
+    logger.warn(`Failed to release feature usage for ${key}: ${err.message}`);
   }
 };
 

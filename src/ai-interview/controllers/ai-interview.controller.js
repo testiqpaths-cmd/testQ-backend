@@ -36,7 +36,7 @@ export class AiInterviewController {
         data: result,
       });
     } catch (error) {
-      await releaseFeatureUsage(req.user?._id, "AI_INTERVIEW");
+      await releaseFeatureUsage(req);
       next(error);
     }
   }
@@ -58,7 +58,7 @@ export class AiInterviewController {
         data: result,
       });
     } catch (error) {
-      await releaseFeatureUsage(req.user?._id, "AI_INTERVIEW");
+      await releaseFeatureUsage(req);
       next(error);
     }
   }

@@ -28,6 +28,27 @@ const userFeatureUsageSchema = new mongoose.Schema(
       type: Date,
       default: Date.now,
     },
+    reservations: [
+      {
+        reservationId: {
+          type: String,
+          required: true,
+        },
+        count: {
+          type: Number,
+          default: 1,
+        },
+        status: {
+          type: String,
+          enum: ["ACTIVE", "RELEASED"],
+          default: "ACTIVE",
+        },
+        createdAt: {
+          type: Date,
+          default: Date.now,
+        },
+      },
+    ],
   },
   { timestamps: true }
 );

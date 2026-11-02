@@ -10,7 +10,11 @@ import {
   createPlanFeatureFixture,
   createSubscriptionFixture,
 } from "./helpers/fixtures.js";
-import { checkFeatureAccess } from "../../src/modules/subscription/services/subscription.service.js";
+import crypto from "crypto";
+import {
+  checkFeatureAccess,
+  releaseFeatureUsage,
+} from "../../src/modules/subscription/services/subscription.service.js";
 import UserFeatureUsage from "../../src/modules/subscription/models/UserFeatureUsage.model.js";
 
 describe("Suite 2: Usage Counters, Rolling Resets & Concurrency", () => {
@@ -151,6 +155,71 @@ describe("Suite 2: Usage Counters, Rolling Resets & Concurrency", () => {
 
     assert.equal(await checkFeatureAccess(student._id, boolFeature.key, 1), true);
     assert.equal(await checkFeatureAccess(student._id, unlimitedUsageFeature.key, 50), true);
+  });
+
+  test("releaseFeatureUsage is idempotent and prevents duplicate refunds with unique reservationId", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "REFUND_TEST_FEATURE", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 5 });
+
+    const reservationId = crypto.randomUUID();
+
+    // 1. Reserve 1 use with reservationId
+    const reserved = await checkFeatureAccess(student._id, feature.key, 1, reservationId);
+    assert.equal(reserved, true);
+
+    const usageAfterReserve = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageAfterReserve.usedCount, 1);
+
+    // 2. First release call succeeds and decrements usedCount to 0
+    await releaseFeatureUsage(student._id, feature.key, 1, reservationId);
+
+    const usageAfterRelease1 = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageAfterRelease1.usedCount, 0);
+
+    // 3. Second duplicate release call with the same reservationId MUST NOT decrement further (remains 0)
+    await releaseFeatureUsage(student._id, feature.key, 1, reservationId);
+
+    const usageAfterRelease2 = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageAfterRelease2.usedCount, 0, "Duplicate release must not over-refund usage");
+
+    // 4. Also verify request-level polymorphism and duplicate guard
+    const fakeReq = {
+      featureReservation: {
+        reservationId: crypto.randomUUID(),
+        featureKey: feature.key,
+        userId: student._id,
+        count: 1,
+        released: false,
+      },
+    };
+
+    await checkFeatureAccess(student._id, feature.key, 1, fakeReq.featureReservation.reservationId);
+    const usageBeforeReqRelease = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usageBeforeReqRelease.usedCount, 1);
+
+    await releaseFeatureUsage(fakeReq);
+    assert.equal(fakeReq.featureReservation.released, true);
+
+    const usageAfterReqRelease1 = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usageAfterReqRelease1.usedCount, 0);
+
+    // Calling releaseFeatureUsage(fakeReq) again must do nothing
+    await releaseFeatureUsage(fakeReq);
+    const usageAfterReqRelease2 = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usageAfterReqRelease2.usedCount, 0, "Repeated release on req must be a no-op");
   });
 });
 

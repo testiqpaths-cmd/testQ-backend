@@ -47,7 +47,7 @@ export const createTest = async (req, res) => {
       data: created,
     });
   } catch (err) {
-    await releaseFeatureUsage(req.user?._id || req.user?.id, "CREATE_TEST");
+    await releaseFeatureUsage(req);
     logger.error(`createTest error: ${err.message}`);
     return res.status(err.statusCode || 500).json({
       success: false,
