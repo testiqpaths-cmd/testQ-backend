@@ -6,6 +6,7 @@ import Plan from "../models/Plan.model.js";
 import PlanFeature from "../models/PlanFeature.model.js";
 import UserSubscription from "../models/UserSubscription.model.js";
 import UserFeatureUsage from "../models/UserFeatureUsage.model.js";
+import FeatureReservation from "../models/FeatureReservation.model.js";
 import Payment from "../models/Payment.model.js";
 import User from "../../../modules/auth/models/User.model.js"; // Existing user model
 import Organization from "../../../models/organization.model.js";
@@ -210,7 +211,13 @@ export const validatePlanEligibility = async (userId, planId) => {
  * For USAGE features, incrementBy will increment the usage record (default 0).
  * For CAPACITY features, incrementBy represents the new items being added, ensuring currentCount + incrementBy <= limit.
  */
-export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0, reservationId = null) => {
+export const checkFeatureAccess = async (
+  userId,
+  featureKey,
+  incrementBy = 0,
+  reservationId = null,
+  options = {}
+) => {
   // 0. Validate incrementBy parameter
   if (typeof incrementBy !== "number" || isNaN(incrementBy) || incrementBy < 0) {
     throw new ApiError(400, "incrementBy must be a non-negative number.");
@@ -451,6 +458,7 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0, re
   };
 
   if (reservationId) {
+    // Retain in embedded array as lightweight backward-compatible record
     updateOp.$push = {
       reservations: {
         $each: [
@@ -461,7 +469,7 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0, re
             createdAt: new Date(),
           },
         ],
-        $slice: -50,
+        $slice: -200,
       },
     };
   }
@@ -491,12 +499,79 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0, re
     );
   }
 
+  // 4. Durable tracking in dedicated FeatureReservation collection (removes array cap bottleneck)
+  if (reservationId) {
+    const leaseMs = options.leaseMs || 15 * 60 * 1000;
+    try {
+      await FeatureReservation.create({
+        reservationId,
+        userId,
+        featureId: feature._id,
+        featureKey: feature.key,
+        count: incrementBy,
+        status: "PENDING",
+        leaseExpiresAt: new Date(Date.now() + leaseMs),
+        metadata: options.metadata || {},
+      });
+    } catch (resErr) {
+      // If creating the durable reservation document fails, roll back usage increment
+      await UserFeatureUsage.updateOne(
+        { _id: usageRecord._id },
+        { $inc: { usedCount: -incrementBy } }
+      );
+      throw resErr;
+    }
+  }
+
   return true;
+};
+
+/**
+ * Commits a previously reserved feature usage slot upon confirmed business operation success.
+ * Transition: PENDING -> COMMITTED.
+ * Guaranteed idempotent against multiple commit calls.
+ */
+export const commitFeatureUsage = async (
+  target,
+  targetResourceId = null,
+  targetResourceType = null
+) => {
+  let resId = null;
+  if (typeof target === "string") {
+    resId = target;
+  } else if (target && typeof target === "object" && target.featureReservation) {
+    resId = target.featureReservation.reservationId;
+  }
+
+  if (!resId) return null;
+
+  const updateFields = {
+    status: "COMMITTED",
+  };
+  if (targetResourceId) updateFields.targetResourceId = targetResourceId;
+  if (targetResourceType) updateFields.targetResourceType = targetResourceType;
+
+  const reservation = await FeatureReservation.findOneAndUpdate(
+    { reservationId: resId, status: "PENDING" },
+    { $set: updateFields },
+    { new: true }
+  );
+
+  if (reservation) {
+    await UserFeatureUsage.updateOne(
+      { userId: reservation.userId, featureId: reservation.featureId },
+      { $set: { "reservations.$[elem].status": "COMMITTED" } },
+      { arrayFilters: [{ "elem.reservationId": resId }] }
+    );
+  }
+
+  return reservation;
 };
 
 /**
  * Safely releases (refunds) a previously reserved feature usage slot if downstream
  * operation fails before completion. Guaranteed idempotent against duplicate refunds.
+ * Transition: PENDING -> RELEASED.
  */
 export const releaseFeatureUsage = async (
   target,
@@ -528,9 +603,42 @@ export const releaseFeatureUsage = async (
     const feature = await Feature.findOne({ key: key, active: true });
     if (!feature || feature.type !== "USAGE") return;
 
-    // 1. If reservationId is present, perform exact-once release against the ACTIVE reservation
+    // 1. If reservationId is present, check dedicated FeatureReservation collection first
     if (resId) {
-      const releasedDoc = await UserFeatureUsage.findOneAndUpdate(
+      const existingRes = await FeatureReservation.findOne({ reservationId: resId });
+      if (existingRes) {
+        if (existingRes.status === "PENDING") {
+          const updated = await FeatureReservation.findOneAndUpdate(
+            { reservationId: resId, status: "PENDING" },
+            { $set: { status: "RELEASED" } },
+            { new: true }
+          );
+
+          if (updated) {
+            // Exactly-once decrement of usedCount
+            await UserFeatureUsage.findOneAndUpdate(
+              {
+                userId,
+                featureId: feature._id,
+                usedCount: { $gte: existingRes.count },
+              },
+              {
+                $inc: { usedCount: -existingRes.count },
+                $set: { "reservations.$[elem].status": "RELEASED" },
+              },
+              {
+                arrayFilters: [{ "elem.reservationId": resId }],
+              }
+            );
+          }
+        }
+        // Found in FeatureReservation collection (PENDING, COMMITTED, RELEASED or EXPIRED).
+        // Return immediately to guarantee idempotent state and never fall through to legacy check.
+        return;
+      }
+
+      // Backward compatibility check for legacy embedded reservation test fixtures
+      const legacyReleased = await UserFeatureUsage.findOneAndUpdate(
         {
           userId,
           featureId: feature._id,
@@ -545,12 +653,9 @@ export const releaseFeatureUsage = async (
         },
         { new: true }
       );
+      if (legacyReleased) return;
 
-      if (releasedDoc) {
-        return; // Exactly once release confirmed
-      }
-
-      // If reservation was already released or not found, return to avoid duplicate decrement
+      // If reservation was already COMMITTED, RELEASED, or EXPIRED, do nothing (no duplicate decrement)
       return;
     }
 
@@ -562,6 +667,129 @@ export const releaseFeatureUsage = async (
   } catch (err) {
     logger.warn(`Failed to release feature usage for ${key}: ${err.message}`);
   }
+};
+
+/**
+ * Extends the lease for long-running operations (e.g. active AI interviews).
+ */
+export const extendFeatureLease = async (
+  reservationId,
+  extensionMs = 15 * 60 * 1000
+) => {
+  if (!reservationId) return null;
+  return FeatureReservation.findOneAndUpdate(
+    { reservationId, status: "PENDING" },
+    { $set: { leaseExpiresAt: new Date(Date.now() + extensionMs) } },
+    { new: true }
+  );
+};
+
+/**
+ * Reconciles stale PENDING reservations whose lease has expired.
+ * Verifies business entity creation before deciding to COMMIT or EXPIRE/refund.
+ */
+export const reconcileStaleReservations = async ({
+  batchSize = 50,
+  now = new Date(),
+} = {}) => {
+  const staleDocs = await FeatureReservation.find({
+    status: "PENDING",
+    leaseExpiresAt: { $lt: now },
+  })
+    .limit(batchSize)
+    .lean();
+
+  const results = {
+    processed: 0,
+    committed: 0,
+    released: 0,
+    skipped: 0,
+  };
+
+  for (const doc of staleDocs) {
+    results.processed++;
+
+    let entityExists = false;
+    try {
+      if (doc.featureKey === "CREATE_TEST") {
+        const Test = (await import("../../../models/test.model.js")).default;
+        const test = await Test.findOne({
+          $or: [
+            { "createdBy.userId": doc.userId },
+            { createdBy: doc.userId },
+          ],
+          createdAt: {
+            $gte: new Date(new Date(doc.createdAt).getTime() - 15000),
+            $lte: new Date(new Date(doc.leaseExpiresAt).getTime() + 60000),
+          },
+        }).lean();
+        if (test) entityExists = true;
+      } else if (doc.featureKey === "TEST_SERIES") {
+        const TestSeries = (await import("../../../models/testSeries.model.js")).default;
+        if (TestSeries) {
+          const series = await TestSeries.findOne({
+            $or: [
+              { "createdBy.userId": doc.userId },
+              { createdBy: doc.userId },
+            ],
+            createdAt: {
+              $gte: new Date(new Date(doc.createdAt).getTime() - 15000),
+              $lte: new Date(new Date(doc.leaseExpiresAt).getTime() + 60000),
+            },
+          }).lean();
+          if (series) entityExists = true;
+        }
+      } else if (doc.featureKey === "AI_INTERVIEW") {
+        const { InterviewSession } = await import(
+          "../../../ai-interview/schemas/interview-session.schema.js"
+        );
+        if (InterviewSession) {
+          const session = await InterviewSession.findOne({
+            userId: doc.userId,
+            createdAt: {
+              $gte: new Date(new Date(doc.createdAt).getTime() - 15000),
+              $lte: new Date(new Date(doc.leaseExpiresAt).getTime() + 60000),
+            },
+          }).lean();
+          if (session) entityExists = true;
+        }
+      }
+    } catch (checkErr) {
+      logger.warn(
+        `Verification check failed for reservation ${doc.reservationId}: ${checkErr.message}`
+      );
+      results.skipped++;
+      continue;
+    }
+
+    if (entityExists) {
+      // Operation actually succeeded before crash! Transition PENDING -> COMMITTED without refund
+      const updated = await FeatureReservation.findOneAndUpdate(
+        { reservationId: doc.reservationId, status: "PENDING" },
+        { $set: { status: "COMMITTED" } }
+      );
+      if (updated) results.committed++;
+    } else {
+      // Operation confirmed NOT created. Atomically transition PENDING -> EXPIRED and refund usedCount
+      const updated = await FeatureReservation.findOneAndUpdate(
+        { reservationId: doc.reservationId, status: "PENDING" },
+        { $set: { status: "EXPIRED" } }
+      );
+      if (updated) {
+        await UserFeatureUsage.findOneAndUpdate(
+          {
+            userId: doc.userId,
+            featureId: doc.featureId,
+            usedCount: { $gte: doc.count },
+          },
+          { $inc: { usedCount: -doc.count } }
+        );
+        results.released++;
+      }
+    }
+  }
+
+  return results;
 };
 
 /**

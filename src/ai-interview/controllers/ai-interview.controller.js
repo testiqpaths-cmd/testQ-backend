@@ -17,7 +17,10 @@ import { ApiError } from "../../common/exceptions/ApiError.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
 import logger from "../../config/logger.js";
-import { releaseFeatureUsage } from "../../modules/subscription/services/subscription.service.js";
+import {
+  releaseFeatureUsage,
+  commitFeatureUsage,
+} from "../../modules/subscription/services/subscription.service.js";
 
 export class AiInterviewController {
   /**
@@ -30,6 +33,7 @@ export class AiInterviewController {
         req.user._id,
         req.body
       );
+      await commitFeatureUsage(req, result?._id || result?.sessionId, "AiInterviewSession");
       return res.status(201).json({
         success: true,
         message: "Interview session created successfully",
@@ -52,6 +56,7 @@ export class AiInterviewController {
         req.file,
         req.body
       );
+      await commitFeatureUsage(req, result?._id || result?.sessionId, "AiInterviewSession");
       return res.status(201).json({
         success: true,
         message: "Resume interview created successfully",

@@ -1,6 +1,9 @@
 import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
-import { releaseFeatureUsage } from "../subscription/services/subscription.service.js";
+import {
+  releaseFeatureUsage,
+  commitFeatureUsage,
+} from "../subscription/services/subscription.service.js";
 import { computeTestStatus, hasTestEnded } from "./utils/status.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 import { isTestMandatoryForStudent } from "./utils/visibility.js";
@@ -40,6 +43,7 @@ export const createTest = async (req, res) => {
     }
 
     const created = await service.createTest(req.body, req.user);
+    await commitFeatureUsage(req, created?._id, "Test");
 
     return res.status(201).json({
       success: true,

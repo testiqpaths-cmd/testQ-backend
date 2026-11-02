@@ -13,9 +13,14 @@ import {
 import crypto from "crypto";
 import {
   checkFeatureAccess,
+  commitFeatureUsage,
   releaseFeatureUsage,
+  extendFeatureLease,
+  reconcileStaleReservations,
 } from "../../src/modules/subscription/services/subscription.service.js";
 import UserFeatureUsage from "../../src/modules/subscription/models/UserFeatureUsage.model.js";
+import FeatureReservation from "../../src/modules/subscription/models/FeatureReservation.model.js";
+import TestModel from "../../src/models/test.model.js";
 
 describe("Suite 2: Usage Counters, Rolling Resets & Concurrency", () => {
   let studentRole;
@@ -220,6 +225,191 @@ describe("Suite 2: Usage Counters, Rolling Resets & Concurrency", () => {
     await releaseFeatureUsage(fakeReq);
     const usageAfterReqRelease2 = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
     assert.equal(usageAfterReqRelease2.usedCount, 0, "Repeated release on req must be a no-op");
+  });
+
+  test("60 simultaneous reservations: All 60 reservations persist in FeatureReservation without truncation", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "LARGE_BURST_FEATURE", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 100 });
+
+    const reservationIds = Array.from({ length: 60 }, () => crypto.randomUUID());
+
+    // Execute 60 reservations
+    for (const resId of reservationIds) {
+      await checkFeatureAccess(student._id, feature.key, 1, resId);
+    }
+
+    // Verify all 60 are preserved in FeatureReservation
+    const savedReservations = await FeatureReservation.find({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(savedReservations.length, 60, "All 60 reservations must exist in dedicated collection");
+
+    // Releasing the 1st reservation (which in a $slice: -50 array would have been pruned) works cleanly
+    await releaseFeatureUsage(student._id, feature.key, 1, reservationIds[0]);
+    const usageAfterPrunedRelease = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageAfterPrunedRelease.usedCount, 59);
+  });
+
+  test("commitFeatureUsage transitions PENDING to COMMITTED and prevents subsequent release refund", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "COMMIT_TEST_FEATURE", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 10 });
+
+    const reservationId = crypto.randomUUID();
+    await checkFeatureAccess(student._id, feature.key, 1, reservationId);
+
+    const committed = await commitFeatureUsage(reservationId, "resource_123", "Test");
+    assert.equal(committed.status, "COMMITTED");
+    assert.equal(committed.targetResourceId, "resource_123");
+
+    // Subsequent release attempt on committed reservation MUST NOT decrement usedCount
+    await releaseFeatureUsage(student._id, feature.key, 1, reservationId);
+    const usageAfterCommitRelease = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageAfterCommitRelease.usedCount, 1, "Committed reservation must not be refunded");
+  });
+
+  test("Crash recovery: Server crashes after reservation (no test created) -> reconcileStaleReservations detects missing entity, transitions to EXPIRED, and refunds usage", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "CREATE_TEST", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 10 });
+
+    const reservationId = crypto.randomUUID();
+    // Simulate expired lease (1 second lease that is now in the past)
+    await checkFeatureAccess(student._id, feature.key, 1, reservationId, {
+      leaseMs: -1000,
+    });
+
+    const usageBeforeRecovery = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageBeforeRecovery.usedCount, 1);
+
+    // Run recovery worker (no test exists in TestModel)
+    const recoveryResult = await reconcileStaleReservations({ batchSize: 10 });
+    assert.equal(recoveryResult.released, 1);
+    assert.equal(recoveryResult.committed, 0);
+
+    const reservationDoc = await FeatureReservation.findOne({ reservationId });
+    assert.equal(reservationDoc.status, "EXPIRED");
+
+    const usageAfterRecovery = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageAfterRecovery.usedCount, 0, "Usage must be refunded for unconfirmed crashed request");
+  });
+
+  test("Crash recovery: Server crashes after test creation (test exists uncommitted) -> reconcileStaleReservations detects created test and COMMITS without refunding", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "CREATE_TEST", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 10 });
+
+    const reservationId = crypto.randomUUID();
+    // Expired lease
+    await checkFeatureAccess(student._id, feature.key, 1, reservationId, {
+      leaseMs: -1000,
+    });
+
+    // Simulate test entity was created right at reservation time before crash
+    await TestModel.create({
+      title: "Crashed Node Created Test",
+      createdBy: {
+        userId: student._id,
+        role: "STUDENT",
+      },
+      duration: 30,
+      totalQuestions: 5,
+      totalMarks: 5,
+      marksPerQuestion: 1,
+      visibility: "PUBLIC",
+      scheduleType: "IMMEDIATE",
+      sections: [],
+    });
+
+    // Run recovery worker
+    const recoveryResult = await reconcileStaleReservations({ batchSize: 10 });
+    assert.equal(recoveryResult.committed, 1, "Must commit confirmed created entity");
+    assert.equal(recoveryResult.released, 0, "Must not refund completed operation");
+
+    const reservationDoc = await FeatureReservation.findOne({ reservationId });
+    assert.equal(reservationDoc.status, "COMMITTED");
+
+    const usageAfterRecovery = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usageAfterRecovery.usedCount, 1, "Usage must remain charged for confirmed test");
+  });
+
+  test("Legitimate long-running operation with active lease -> reconcileStaleReservations skips it", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "AI_INTERVIEW", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 10 });
+
+    const reservationId = crypto.randomUUID();
+    // Lease expires 30 minutes in the future (active long-running interview)
+    await checkFeatureAccess(student._id, feature.key, 1, reservationId, {
+      leaseMs: 30 * 60 * 1000,
+    });
+
+    const recoveryResult = await reconcileStaleReservations({ batchSize: 10 });
+    assert.equal(recoveryResult.processed, 0, "Active lease must be ignored by recovery worker");
+
+    const reservationDoc = await FeatureReservation.findOne({ reservationId });
+    assert.equal(reservationDoc.status, "PENDING");
+  });
+
+  test("Two recovery workers run simultaneously -> Exactly one refunds, preventing duplicate refund", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "RECOVERY_RACE_FEATURE", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 10 });
+
+    const reservationId = crypto.randomUUID();
+    await checkFeatureAccess(student._id, feature.key, 1, reservationId, {
+      leaseMs: -1000,
+    });
+
+    // Launch two recovery workers concurrently
+    const [result1, result2] = await Promise.all([
+      reconcileStaleReservations({ batchSize: 10 }),
+      reconcileStaleReservations({ batchSize: 10 }),
+    ]);
+
+    const totalReleased = result1.released + result2.released;
+    assert.equal(totalReleased, 1, "Exactly one worker must claim and refund the stale reservation");
+
+    const usage = await UserFeatureUsage.findOne({
+      userId: student._id,
+      featureId: feature._id,
+    });
+    assert.equal(usage.usedCount, 0, "Usage count must be 0 (no duplicate refund)");
   });
 });
 

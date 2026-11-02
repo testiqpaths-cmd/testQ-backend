@@ -1,6 +1,9 @@
 import * as service from "./testSeries.service.js";
 import logger from "../../config/logger.js";
-import { releaseFeatureUsage } from "../subscription/services/subscription.service.js";
+import {
+  releaseFeatureUsage,
+  commitFeatureUsage,
+} from "../subscription/services/subscription.service.js";
 import mongoose from "mongoose";
 import TestSeries from "../../models/testSeries.model.js";
 import TestSeriesAssignment from "../../models/testSeriesAssignment.model.js";
@@ -322,6 +325,8 @@ export const createSeries = async (req, res, next) => {
       },
       req.user
     );
+
+    await commitFeatureUsage(req, series?._id, "TestSeries");
 
     return res.status(201).json({
       success: true,
