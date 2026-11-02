@@ -65,3 +65,4 @@ featureReservationSchema.index({ featureKey: 1, createdAt: -1 });
 
 export default mongoose.models.FeatureReservation ||
   mongoose.model("FeatureReservation", featureReservationSchema);
+

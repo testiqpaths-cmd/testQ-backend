@@ -21,6 +21,7 @@ const testSchema = new Schema({
     userId: { type: Types.ObjectId, required: true },
     role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
   },
+  reservationId: { type: String, default: null, index: true },
   visibility: { type: String, enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY", "SELECT_STUDENT"], required: true },
   allowedOrganizations: [{ type: Types.ObjectId }],
   allowedStudents: [{ type: Types.ObjectId, ref: "User" }],

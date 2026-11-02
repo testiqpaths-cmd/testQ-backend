@@ -17,9 +17,11 @@ import {
   releaseFeatureUsage,
   extendFeatureLease,
   reconcileStaleReservations,
+  withSubscriptionTransaction,
 } from "../../src/modules/subscription/services/subscription.service.js";
 import UserFeatureUsage from "../../src/modules/subscription/models/UserFeatureUsage.model.js";
 import FeatureReservation from "../../src/modules/subscription/models/FeatureReservation.model.js";
+import PlanFeature from "../../src/modules/subscription/models/PlanFeature.model.js";
 import TestModel from "../../src/models/test.model.js";
 
 describe("Suite 2: Usage Counters, Rolling Resets & Concurrency", () => {
@@ -410,6 +412,173 @@ describe("Suite 2: Usage Counters, Rolling Resets & Concurrency", () => {
       featureId: feature._id,
     });
     assert.equal(usage.usedCount, 0, "Usage count must be 0 (no duplicate refund)");
+  });
+
+  test("Transactional integrity: simulated crash/abort mid-operation rolls back both documents", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "TX_TEST_FEATURE", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 10 });
+
+    const reservationId = crypto.randomUUID();
+    await checkFeatureAccess(student._id, feature.key, 1, reservationId);
+
+    const usageBefore = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usageBefore.usedCount, 1);
+
+    // Simulate an aborted transaction where reservation was updated to RELEASED but second op throws
+    let txThrew = false;
+    try {
+      await withSubscriptionTransaction(async (session) => {
+        await FeatureReservation.findOneAndUpdate(
+          { reservationId, status: "PENDING" },
+          { $set: { status: "RELEASED" } },
+          { session }
+        );
+        // Simulate unexpected crash / host kill signal
+        throw new Error("SIMULATED_WORKER_CRASH_MID_TRANSACTION");
+      });
+    } catch (err) {
+      if (err.message === "SIMULATED_WORKER_CRASH_MID_TRANSACTION") {
+        txThrew = true;
+      }
+    }
+
+    assert.equal(txThrew, true);
+
+    // Verify reservation remains PENDING because transaction aborted cleanly
+    const reservationDoc = await FeatureReservation.findOne({ reservationId });
+    assert.equal(reservationDoc.status, "PENDING", "Reservation status must remain PENDING on transaction abort");
+
+    // Verify usage remained 1
+    const usageAfter = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usageAfter.usedCount, 1, "Usage count must remain untouched on transaction abort");
+  });
+
+  test("Crash recovery with exact correlation ID: two simultaneous test creations recover and commit their respective reservations without cross-contamination", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "CREATE_TEST", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 10 });
+
+    const resA = crypto.randomUUID();
+    const resB = crypto.randomUUID();
+
+    // Two parallel reservations by the same student
+    await checkFeatureAccess(student._id, feature.key, 1, resA, { leaseMs: -1000 });
+    await checkFeatureAccess(student._id, feature.key, 1, resB, { leaseMs: -1000 });
+
+    // Resource A was created with reservationId resA
+    const testA = await TestModel.create({
+      title: "Simultaneous Test A",
+      reservationId: resA,
+      createdBy: { userId: student._id, role: "STUDENT" },
+      duration: 30,
+      totalQuestions: 5,
+      totalMarks: 5,
+      marksPerQuestion: 1,
+      visibility: "PUBLIC",
+      scheduleType: "IMMEDIATE",
+      sections: [],
+    });
+
+    // Resource B was created with reservationId resB
+    const testB = await TestModel.create({
+      title: "Simultaneous Test B",
+      reservationId: resB,
+      createdBy: { userId: student._id, role: "STUDENT" },
+      duration: 30,
+      totalQuestions: 5,
+      totalMarks: 5,
+      marksPerQuestion: 1,
+      visibility: "PUBLIC",
+      scheduleType: "IMMEDIATE",
+      sections: [],
+    });
+
+    // Run recovery worker
+    const recoveryResult = await reconcileStaleReservations({ batchSize: 10 });
+    assert.equal(recoveryResult.committed, 2, "Both tests must be discovered and committed");
+    assert.equal(recoveryResult.released, 0, "Neither test must be refunded");
+
+    const docA = await FeatureReservation.findOne({ reservationId: resA });
+    const docB = await FeatureReservation.findOne({ reservationId: resB });
+    assert.equal(docA.status, "COMMITTED");
+    assert.equal(docB.status, "COMMITTED");
+
+    // Total usage count must remain 2 (both consumed)
+    const usage = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usage.usedCount, 2);
+  });
+
+  test("Dynamic plan limit updates: changing PlanFeature.limit immediately affects subscriber without altering historic usage count", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "DYNAMIC_PLAN_FEATURE", type: "USAGE" });
+    const pf = await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 5 });
+
+    // 1. Consume 3 uses under initial limit of 5
+    for (let i = 0; i < 3; i++) {
+      await checkFeatureAccess(student._id, feature.key, 1, crypto.randomUUID());
+    }
+
+    const usageAfter3 = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usageAfter3.usedCount, 3);
+
+    // 2. Admin increases limit from 5 to 10 in PlanFeature
+    await PlanFeature.updateOne({ _id: pf._id }, { $set: { limit: 10 } });
+
+    // Can immediately make 7 more reservations without code change or user logout
+    for (let i = 0; i < 7; i++) {
+      await checkFeatureAccess(student._id, feature.key, 1, crypto.randomUUID());
+    }
+
+    const usageAfter10 = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usageAfter10.usedCount, 10);
+
+    // Attempting 11th request under limit 10 fails with 402
+    await assert.rejects(
+      async () => checkFeatureAccess(student._id, feature.key, 1, crypto.randomUUID()),
+      (err) => err.statusCode === 402 && err.code === "FEATURE_LIMIT_REACHED"
+    );
+
+    // 3. Admin reduces limit from 10 to 5 while usedCount is 10
+    await PlanFeature.updateOne({ _id: pf._id }, { $set: { limit: 5 } });
+
+    // Existing usedCount is preserved (NEVER wiped or reset)
+    const usagePreserved = await UserFeatureUsage.findOne({ userId: student._id, featureId: feature._id });
+    assert.equal(usagePreserved.usedCount, 10);
+
+    // New request is blocked with 402 and remaining: 0
+    await assert.rejects(
+      async () => checkFeatureAccess(student._id, feature.key, 1, crypto.randomUUID()),
+      (err) => {
+        assert.equal(err.statusCode, 402);
+        assert.equal(err.code, "FEATURE_LIMIT_REACHED");
+        assert.equal(err.data.used, 10);
+        assert.equal(err.data.limit, 5);
+        assert.equal(err.data.remaining, 0);
+        return true;
+      }
+    );
+
+    // 4. Admin sets limit to 0 -> immediately blocked with 402
+    await PlanFeature.updateOne({ _id: pf._id }, { $set: { limit: 0 } });
+    await assert.rejects(
+      async () => checkFeatureAccess(student._id, feature.key, 1, crypto.randomUUID()),
+      (err) => err.statusCode === 402
+    );
+
+    // 5. Admin sets limit to null -> immediately unlimited
+    await PlanFeature.updateOne({ _id: pf._id }, { $set: { limit: null } });
+    const unlimitedAccess = await checkFeatureAccess(student._id, feature.key, 1, crypto.randomUUID());
+    assert.equal(unlimitedAccess, true);
   });
 });
 

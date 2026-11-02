@@ -322,6 +322,7 @@ export const createSeries = async (req, res, next) => {
         targetRole: targetRole || null,
         hiringRounds: validatedHiringRounds,
         launchDate,
+        reservationId: req.featureReservation?.reservationId || req.reservationId,
       },
       req.user
     );

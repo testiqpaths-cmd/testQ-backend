@@ -16,6 +16,32 @@ import env from "../../../config/env.js";
 import logger from "../../../config/logger.js";
 
 /**
+ * Executes a callback within a MongoDB multi-document ACID transaction.
+ * Gracefully falls back if running on a standalone instance without replica sets.
+ */
+export const withSubscriptionTransaction = async (workFn) => {
+  const session = await mongoose.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      result = await workFn(session);
+    });
+    return result;
+  } catch (err) {
+    if (
+      err.message &&
+      (err.message.includes("Transaction numbers are only allowed on a replica set") ||
+        err.message.includes("replica set"))
+    ) {
+      return await workFn(null);
+    }
+    throw err;
+  } finally {
+    await session.endSession();
+  }
+};
+
+/**
  * Gets the user's active subscription or assigns a default one if missing.
  *
  * The plan/subscription system only governs independent students — an
@@ -474,6 +500,57 @@ export const checkFeatureAccess = async (
     };
   }
 
+  // 4. If reservationId is present, execute atomic usage increment and FeatureReservation creation inside an ACID transaction
+  if (reservationId) {
+    const leaseMs = options.leaseMs || 15 * 60 * 1000;
+    await withSubscriptionTransaction(async (session) => {
+      const sessionOpt = session ? { session } : {};
+      const updated = await UserFeatureUsage.findOneAndUpdate(
+        {
+          _id: usageRecord._id,
+          usedCount: { $lte: limit - incrementBy },
+        },
+        updateOp,
+        { new: true, ...sessionOpt }
+      );
+
+      if (!updated) {
+        throw new ApiError(
+          402,
+          `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
+          null,
+          "FEATURE_LIMIT_REACHED",
+          {
+            feature: feature.key,
+            used: usageRecord.usedCount,
+            limit,
+            remaining: Math.max(0, limit - usageRecord.usedCount),
+            availablePlans: true,
+          }
+        );
+      }
+
+      await FeatureReservation.create(
+        [
+          {
+            reservationId,
+            userId,
+            featureId: feature._id,
+            featureKey: feature.key,
+            count: incrementBy,
+            status: "PENDING",
+            leaseExpiresAt: new Date(Date.now() + leaseMs),
+            metadata: options.metadata || {},
+          },
+        ],
+        sessionOpt
+      );
+    });
+
+    return true;
+  }
+
+  // Fallback for non-reserved USAGE increment
   const updatedUsage = await UserFeatureUsage.findOneAndUpdate(
     {
       _id: usageRecord._id,
@@ -499,29 +576,7 @@ export const checkFeatureAccess = async (
     );
   }
 
-  // 4. Durable tracking in dedicated FeatureReservation collection (removes array cap bottleneck)
-  if (reservationId) {
-    const leaseMs = options.leaseMs || 15 * 60 * 1000;
-    try {
-      await FeatureReservation.create({
-        reservationId,
-        userId,
-        featureId: feature._id,
-        featureKey: feature.key,
-        count: incrementBy,
-        status: "PENDING",
-        leaseExpiresAt: new Date(Date.now() + leaseMs),
-        metadata: options.metadata || {},
-      });
-    } catch (resErr) {
-      // If creating the durable reservation document fails, roll back usage increment
-      await UserFeatureUsage.updateOne(
-        { _id: usageRecord._id },
-        { $inc: { usedCount: -incrementBy } }
-      );
-      throw resErr;
-    }
-  }
+  return true;
 
   return true;
 };
@@ -605,57 +660,58 @@ export const releaseFeatureUsage = async (
 
     // 1. If reservationId is present, check dedicated FeatureReservation collection first
     if (resId) {
-      const existingRes = await FeatureReservation.findOne({ reservationId: resId });
-      if (existingRes) {
-        if (existingRes.status === "PENDING") {
-          const updated = await FeatureReservation.findOneAndUpdate(
-            { reservationId: resId, status: "PENDING" },
-            { $set: { status: "RELEASED" } },
-            { new: true }
-          );
-
-          if (updated) {
-            // Exactly-once decrement of usedCount
-            await UserFeatureUsage.findOneAndUpdate(
-              {
-                userId,
-                featureId: feature._id,
-                usedCount: { $gte: existingRes.count },
-              },
-              {
-                $inc: { usedCount: -existingRes.count },
-                $set: { "reservations.$[elem].status": "RELEASED" },
-              },
-              {
-                arrayFilters: [{ "elem.reservationId": resId }],
-              }
+      await withSubscriptionTransaction(async (session) => {
+        const sessionOpt = session ? { session } : {};
+        const existingRes = await FeatureReservation.findOne({ reservationId: resId }).session(session || null);
+        if (existingRes) {
+          if (existingRes.status === "PENDING") {
+            const updated = await FeatureReservation.findOneAndUpdate(
+              { reservationId: resId, status: "PENDING" },
+              { $set: { status: "RELEASED" } },
+              { new: true, ...sessionOpt }
             );
+
+            if (updated) {
+              // Exactly-once decrement of usedCount
+              await UserFeatureUsage.findOneAndUpdate(
+                {
+                  userId,
+                  featureId: feature._id,
+                  usedCount: { $gte: existingRes.count },
+                },
+                {
+                  $inc: { usedCount: -existingRes.count },
+                  $set: { "reservations.$[elem].status": "RELEASED" },
+                },
+                {
+                  arrayFilters: [{ "elem.reservationId": resId }],
+                  ...sessionOpt,
+                }
+              );
+            }
           }
+          // Found in FeatureReservation collection (PENDING, COMMITTED, RELEASED or EXPIRED).
+          // Return immediately to guarantee idempotent state and never fall through to legacy check.
+          return;
         }
-        // Found in FeatureReservation collection (PENDING, COMMITTED, RELEASED or EXPIRED).
-        // Return immediately to guarantee idempotent state and never fall through to legacy check.
-        return;
-      }
 
-      // Backward compatibility check for legacy embedded reservation test fixtures
-      const legacyReleased = await UserFeatureUsage.findOneAndUpdate(
-        {
-          userId,
-          featureId: feature._id,
-          usedCount: { $gte: targetCount },
-          reservations: {
-            $elemMatch: { reservationId: resId, status: "ACTIVE" },
+        // Backward compatibility check for legacy embedded reservation test fixtures
+        await UserFeatureUsage.findOneAndUpdate(
+          {
+            userId,
+            featureId: feature._id,
+            usedCount: { $gte: targetCount },
+            reservations: {
+              $elemMatch: { reservationId: resId, status: "ACTIVE" },
+            },
           },
-        },
-        {
-          $inc: { usedCount: -targetCount },
-          $set: { "reservations.$.status": "RELEASED" },
-        },
-        { new: true }
-      );
-      if (legacyReleased) return;
-
-      // If reservation was already COMMITTED, RELEASED, or EXPIRED, do nothing (no duplicate decrement)
+          {
+            $inc: { usedCount: -targetCount },
+            $set: { "reservations.$.status": "RELEASED" },
+          },
+          { new: true, ...sessionOpt }
+        );
+      });
       return;
     }
 
@@ -713,21 +769,14 @@ export const reconcileStaleReservations = async ({
     try {
       if (doc.featureKey === "CREATE_TEST") {
         const Test = (await import("../../../models/test.model.js")).default;
-        const test = await Test.findOne({
-          $or: [
-            { "createdBy.userId": doc.userId },
-            { createdBy: doc.userId },
-          ],
-          createdAt: {
-            $gte: new Date(new Date(doc.createdAt).getTime() - 15000),
-            $lte: new Date(new Date(doc.leaseExpiresAt).getTime() + 60000),
-          },
-        }).lean();
-        if (test) entityExists = true;
-      } else if (doc.featureKey === "TEST_SERIES") {
-        const TestSeries = (await import("../../../models/testSeries.model.js")).default;
-        if (TestSeries) {
-          const series = await TestSeries.findOne({
+        // 1. Exact correlation ID check
+        let test = await Test.findOne({ reservationId: doc.reservationId }).lean();
+        if (!test && doc.targetResourceId) {
+          test = await Test.findById(doc.targetResourceId).lean();
+        }
+        if (!test) {
+          // Fallback legacy window check
+          test = await Test.findOne({
             $or: [
               { "createdBy.userId": doc.userId },
               { createdBy: doc.userId },
@@ -737,6 +786,15 @@ export const reconcileStaleReservations = async ({
               $lte: new Date(new Date(doc.leaseExpiresAt).getTime() + 60000),
             },
           }).lean();
+        }
+        if (test) entityExists = true;
+      } else if (doc.featureKey === "TEST_SERIES") {
+        const TestSeries = (await import("../../../models/testSeries.model.js")).default;
+        if (TestSeries) {
+          let series = await TestSeries.findOne({ reservationId: doc.reservationId }).lean();
+          if (!series && doc.targetResourceId) {
+            series = await TestSeries.findById(doc.targetResourceId).lean();
+          }
           if (series) entityExists = true;
         }
       } else if (doc.featureKey === "AI_INTERVIEW") {
@@ -744,13 +802,10 @@ export const reconcileStaleReservations = async ({
           "../../../ai-interview/schemas/interview-session.schema.js"
         );
         if (InterviewSession) {
-          const session = await InterviewSession.findOne({
-            userId: doc.userId,
-            createdAt: {
-              $gte: new Date(new Date(doc.createdAt).getTime() - 15000),
-              $lte: new Date(new Date(doc.leaseExpiresAt).getTime() + 60000),
-            },
-          }).lean();
+          let session = await InterviewSession.findOne({ reservationId: doc.reservationId }).lean();
+          if (!session && doc.targetResourceId) {
+            session = await InterviewSession.findById(doc.targetResourceId).lean();
+          }
           if (session) entityExists = true;
         }
       }
@@ -770,22 +825,27 @@ export const reconcileStaleReservations = async ({
       );
       if (updated) results.committed++;
     } else {
-      // Operation confirmed NOT created. Atomically transition PENDING -> EXPIRED and refund usedCount
-      const updated = await FeatureReservation.findOneAndUpdate(
-        { reservationId: doc.reservationId, status: "PENDING" },
-        { $set: { status: "EXPIRED" } }
-      );
-      if (updated) {
-        await UserFeatureUsage.findOneAndUpdate(
-          {
-            userId: doc.userId,
-            featureId: doc.featureId,
-            usedCount: { $gte: doc.count },
-          },
-          { $inc: { usedCount: -doc.count } }
+      // Operation confirmed NOT created. Atomically transition PENDING -> EXPIRED and refund usedCount within ACID transaction
+      await withSubscriptionTransaction(async (session) => {
+        const sessionOpt = session ? { session } : {};
+        const updated = await FeatureReservation.findOneAndUpdate(
+          { reservationId: doc.reservationId, status: "PENDING" },
+          { $set: { status: "EXPIRED" } },
+          { new: true, ...sessionOpt }
         );
-        results.released++;
-      }
+        if (updated) {
+          await UserFeatureUsage.findOneAndUpdate(
+            {
+              userId: doc.userId,
+              featureId: doc.featureId,
+              usedCount: { $gte: doc.count },
+            },
+            { $inc: { usedCount: -doc.count } },
+            sessionOpt
+          );
+          results.released++;
+        }
+      });
     }
   }
 

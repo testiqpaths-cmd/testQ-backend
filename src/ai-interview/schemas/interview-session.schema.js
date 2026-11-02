@@ -179,6 +179,11 @@ const interviewSessionSchema = new Schema(
       required: true,
       index: true,
     },
+    reservationId: {
+      type: String,
+      default: null,
+      index: true,
+    },
     interviewId: {
       type: String,
       unique: true,

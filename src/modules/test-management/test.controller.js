@@ -42,7 +42,11 @@ export const createTest = async (req, res) => {
       });
     }
 
-    const created = await service.createTest(req.body, req.user);
+    const testPayload = {
+      ...req.body,
+      reservationId: req.featureReservation?.reservationId || req.reservationId,
+    };
+    const created = await service.createTest(testPayload, req.user);
     await commitFeatureUsage(req, created?._id, "Test");
 
     return res.status(201).json({

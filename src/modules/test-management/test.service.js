@@ -79,6 +79,7 @@ export async function createTest(data, user) {
 
   const payload = {
     ...normalizeTestPayload(data),
+    reservationId: data.reservationId || null,
     maxAttempts: Number(data.maxAttempts) || 1,
     testCode:
       data.visibility === "LINK_ONLY"

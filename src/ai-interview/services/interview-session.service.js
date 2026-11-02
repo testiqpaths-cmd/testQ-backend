@@ -145,6 +145,7 @@ export class InterviewSessionService {
     // 3. Create Session with Backend Authority Defaults
     const session = new InterviewSession({
       userId,
+      reservationId: data?.reservationId || null,
       interviewId,
       interviewType: "CUSTOM",
       role,
@@ -330,6 +331,7 @@ export class InterviewSessionService {
     // 3. Create Session
     const session = new InterviewSession({
       userId,
+      reservationId: (data && data.reservationId) || (payload && payload.reservationId) || null,
       interviewId,
       interviewType: "RESUME",
       role,

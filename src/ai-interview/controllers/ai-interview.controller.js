@@ -29,9 +29,13 @@ export class AiInterviewController {
    */
   async createCustomInterview(req, res, next) {
     try {
+      const interviewPayload = {
+        ...req.body,
+        reservationId: req.featureReservation?.reservationId || req.reservationId,
+      };
       const result = await interviewSessionService.createCustomInterview(
         req.user._id,
-        req.body
+        interviewPayload
       );
       await commitFeatureUsage(req, result?._id || result?.sessionId, "AiInterviewSession");
       return res.status(201).json({
@@ -51,10 +55,14 @@ export class AiInterviewController {
    */
   async createResumeInterview(req, res, next) {
     try {
+      const interviewPayload = {
+        ...req.body,
+        reservationId: req.featureReservation?.reservationId || req.reservationId,
+      };
       const result = await interviewSessionService.createResumeInterview(
         req.user._id,
         req.file,
-        req.body
+        interviewPayload
       );
       await commitFeatureUsage(req, result?._id || result?.sessionId, "AiInterviewSession");
       return res.status(201).json({

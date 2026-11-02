@@ -17,6 +17,8 @@ const TestSeriesSchema = new mongoose.Schema(
       role: { type: String, enum: ["IQPATH_ADMIN", "ORGANIZATION","STUDENT"], required: true }
     },
 
+    reservationId: { type: String, default: null, index: true },
+
     visibility: {
       type: String,
       enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY", "SELECT_STUDENT"],
