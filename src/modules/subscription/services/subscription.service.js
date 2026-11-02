@@ -218,7 +218,13 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   // 1. Resolve Feature (FAIL-CLOSED: unconfigured / unrecognized feature throws 402)
   const feature = await Feature.findOne({ key: featureKey, active: true });
   if (!feature) {
-    throw new ApiError(402, `Feature '${featureKey}' is not configured or recognized.`);
+    throw new ApiError(
+      402,
+      `Feature '${featureKey}' is not configured or recognized.`,
+      null,
+      "FEATURE_NOT_INCLUDED",
+      { feature: featureKey, availablePlans: true }
+    );
   }
 
   // 2. Resolve User & Access Policy
@@ -255,7 +261,16 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
               `Student limit reached for ${org.name || "this organization"}. You can add at most ${Math.max(
                 0,
                 org.studentLimit - currentCount
-              )} more student(s) (limit: ${org.studentLimit}).`
+              )} more student(s) (limit: ${org.studentLimit}).`,
+              null,
+              "FEATURE_LIMIT_REACHED",
+              {
+                feature: feature.key,
+                used: currentCount,
+                limit: org.studentLimit,
+                remaining: Math.max(0, org.studentLimit - currentCount),
+                availablePlans: true,
+              }
             );
           }
         }
@@ -267,13 +282,25 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   // 3. Resolve Subscription for Independent Student
   const sub = await getUserSubscription(userId);
   if (!sub || sub.status !== "ACTIVE" || !sub.planId) {
-    throw new ApiError(402, "No active subscription found. Please subscribe to access this feature.");
+    throw new ApiError(
+      402,
+      "No active subscription found. Please subscribe to access this feature.",
+      null,
+      "SUBSCRIPTION_REQUIRED",
+      { feature: feature.key, availablePlans: true }
+    );
   }
 
   if (sub.expiresAt && sub.expiresAt <= new Date()) {
     sub.status = "EXPIRED";
     await sub.save();
-    throw new ApiError(402, "Your subscription has expired. Please renew or upgrade to continue.");
+    throw new ApiError(
+      402,
+      "Your subscription has expired. Please renew or upgrade to continue.",
+      null,
+      "SUBSCRIPTION_EXPIRED",
+      { feature: feature.key, availablePlans: true }
+    );
   }
 
   const planId = sub.planId._id ? sub.planId._id : sub.planId;
@@ -282,11 +309,35 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   const planFeature = await PlanFeature.findOne({ planId, featureId: feature._id });
   
   if (!planFeature) {
-    throw new ApiError(402, `Access to ${feature.displayName} is not included in your current plan.`);
+    throw new ApiError(
+      402,
+      `Access to ${feature.displayName} is not included in your current plan.`,
+      null,
+      "FEATURE_NOT_INCLUDED",
+      {
+        feature: feature.key,
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        availablePlans: true,
+      }
+    );
   }
 
   if (!planFeature.enabled) {
-    throw new ApiError(402, `Access to ${feature.displayName} is disabled on your current plan.`);
+    throw new ApiError(
+      402,
+      `Access to ${feature.displayName} is disabled on your current plan.`,
+      null,
+      "FEATURE_NOT_INCLUDED",
+      {
+        feature: feature.key,
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        availablePlans: true,
+      }
+    );
   }
 
   const limit = planFeature.limit;
@@ -295,7 +346,19 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   }
 
   if (limit === 0) {
-    throw new ApiError(402, `Access to ${feature.displayName} is not available in your current plan.`);
+    throw new ApiError(
+      402,
+      `Access to ${feature.displayName} is not available in your current plan.`,
+      null,
+      "FEATURE_LIMIT_REACHED",
+      {
+        feature: feature.key,
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        availablePlans: true,
+      }
+    );
   }
 
   // 5. Handle based on feature type
@@ -310,7 +373,19 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
     }
     
     if (currentCount + incrementBy > limit) {
-      throw new ApiError(402, `Limit exceeded! You can only add ${limit - currentCount} more ${feature.displayName} on your current plan. Please upgrade to continue.`);
+      throw new ApiError(
+        402,
+        `Limit exceeded! You can only add ${limit - currentCount} more ${feature.displayName} on your current plan. Please upgrade to continue.`,
+        null,
+        "FEATURE_LIMIT_REACHED",
+        {
+          feature: feature.key,
+          used: currentCount,
+          limit,
+          remaining: Math.max(0, limit - currentCount),
+          availablePlans: true,
+        }
+      );
     }
     return true;
   }
@@ -351,7 +426,19 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   // If incrementBy === 0, just check access without consuming usage
   if (incrementBy === 0) {
     if (usageRecord.usedCount >= limit) {
-      throw new ApiError(402, `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`);
+      throw new ApiError(
+        402,
+        `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
+        null,
+        "FEATURE_LIMIT_REACHED",
+        {
+          feature: feature.key,
+          used: usageRecord.usedCount,
+          limit,
+          remaining: 0,
+          availablePlans: true,
+        }
+      );
     }
     return true;
   }
@@ -370,7 +457,19 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   );
 
   if (!updatedUsage) {
-    throw new ApiError(402, `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`);
+    throw new ApiError(
+      402,
+      `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
+      null,
+      "FEATURE_LIMIT_REACHED",
+      {
+        feature: feature.key,
+        used: usageRecord.usedCount,
+        limit,
+        remaining: Math.max(0, limit - usageRecord.usedCount),
+        availablePlans: true,
+      }
+    );
   }
 
   return true;

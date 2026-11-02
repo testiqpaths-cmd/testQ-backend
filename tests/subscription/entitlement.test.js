@@ -217,5 +217,87 @@ describe("Suite 1: Entitlement Security & Plan Eligibility", () => {
       }
     );
   });
+
+  test("returns structured code FEATURE_LIMIT_REACHED with usage data when usage limit is hit", async () => {
+    const student = await createUserFixture({ role: "STUDENT" });
+    const plan = await createPlanFixture(studentRole._id);
+    await createSubscriptionFixture(student._id, plan._id);
+
+    const feature = await createFeatureFixture({ key: "METERED_TEST_FEATURE", type: "USAGE" });
+    await createPlanFeatureFixture(plan._id, feature._id, { enabled: true, limit: 2 });
+
+    // 1st use succeeds
+    const first = await checkFeatureAccess(student._id, feature.key, 1);
+    assert.equal(first, true);
+
+    // 2nd use succeeds
+    const second = await checkFeatureAccess(student._id, feature.key, 1);
+    assert.equal(second, true);
+
+    // 3rd use exceeds limit (2/2) -> throws 402 FEATURE_LIMIT_REACHED
+    await assert.rejects(
+      async () => {
+        await checkFeatureAccess(student._id, feature.key, 1);
+      },
+      (err) => {
+        assert.equal(err.statusCode, 402);
+        assert.equal(err.code, "FEATURE_LIMIT_REACHED");
+        assert.match(err.message, /maximum limit/i);
+        assert.ok(err.data);
+        assert.equal(err.data.feature, feature.key);
+        assert.equal(err.data.used, 2);
+        assert.equal(err.data.limit, 2);
+        assert.equal(err.data.remaining, 0);
+        assert.equal(err.data.availablePlans, true);
+        return true;
+      }
+    );
+  });
+
+  test("errorMiddleware properly formats structured ApiError with code and data", async () => {
+    const { errorMiddleware } = await import("../../src/common/middlewares/error.middleware.js");
+    const { ApiError } = await import("../../src/common/exceptions/ApiError.js");
+
+    const err = new ApiError(
+      402,
+      "You have reached your AI Interview usage limit.",
+      null,
+      "FEATURE_LIMIT_REACHED",
+      {
+        feature: "AI_INTERVIEW",
+        used: 3,
+        limit: 3,
+        remaining: 0,
+        availablePlans: true,
+      }
+    );
+
+    let sentStatus = null;
+    let sentJson = null;
+    const res = {
+      status(s) {
+        sentStatus = s;
+        return this;
+      },
+      json(j) {
+        sentJson = j;
+        return this;
+      },
+    };
+
+    errorMiddleware(err, {}, res, () => {});
+
+    assert.equal(sentStatus, 402);
+    assert.equal(sentJson.success, false);
+    assert.equal(sentJson.code, "FEATURE_LIMIT_REACHED");
+    assert.equal(sentJson.message, "You have reached your AI Interview usage limit.");
+    assert.deepEqual(sentJson.data, {
+      feature: "AI_INTERVIEW",
+      used: 3,
+      limit: 3,
+      remaining: 0,
+      availablePlans: true,
+    });
+  });
 });
 
