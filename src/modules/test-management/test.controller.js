@@ -1,5 +1,6 @@
 import * as service from "./test.service.js";
 import logger from "../../config/logger.js";
+import { releaseFeatureUsage } from "../subscription/services/subscription.service.js";
 import { computeTestStatus, hasTestEnded } from "./utils/status.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 import { isTestMandatoryForStudent } from "./utils/visibility.js";
@@ -46,6 +47,7 @@ export const createTest = async (req, res) => {
       data: created,
     });
   } catch (err) {
+    await releaseFeatureUsage(req.user?._id || req.user?.id, "CREATE_TEST");
     logger.error(`createTest error: ${err.message}`);
     return res.status(err.statusCode || 500).json({
       success: false,

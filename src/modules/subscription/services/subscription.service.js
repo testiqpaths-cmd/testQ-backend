@@ -12,6 +12,7 @@ import Organization from "../../../models/organization.model.js";
 import { ApiError } from "../../../common/exceptions/ApiError.js";
 import { getRazorpayClient } from "./razorpay.client.js";
 import env from "../../../config/env.js";
+import logger from "../../../config/logger.js";
 
 /**
  * Gets the user's active subscription or assigns a default one if missing.
@@ -473,6 +474,25 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
   }
 
   return true;
+};
+
+/**
+ * Safely releases (refunds) a previously reserved feature usage slot if downstream
+ * operation fails before completion.
+ */
+export const releaseFeatureUsage = async (userId, featureKey, count = 1) => {
+  if (!userId || !featureKey || typeof count !== "number" || count <= 0) return;
+  try {
+    const feature = await Feature.findOne({ key: featureKey, active: true });
+    if (!feature || feature.type !== "USAGE") return;
+
+    await UserFeatureUsage.findOneAndUpdate(
+      { userId, featureId: feature._id, usedCount: { $gte: count } },
+      { $inc: { usedCount: -count } }
+    );
+  } catch (err) {
+    logger.warn(`Failed to release feature usage for ${featureKey}: ${err.message}`);
+  }
 };
 
 /**

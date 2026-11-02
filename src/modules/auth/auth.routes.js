@@ -21,6 +21,7 @@ import {
 } from "./auth.controller.js";
 import { authMiddleware} from "../../common/middlewares/auth.middleware.js";
 import { roleMiddleware } from "../../common/middlewares/role.middleware.js";
+import { featureMiddleware } from "../../common/middlewares/feature.middleware.js";
 
 const router = express.Router();
 
@@ -39,7 +40,7 @@ router.post("/exchange-launch-token", exchangeLaunchTokenController);
 // mints a ticket for the logged-in browser; /verify is called
 // server-to-server by that app's backend and checks its own
 // X-Service-Api-Key instead of a testQ session — see ssoVerifyController.
-router.post("/sso/launch", authMiddleware, ssoLaunchController);
+router.post("/sso/launch", authMiddleware, featureMiddleware("RESUME_BUILDER", false), ssoLaunchController);
 router.post("/sso/verify", ssoVerifyController);
 router.post("/sso/verify-credentials", ssoVerifyCredentialsController);
 

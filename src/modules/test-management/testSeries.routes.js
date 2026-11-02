@@ -24,8 +24,9 @@ const router = Router();
 // ✅ CREATE: POST /api/test-series
 router.post(
   "/",
-  authMiddleware,                 // enable later if needed
-  roleMiddleware("IQPATH_ADMIN","ORGANIZATION","STUDENT"),  // enable later if needed
+  authMiddleware,
+  roleMiddleware("IQPATH_ADMIN", "ORGANIZATION", "STUDENT"),
+  featureMiddleware("TEST_SERIES", true),
   createSeries
 );
 

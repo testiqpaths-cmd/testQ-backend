@@ -17,6 +17,7 @@ import { ApiError } from "../../common/exceptions/ApiError.js";
 import { resumeService } from "../resume/resume.service.js";
 import { resumeTopicService } from "../resume/resume-topic.service.js";
 import logger from "../../config/logger.js";
+import { releaseFeatureUsage } from "../../modules/subscription/services/subscription.service.js";
 
 export class AiInterviewController {
   /**
@@ -35,6 +36,7 @@ export class AiInterviewController {
         data: result,
       });
     } catch (error) {
+      await releaseFeatureUsage(req.user?._id, "AI_INTERVIEW");
       next(error);
     }
   }
@@ -56,6 +58,7 @@ export class AiInterviewController {
         data: result,
       });
     } catch (error) {
+      await releaseFeatureUsage(req.user?._id, "AI_INTERVIEW");
       next(error);
     }
   }

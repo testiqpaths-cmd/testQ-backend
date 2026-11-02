@@ -1,5 +1,6 @@
 import * as service from "./testSeries.service.js";
 import logger from "../../config/logger.js";
+import { releaseFeatureUsage } from "../subscription/services/subscription.service.js";
 import mongoose from "mongoose";
 import TestSeries from "../../models/testSeries.model.js";
 import TestSeriesAssignment from "../../models/testSeriesAssignment.model.js";
@@ -254,12 +255,14 @@ export const createSeries = async (req, res, next) => {
     } = req.body;
 
     if (!title?.trim()) {
+      await releaseFeatureUsage(req.user?._id || req.user?.id, "TEST_SERIES");
       return res
         .status(400)
         .json({ success: false, message: "Title is required" });
     }
 
     if (category === "COMPANY" && req.user?.role !== "IQPATH_ADMIN") {
+      await releaseFeatureUsage(req.user?._id || req.user?.id, "TEST_SERIES");
       return res.status(403).json({
         success: false,
         message: "Only IQPATH_ADMIN is authorized to create company placement tracks",
@@ -270,6 +273,7 @@ export const createSeries = async (req, res, next) => {
     if (plannedTestCount !== undefined && plannedTestCount !== null && plannedTestCount !== "") {
       const parsed = Number(plannedTestCount);
       if (!Number.isInteger(parsed) || parsed < 0) {
+        await releaseFeatureUsage(req.user?._id || req.user?.id, "TEST_SERIES");
         return res.status(400).json({
           success: false,
           message: "Total tests planned must be a whole number of 0 or more",
@@ -325,6 +329,7 @@ export const createSeries = async (req, res, next) => {
       data: series,
     });
   } catch (err) {
+    await releaseFeatureUsage(req.user?._id || req.user?.id, "TEST_SERIES");
     logger.error(`createSeries error: ${err.message}`);
     const statusCode = err.statusCode || 500;
     return res.status(statusCode).json({
