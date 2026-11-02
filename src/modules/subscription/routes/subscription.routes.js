@@ -23,7 +23,8 @@ import {
   updatePlan,
   deletePlan,
   getPlanFeatures,
-  updatePlanFeature
+  updatePlanFeature,
+  bulkUpdatePlanFeatures
 } from "../controllers/subscription.controller.js";
 
 const router = express.Router();
@@ -61,6 +62,7 @@ router.put("/admin/plans/:id", adminOnly, updatePlan);
 router.delete("/admin/plans/:id", adminOnly, deletePlan);
 
 router.get("/admin/plans/:planId/features", adminOnly, getPlanFeatures);
+router.put("/admin/plans/:planId/features", adminOnly, bulkUpdatePlanFeatures);
 router.put("/admin/plans/:planId/features/:featureId", adminOnly, updatePlanFeature);
 
 export default router;

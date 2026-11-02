@@ -280,7 +280,23 @@ export const getPlans = async (req, res, next) => {
 
 export const createPlan = async (req, res, next) => {
   try {
-    const plan = await Plan.create(req.body);
+    const { features, ...planData } = req.body;
+    const plan = await Plan.create(planData);
+    if (Array.isArray(features) && features.length > 0) {
+      await Promise.all(
+        features.map((f) =>
+          PlanFeature.findOneAndUpdate(
+            { planId: plan._id, featureId: f.featureId },
+            {
+              enabled: Boolean(f.enabled),
+              limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
+              resetType: f.resetType || "LIFETIME",
+            },
+            { new: true, upsert: true }
+          )
+        )
+      );
+    }
     res.status(201).json({ success: true, data: plan });
   } catch (error) {
     next(error);
@@ -289,8 +305,24 @@ export const createPlan = async (req, res, next) => {
 
 export const updatePlan = async (req, res, next) => {
   try {
-    const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const { features, ...planData } = req.body;
+    const plan = await Plan.findByIdAndUpdate(req.params.id, planData, { new: true, runValidators: true });
     if (!plan) return res.status(404).json({ success: false, message: "Plan not found" });
+    if (Array.isArray(features) && features.length > 0) {
+      await Promise.all(
+        features.map((f) =>
+          PlanFeature.findOneAndUpdate(
+            { planId: plan._id, featureId: f.featureId },
+            {
+              enabled: Boolean(f.enabled),
+              limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
+              resetType: f.resetType || "LIFETIME",
+            },
+            { new: true, upsert: true }
+          )
+        )
+      );
+    }
     res.json({ success: true, data: plan });
   } catch (error) {
     next(error);
@@ -345,6 +377,34 @@ export const updatePlanFeature = async (req, res, next) => {
     );
     
     res.json({ success: true, message: "Plan feature updated", data: pf });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const bulkUpdatePlanFeatures = async (req, res, next) => {
+  try {
+    const { planId } = req.params;
+    const { features } = req.body;
+    if (!Array.isArray(features)) {
+      return res.status(400).json({ success: false, message: "Features array is required" });
+    }
+
+    const updated = await Promise.all(
+      features.map((f) =>
+        PlanFeature.findOneAndUpdate(
+          { planId, featureId: f.featureId },
+          {
+            enabled: Boolean(f.enabled),
+            limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
+            resetType: f.resetType || "LIFETIME",
+          },
+          { new: true, upsert: true }
+        )
+      )
+    );
+
+    res.json({ success: true, message: "Plan features updated successfully", data: updated });
   } catch (error) {
     next(error);
   }
