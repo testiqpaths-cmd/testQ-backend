@@ -1,4 +1,4 @@
-import TestAttempt from "../../../models/testAttempt.model.js";
+import TestAttempt from "../models/testAttempt.model.js";
 
 // A test is shared by every student assigned/attempting it — if one student
 // finishes early and can already see the correct answers, they can pass them

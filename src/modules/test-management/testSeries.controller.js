@@ -5,7 +5,7 @@ import {
   commitFeatureUsage,
 } from "../subscription/services/subscription.service.js";
 import mongoose from "mongoose";
-import TestSeries from "../../models/testSeries.model.js";
+import TestSeries from "./models/testSeries.model.js";
 import TestSeriesAssignment from "../../models/testSeriesAssignment.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";

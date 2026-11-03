@@ -1,9 +1,2 @@
-export const AnswerStatus = Object.freeze({
-  ACCURATE: "ACCURATE",
-  PARTIAL: "PARTIAL",
-  KNOWLEDGE_GAP: "KNOWLEDGE_GAP",
-  INCORRECT: "INCORRECT",
-  SKIPPED: "SKIPPED",
-});
-
-export default AnswerStatus;
+export * from "../../modules/ai-interview/enums/answer-status.enum.js";
+export { default } from "../../modules/ai-interview/enums/answer-status.enum.js";

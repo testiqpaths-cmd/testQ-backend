@@ -1,7 +1,7 @@
 // modules/testAttempts/testAttempt.controller.js
 import mongoose from "mongoose";
 import Test from "../../models/test.model.js"; // adjust path
-import TestAttempt from "../../models/testAttempt.model.js"; // adjust path";
+import TestAttempt from "./models/testAttempt.model.js"; // adjust path";
 import { computeAttemptTiming } from "../test-attempts/utils/attemptTimer.util.js";
 import { saveAnswerSchema } from "./schemas/saveAnswer.schema.js";
 import { evaluateObjectiveForAttempt } from "./services/evaluateObjectiveAttempts.service.js";

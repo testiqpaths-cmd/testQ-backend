@@ -1,5 +1,5 @@
 // src/modules/testAttempts/middlewares/enforceAttemptTimer.middleware.js
-import TestAttempt from "../../../models/testAttempt.model.js";
+import TestAttempt from "../models/testAttempt.model.js";
 import UserModel from "../../../models/user.model.js";
 import { computeAttemptTiming } from "../utils/attemptTimer.util.js";
 import {

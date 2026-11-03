@@ -27,7 +27,7 @@ import newsUpdatesRoutes from "../modules/news-updates/newsUpdates.routes.js";
 import examBrowserRoutes from "../modules/exam-browser/examBrowser.routes.js";
 import companyRoutes from "../modules/company/company.routes.js";
 import companyExamRoutes from "../modules/company-exams/companyExam.routes.js";
-import aiInterviewRoutes from "../ai-interview/ai-interview.routes.js";
+import aiInterviewRoutes from "../modules/ai-interview/ai-interview.routes.js";
 const router = express.Router();
 
 // Health check

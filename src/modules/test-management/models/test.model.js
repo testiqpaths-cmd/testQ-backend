@@ -1,0 +1,80 @@
+import mongoose from "mongoose";
+const { Schema, model, Types } = mongoose;
+
+const testSchema = new Schema({
+  title: { type: String, required: true },
+  description: { type: String },
+  subjectId: { type: Types.ObjectId, ref: "Subject"},
+
+   // ✅ Company references
+  companyIds: [{ type: Types.ObjectId, ref: "Company" }],
+  companyId: { type: Types.ObjectId, ref: "Company", default: null, index: true },
+  companyStage: { type: String, default: null }, // legacy display string fallback
+  companyStageKey: { type: String, default: null, index: true }, // e.g. "ROUND_1", "ROUND_2"
+  companyStageName: { type: String, default: null }, // e.g. "Cognitive Skills", "Advanced Technical"
+  companyStageOrder: { type: Number, default: 1 }, // 1, 2, 3...
+  passingPercentage: { type: Number, default: 50 },
+  questions: [{ type: Types.ObjectId, ref: "Question" }],
+  // Immutable frozen question content snapshot captured at publish time
+  questionSnapshot: [{ type: Schema.Types.Mixed, default: undefined }],
+  createdBy: {
+    userId: { type: Types.ObjectId, required: true },
+    role: { type: String, enum:["IQPATH_ADMIN", "ORGANIZATION", "STUDENT"], required: true },
+  },
+  reservationId: { type: String, default: null, index: true },
+  visibility: { type: String, enum: ["PUBLIC", "ORG_ONLY", "LINK_ONLY", "SELECT_STUDENT"], required: true },
+  allowedOrganizations: [{ type: Types.ObjectId }],
+  allowedStudents: [{ type: Types.ObjectId, ref: "User" }],
+  testCode: { type: String },
+  totalQuestions: { type: Number, required: true },
+  questionSource: {
+    type: String,
+    enum: ["SUBJECT_TOPIC", "EXCEL"],
+    default: "SUBJECT_TOPIC",
+  },
+  excelBatchId: { type: String, default: null },
+  subjectIds: [{ type: Types.ObjectId, ref: "Subject"}],
+  topicIds: [{ type: Types.ObjectId, ref: "Topic" }],
+  difficulty: [{ type: String }],
+  type: [{ type: String }],
+  duration: { type: Number, required: true },
+  maxAttempts: { type: Number, default: 1 },
+  totalMarks: { type: Number, required: true },
+  marksPerQuestion: { type: Number, required: true, default: 1 },
+  negativeMarkingPercentage: { type: Number, default: 0 },
+  scheduleType: { type: String, enum: ["IMMEDIATE", "DELAYED", "FIXED"], required: true },
+  delayDays: { type: Number }, // ✅ must be Number
+  startTime: { type: Date },
+  endTime: { type: Date },
+  isPublished: { type: Boolean, default: false },
+  publishedAt: { type: Date },
+  status: { type: String, enum: ["DRAFT", "PUBLISHED", "UPCOMING", "ACTIVE", "COMPLETED"], default: "DRAFT" },
+  testSeriesId: { type: Types.ObjectId, ref: "TestSeries" },
+  isSeriesTest: { type: Boolean, default: false },
+  isIQRoomTest: { type: Boolean, default: false },
+  // Gates the normal browser-tab attempt-start path (see
+  // test-attempts/testAttempt.controller.js) behind an ACTIVE ExamSession
+  // claimed by the testQ-browser Electron app. Defaults true — the
+  // frontend create-test form always sends an explicit value, so this is
+  // only a fallback for requests that omit the field, but it should still
+  // fail closed (secure) rather than open.
+  secureBrowserRequired: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now },
+  isDeleted: {
+  type: Number,
+  enum: [0, 1],
+  default: 0,
+},
+});
+
+// Test had zero indexes despite being queried constantly by these exact
+// filter+sort shapes (getAssignedTests, getMyTests, dashboard counts, series
+// lookups) — every one of those was a full collection scan that gets slower
+// as the platform's total test count grows.
+testSchema.index({ isDeleted: 1, isPublished: 1, isIQRoomTest: 1, createdAt: -1 });
+testSchema.index({ "createdBy.userId": 1, isDeleted: 1, createdAt: -1 });
+testSchema.index({ status: 1, isDeleted: 1 });
+testSchema.index({ testSeriesId: 1, companyStageOrder: 1 });
+testSchema.index({ companyId: 1, isDeleted: 1 });
+
+export default model("Test", testSchema);

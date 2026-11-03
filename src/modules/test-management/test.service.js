@@ -1,6 +1,6 @@
 import crypto from "crypto";
-import Test from "../../models/test.model.js";
-import TestSeries from "../../models/testSeries.model.js";
+import Test from "./models/test.model.js";
+import TestSeries from "./models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
 import { ensureCreatorOrgIncluded, resolveAllowedStudents, resolveMandatoryOrgTestIds } from "./utils/visibility.js";
@@ -163,7 +163,7 @@ export async function deleteTest(test) {
   await test.save();
 
   if (test.testSeriesId) {
-    const TestSeries = (await import("../../models/testSeries.model.js")).default;
+    const TestSeries = (await import("./models/testSeries.model.js")).default;
     await TestSeries.findByIdAndUpdate(test.testSeriesId, {
       $pull: { tests: test._id },
     });

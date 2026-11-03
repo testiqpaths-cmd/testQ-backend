@@ -1,14 +1,2 @@
-export const InterviewState = Object.freeze({
-  CREATED: "CREATED",
-  READY: "READY",
-  IN_PROGRESS: "IN_PROGRESS",
-  PROCESSING_ANSWER: "PROCESSING_ANSWER",
-  WAITING_FOR_NEXT_QUESTION: "WAITING_FOR_NEXT_QUESTION",
-  COMPLETED: "COMPLETED",
-  CANCELLED: "CANCELLED",
-  EXPIRED: "EXPIRED",
-  EVALUATING: "EVALUATING",
-  EVALUATED: "EVALUATED",
-});
-
-export default InterviewState;
+export * from "../../modules/ai-interview/enums/interview-state.enum.js";
+export { default } from "../../modules/ai-interview/enums/interview-state.enum.js";

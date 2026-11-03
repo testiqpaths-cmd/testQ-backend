@@ -1,4 +1,4 @@
-import TestAttempt from "../../../models/testAttempt.model.js";
+import TestAttempt from "../models/testAttempt.model.js";
 import Question from "../../../models/question.model.js";
 import Notification from "../../../modules/notification/notification.model.js";
 import Test from "../../../models/test.model.js";

@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const FRONTEND_DIR = path.resolve(__dirname, "../../../testQ-frontend/testQ-frontend");
+const FRONTEND_DIR = path.resolve(__dirname, "../../testQ-frontend");
 const AI_INTERVIEW_DIR = path.join(FRONTEND_DIR, "src/features/ai-interview");
 
 const readFrontendFile = (subPath) => {

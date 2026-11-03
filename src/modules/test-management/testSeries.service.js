@@ -1,6 +1,6 @@
 import mongoose from "mongoose";
 import crypto from "crypto";
-import TestSeries from "../../models/testSeries.model.js";
+import TestSeries from "./models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import logger from "../../config/logger.js";
 import { computeTestStatus } from "./utils/status.js";

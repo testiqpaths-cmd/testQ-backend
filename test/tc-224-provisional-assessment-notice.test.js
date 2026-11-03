@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import {
   hasUnassessedCoreCompetencies,
   PROVISIONAL_ASSESSMENT_NOTICE_MESSAGE,
-} from "../../../testQ-frontend/testQ-frontend/src/features/ai-interview/utils/interview.utils.js";
+} from "../../testQ-frontend/src/features/ai-interview/utils/interview.utils.js";
 import { interviewResultsService } from "../src/ai-interview/services/interview-results.service.js";
 import { integrityService } from "../src/ai-interview/services/integrity.service.js";
 

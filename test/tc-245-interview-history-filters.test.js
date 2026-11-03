@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { filterInterviewHistory } from "../../../testQ-frontend/testQ-frontend/src/features/ai-interview/utils/interview.utils.js";
+import { filterInterviewHistory } from "../../testQ-frontend/src/features/ai-interview/utils/interview.utils.js";
 
 const SAMPLE_HISTORY = [
   {
