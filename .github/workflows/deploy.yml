@@ -10,36 +10,50 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy to MilesWeb via SSH
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.SSH_HOST }}
-          port: ${{ secrets.SSH_PORT }}
-          username: ${{ secrets.SSH_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          request_pty: true
-          timeout: 60s
-          command_timeout: 15m
-          script_stop: true
-          script: |
-            set -e
-            echo "🚀 Starting deployment..."
-            cd ${{ secrets.DEPLOY_PATH }}
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" | tr -d '\r' > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
 
-            echo "📥 Syncing latest code from production branch..."
-            git fetch origin production
-            git checkout -f production
-            git reset --hard origin/production
+          # Detect SSH port (fallback to 22 if unset)
+          PORT="${SSH_PORT:-22}"
 
-            # Activate Node environment if present
-            if [ -d "$HOME/nodevenv/testqbackend.iqpaths.com/20/bin" ]; then
-              export PATH=$HOME/nodevenv/testqbackend.iqpaths.com/20/bin:$PATH
-            fi
+          # Add target host key to known_hosts to prevent interactive prompt
+          ssh-keyscan -p "$PORT" -H "$SSH_HOST" >> ~/.ssh/known_hosts 2>/dev/null || true
 
-            echo "📦 Installing dependencies..."
-            npm install --production
+          # Connect via native OpenSSH with pseudo-terminal (-tt)
+          ssh -tt -p "$PORT" \
+            -o StrictHostKeyChecking=accept-new \
+            -o ConnectTimeout=30 \
+            -o ServerAliveInterval=15 \
+            -i ~/.ssh/id_rsa \
+            "$SSH_USER@$SSH_HOST" << EOF
+              set -e
+              echo "🚀 Starting deployment..."
+              cd "${DEPLOY_PATH}"
 
-            echo "🔄 Restarting app (Passenger-style restart)..."
-            mkdir -p tmp logs
-            touch tmp/restart.txt
+              echo "📥 Syncing latest code from production branch..."
+              git fetch origin production
+              git checkout -f production
+              git reset --hard origin/production
 
-            echo "✅ Deployment finished successfully! App will restart on next request."
+              # Activate Node environment if present
+              if [ -d "\$HOME/nodevenv/testqbackend.iqpaths.com/20/bin" ]; then
+                export PATH=\$HOME/nodevenv/testqbackend.iqpaths.com/20/bin:\$PATH
+              fi
+
+              echo "📦 Installing dependencies..."
+              npm install --production
+
+              echo "🔄 Restarting app (Passenger-style restart)..."
+              mkdir -p tmp logs
+              touch tmp/restart.txt
+
+              echo "✅ Deployment finished successfully! App will restart on next request."
+          EOF
