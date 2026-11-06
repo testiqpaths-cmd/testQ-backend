@@ -1,6 +1,6 @@
-// Configurable via CORS_ALLOWED_ORIGINS (comma-separated) so production
-// domains can be added at deploy time without a code change — falls back to
-// the local dev + current prod origins if unset.
+// Configurable via CORS_ALLOWED_ORIGINS or CORS_ORIGIN (comma-separated) so production
+// domains can be added in .env at deploy time without code changes — always includes
+// local dev + current prod origins as baseline defaults.
 const defaultOrigins = [
   "http://localhost:5173",
   "http://localhost:5174",
@@ -10,12 +10,18 @@ const defaultOrigins = [
   "http://127.0.0.1:5175",
   "https://test-q-frontend.vercel.app",
   "https://testq.iqpaths.com",
-  "https://resume.iqpaths.com"
+  "https://resume.iqpaths.com",
 ];
 
-const allowedOrigins = process.env.CORS_ALLOWED_ORIGINS
-  ? process.env.CORS_ALLOWED_ORIGINS.split(",").map((o) => o.trim()).filter(Boolean)
-  : defaultOrigins;
+// Support both CORS_ALLOWED_ORIGINS and CORS_ORIGIN from .env (comma-separated or single)
+const envOriginsRaw = process.env.CORS_ALLOWED_ORIGINS || process.env.CORS_ORIGIN || "";
+const envOrigins = envOriginsRaw
+  .split(",")
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+// Combine baseline default origins with any extra origins defined in environment variables
+const allowedOrigins = Array.from(new Set([...defaultOrigins, ...envOrigins]));
 
 export const corsOptions = {
   origin: (origin, callback) => {
@@ -30,7 +36,7 @@ export const corsOptions = {
       return callback(null, true);
     }
 
-    return callback(new Error("Blocked by CORS policy"));
+    return callback(new Error(`Blocked by CORS policy: origin ${origin} is not allowed`));
   },
   credentials: true,
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
