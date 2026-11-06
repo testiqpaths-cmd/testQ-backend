@@ -1,5 +1,5 @@
 // src/modules/testAttempts/services/attemptTimer.service.js
-import TestAttempt from "../../../models/testAttempt.model.js";
+import TestAttempt from "../models/testAttempt.model.js";
 import Test from "../../../models/test.model.js";
 
 /**

@@ -18,7 +18,7 @@ const planSchema = new mongoose.Schema(
     },
     currency: {
       type: String,
-      default: "USD",
+      default: "INR",
     },
     durationDays: {
       type: Number, // null/0 means lifetime or free

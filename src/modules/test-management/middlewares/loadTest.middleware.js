@@ -1,4 +1,4 @@
-import Test from "../../../models/test.model.js";
+import Test from "../models/test.model.js";
 
 export default async function loadTest(req, res, next) {
   try {

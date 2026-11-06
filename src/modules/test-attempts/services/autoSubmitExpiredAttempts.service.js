@@ -1,4 +1,4 @@
-import TestAttempt from "../../../models/testAttempt.model.js";
+import TestAttempt from "../models/testAttempt.model.js";
 import { evaluateObjectiveForAttempt } from "./evaluateObjectiveAttempts.service.js";
 
 export const autoSubmitExpiredAttempts = async () => {

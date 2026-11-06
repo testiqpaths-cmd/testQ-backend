@@ -1,5 +1,5 @@
 // modules/questions/repositories/questions.repository.js
-import Question from "../../../models/question.model.js";
+import Question from "../models/question.model.js";
 
 export const createQuestionRepo = (data) => Question.create(data);
 

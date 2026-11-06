@@ -6,11 +6,40 @@ import Plan from "../models/Plan.model.js";
 import PlanFeature from "../models/PlanFeature.model.js";
 import UserSubscription from "../models/UserSubscription.model.js";
 import UserFeatureUsage from "../models/UserFeatureUsage.model.js";
+import FeatureReservation from "../models/FeatureReservation.model.js";
 import Payment from "../models/Payment.model.js";
 import User from "../../../modules/auth/models/User.model.js"; // Existing user model
+import Organization from "../../../models/organization.model.js";
 import { ApiError } from "../../../common/exceptions/ApiError.js";
 import { getRazorpayClient } from "./razorpay.client.js";
 import env from "../../../config/env.js";
+import logger from "../../../config/logger.js";
+
+/**
+ * Executes a callback within a MongoDB multi-document ACID transaction.
+ * Gracefully falls back if running on a standalone instance without replica sets.
+ */
+export const withSubscriptionTransaction = async (workFn) => {
+  const session = await mongoose.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      result = await workFn(session);
+    });
+    return result;
+  } catch (err) {
+    if (
+      err.message &&
+      (err.message.includes("Transaction numbers are only allowed on a replica set") ||
+        err.message.includes("replica set"))
+    ) {
+      return await workFn(null);
+    }
+    throw err;
+  } finally {
+    await session.endSession();
+  }
+};
 
 /**
  * Gets the user's active subscription or assigns a default one if missing.
@@ -37,7 +66,7 @@ export const getUserSubscription = async (userId) => {
 
   let sub = await UserSubscription.findOne({ userId, status: "ACTIVE" }).populate("planId");
 
-  if (!sub) {
+  if (!sub || !sub.planId) {
     // Map user.role string to Role document
     const roleDoc = await Role.findOne({ name: user.role.toUpperCase() });
     if (!roleDoc) {
@@ -51,13 +80,19 @@ export const getUserSubscription = async (userId) => {
       return null;
     }
 
-    sub = new UserSubscription({
-      userId: user._id,
-      planId: defaultPlan._id,
-      status: "ACTIVE",
-    });
-    await sub.save();
-    sub = await UserSubscription.findById(sub._id).populate("planId");
+    if (sub) {
+      sub.planId = defaultPlan._id;
+      await sub.save();
+      sub = await UserSubscription.findById(sub._id).populate("planId");
+    } else {
+      sub = new UserSubscription({
+        userId: user._id,
+        planId: defaultPlan._id,
+        status: "ACTIVE",
+      });
+      await sub.save();
+      sub = await UserSubscription.findById(sub._id).populate("planId");
+    }
   }
 
   return sub;
@@ -87,11 +122,11 @@ export const getPaidAccessStatus = async (userId) => {
   }
 
   const sub = await getUserSubscription(userId);
-  if (!sub || sub.status !== "ACTIVE") {
+  if (!sub || sub.status !== "ACTIVE" || !sub.planId) {
     return { hasActivePaidAccess: false, planName: sub?.planId?.name ?? null, subscriptionExpiresAt: sub?.expiresAt ?? null };
   }
   if (sub.expiresAt && sub.expiresAt <= new Date()) {
-    return { hasActivePaidAccess: false, planName: sub.planId.name, subscriptionExpiresAt: sub.expiresAt };
+    return { hasActivePaidAccess: false, planName: sub.planId?.name, subscriptionExpiresAt: sub.expiresAt };
   }
 
   // Access is governed purely by the RESUME_BUILDER PlanFeature toggle
@@ -114,9 +149,20 @@ export const getPaidAccessStatus = async (userId) => {
 
   return {
     hasActivePaidAccess: resumeBuilderEnabled,
-    planName: sub.planId.name,
+    planName: sub.planId?.name,
     subscriptionExpiresAt: sub.expiresAt,
   };
+};
+
+const addOneMonthSafe = (date) => {
+  const d = new Date(date);
+  const currentMonth = d.getMonth();
+  d.setMonth(currentMonth + 1);
+  // Month rollover guard (e.g. Jan 31 -> Mar 3 rolled back to Feb 28/29)
+  if (d.getMonth() !== (currentMonth + 1) % 12) {
+    d.setDate(0);
+  }
+  return d;
 };
 
 /**
@@ -127,13 +173,13 @@ const handleResetLogic = async (usageRecord, resetType) => {
 
   const now = new Date();
   
-  if (usageRecord.periodEnd && now > usageRecord.periodEnd) {
-    // Reset needed
+  if (usageRecord.periodEnd && now >= usageRecord.periodEnd) {
+    // Reset needed (boundary: now >= periodEnd)
     usageRecord.usedCount = 0;
     usageRecord.periodStart = now;
 
-    const nextEnd = new Date(now);
-    if (resetType === "MONTHLY") nextEnd.setMonth(nextEnd.getMonth() + 1);
+    let nextEnd = new Date(now);
+    if (resetType === "MONTHLY") nextEnd = addOneMonthSafe(now);
     else if (resetType === "YEARLY") nextEnd.setFullYear(nextEnd.getFullYear() + 1);
     else if (resetType === "WEEKLY") nextEnd.setDate(nextEnd.getDate() + 7);
     else if (resetType === "DAILY") nextEnd.setDate(nextEnd.getDate() + 1);
@@ -142,8 +188,8 @@ const handleResetLogic = async (usageRecord, resetType) => {
   } else if (!usageRecord.periodEnd) {
     // Initialize period
     usageRecord.periodStart = now;
-    const nextEnd = new Date(now);
-    if (resetType === "MONTHLY") nextEnd.setMonth(nextEnd.getMonth() + 1);
+    let nextEnd = new Date(now);
+    if (resetType === "MONTHLY") nextEnd = addOneMonthSafe(now);
     else if (resetType === "YEARLY") nextEnd.setFullYear(nextEnd.getFullYear() + 1);
     else if (resetType === "WEEKLY") nextEnd.setDate(nextEnd.getDate() + 7);
     else if (resetType === "DAILY") nextEnd.setDate(nextEnd.getDate() + 1);
@@ -153,81 +199,657 @@ const handleResetLogic = async (usageRecord, resetType) => {
 };
 
 /**
+ * Centralized plan eligibility validation:
+ * Ensures the user exists, is active, is an independent student,
+ * and that the target plan exists, is active, and is intended for students.
+ */
+export const validatePlanEligibility = async (userId, planId) => {
+  const user = await User.findById(userId).select("role organizationId status");
+  if (!user || user.status === "SUSPENDED") {
+    throw new ApiError(403, "Account suspended or not found");
+  }
+
+  // Only independent students are eligible to subscribe to individual plans
+  if (user.role !== "STUDENT" || user.organizationId) {
+    throw new ApiError(
+      403,
+      user.organizationId
+        ? "Organization students have full access and do not need individual subscriptions."
+        : "Only independent students can subscribe to individual plans."
+    );
+  }
+
+  const plan = await Plan.findById(planId).populate("roleId");
+  if (!plan || !plan.active) {
+    throw new ApiError(404, "Plan not found or inactive");
+  }
+
+  // Plan must belong to STUDENT role
+  if (plan.roleId?.name !== "STUDENT") {
+    throw new ApiError(403, "This plan is not available for students.");
+  }
+
+  return { user, plan };
+};
+
+/**
  * Checks if a user has access to a specific feature.
  * For USAGE features, incrementBy will increment the usage record (default 0).
  * For CAPACITY features, incrementBy represents the new items being added, ensuring currentCount + incrementBy <= limit.
  */
-export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) => {
-  // 1. Resolve Feature
-  const feature = await Feature.findOne({ key: featureKey, active: true });
-  if (!feature) return true; // If feature doesn't exist or is inactive, assume it's unmanaged (allow)
+export const checkFeatureAccess = async (
+  userId,
+  featureKey,
+  incrementBy = 0,
+  reservationId = null,
+  options = {}
+) => {
+  // 0. Validate incrementBy parameter
+  if (typeof incrementBy !== "number" || isNaN(incrementBy) || incrementBy < 0) {
+    throw new ApiError(400, "incrementBy must be a non-negative number.");
+  }
 
-  // 2. Resolve Subscription
+  // 1. Resolve Feature (FAIL-CLOSED: unconfigured / unrecognized feature throws 402)
+  const feature = await Feature.findOne({ key: featureKey, active: true });
+  if (!feature) {
+    throw new ApiError(
+      402,
+      `Feature '${featureKey}' is not configured or recognized.`,
+      null,
+      "FEATURE_NOT_INCLUDED",
+      { feature: featureKey, availablePlans: true }
+    );
+  }
+
+  // 2. Resolve User & Access Policy
+  const user = await User.findById(userId).select("role organizationId status");
+  if (!user || user.status === "SUSPENDED") {
+    throw new ApiError(403, "Account suspended or not found.");
+  }
+
+  // Superuser bypass: IQPATH_ADMIN has unrestricted access
+  if (user.role === "IQPATH_ADMIN") {
+    return true;
+  }
+
+  // Organization-affiliated student bypass: students under an organization have full feature access
+  if (user.role === "STUDENT" && user.organizationId) {
+    return true;
+  }
+
+  // Organization accounts: full feature access, BUT CAPACITY limits (e.g. MAX_STUDENTS) are enforced
+  if (user.role === "ORGANIZATION") {
+    if (feature.type === "CAPACITY") {
+      let currentCount = 0;
+      if (feature.key === "MAX_STUDENTS") {
+        const org = await Organization.findById(userId).select("studentLimit name").lean();
+        if (org && org.studentLimit !== null && org.studentLimit !== undefined) {
+          currentCount = await User.countDocuments({
+            organizationId: userId,
+            role: "STUDENT",
+            status: "ACTIVE",
+          });
+          if (currentCount + incrementBy > org.studentLimit) {
+            throw new ApiError(
+              402,
+              `Student limit reached for ${org.name || "this organization"}. You can add at most ${Math.max(
+                0,
+                org.studentLimit - currentCount
+              )} more student(s) (limit: ${org.studentLimit}).`,
+              null,
+              "FEATURE_LIMIT_REACHED",
+              {
+                feature: feature.key,
+                used: currentCount,
+                limit: org.studentLimit,
+                remaining: Math.max(0, org.studentLimit - currentCount),
+                availablePlans: true,
+              }
+            );
+          }
+        }
+      }
+    }
+    return true;
+  }
+
+  // 3. Resolve Subscription for Independent Student
   const sub = await getUserSubscription(userId);
-  if (!sub) return true; // If no sub system configured for user, fallback allow
+  if (!sub || sub.status !== "ACTIVE" || !sub.planId) {
+    throw new ApiError(
+      402,
+      "No active subscription found. Please subscribe to access this feature.",
+      null,
+      "SUBSCRIPTION_REQUIRED",
+      { feature: feature.key, availablePlans: true }
+    );
+  }
+
+  if (sub.expiresAt && sub.expiresAt <= new Date()) {
+    sub.status = "EXPIRED";
+    await sub.save();
+    throw new ApiError(
+      402,
+      "Your subscription has expired. Please renew or upgrade to continue.",
+      null,
+      "SUBSCRIPTION_EXPIRED",
+      { feature: feature.key, availablePlans: true }
+    );
+  }
 
   const planId = sub.planId._id ? sub.planId._id : sub.planId;
 
-  // 3. Resolve Plan Feature Config
+  // 4. Resolve Plan Feature Config (FAIL-CLOSED)
   const planFeature = await PlanFeature.findOne({ planId, featureId: feature._id });
   
-  if (!planFeature) return true; // Feature not mapped in plan -> unlimited
+  if (!planFeature) {
+    throw new ApiError(
+      402,
+      `Access to ${feature.displayName} is not included in your current plan.`,
+      null,
+      "FEATURE_NOT_INCLUDED",
+      {
+        feature: feature.key,
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        availablePlans: true,
+      }
+    );
+  }
 
   if (!planFeature.enabled) {
-    throw new ApiError(402, `Access to ${feature.displayName} is disabled on your current plan.`);
+    throw new ApiError(
+      402,
+      `Access to ${feature.displayName} is disabled on your current plan.`,
+      null,
+      "FEATURE_NOT_INCLUDED",
+      {
+        feature: feature.key,
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        availablePlans: true,
+      }
+    );
   }
 
   const limit = planFeature.limit;
-  if (limit === null) { // Unlimited
-    return true; 
+  if (limit === null) {
+    return true; // Unlimited
   }
 
   if (limit === 0) {
-    throw new ApiError(402, `Access to ${feature.displayName} is not available in your current plan.`);
+    throw new ApiError(
+      402,
+      `Access to ${feature.displayName} is not available in your current plan.`,
+      null,
+      "FEATURE_LIMIT_REACHED",
+      {
+        feature: feature.key,
+        used: 0,
+        limit: 0,
+        remaining: 0,
+        availablePlans: true,
+      }
+    );
   }
 
-  // 4. Handle based on feature type
+  // 5. Handle based on feature type
+  if (feature.type === "BOOLEAN") {
+    return true;
+  }
+
   if (feature.type === "CAPACITY") {
     let currentCount = 0;
     if (feature.key === "MAX_STUDENTS") {
       currentCount = await User.countDocuments({ organizationId: userId, status: "ACTIVE" });
     }
-    // Add other capacity logic here if needed (e.g. MAX_TESTS, MAX_ROOMS)
     
     if (currentCount + incrementBy > limit) {
-      throw new ApiError(402, `Limit exceeded! You can only add ${limit - currentCount} more ${feature.displayName} on your current plan. Please upgrade to continue.`);
+      throw new ApiError(
+        402,
+        `Limit exceeded! You can only add ${limit - currentCount} more ${feature.displayName} on your current plan. Please upgrade to continue.`,
+        null,
+        "FEATURE_LIMIT_REACHED",
+        {
+          feature: feature.key,
+          used: currentCount,
+          limit,
+          remaining: Math.max(0, limit - currentCount),
+          availablePlans: true,
+        }
+      );
     }
-    // Capacity features do not save usage records
     return true;
   }
 
-  // 5. Handle USAGE / BOOLEAN Features
-  let usageRecord = await UserFeatureUsage.findOne({ userId, featureId: feature._id });
-  
-  if (!usageRecord) {
-    usageRecord = new UserFeatureUsage({
-      userId,
-      featureId: feature._id,
-      usedCount: 0,
-      lastUsedAt: new Date(),
-    });
+  // 6. Handle USAGE Features: atomic upsert / retrieval to prevent concurrent first-use E11000 race
+  let usageRecord;
+  try {
+    usageRecord = await UserFeatureUsage.findOneAndUpdate(
+      { userId, featureId: feature._id },
+      {
+        $setOnInsert: {
+          userId,
+          featureId: feature._id,
+          usedCount: 0,
+          periodStart: new Date(),
+          periodEnd: null,
+          lastUsedAt: new Date(),
+        },
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+  } catch (err) {
+    // In rare race where unique index collides before upsert commits, retrieve existing doc
+    if (err.code === 11000) {
+      usageRecord = await UserFeatureUsage.findOne({ userId, featureId: feature._id });
+    } else {
+      throw err;
+    }
   }
 
-  await handleResetLogic(usageRecord, planFeature.resetType);
-
-  // Enforce Limit (if we are trying to add/use more)
-  if (usageRecord.usedCount + incrementBy > limit) {
-    throw new ApiError(402, `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`);
-  }
-
-  // Increment Usage
-  if (incrementBy > 0) {
-    usageRecord.usedCount += incrementBy;
-    usageRecord.lastUsedAt = new Date();
+  const now = new Date();
+  const neededReset = (usageRecord.periodEnd && now >= usageRecord.periodEnd) || !usageRecord.periodEnd;
+  if (neededReset) {
+    await handleResetLogic(usageRecord, planFeature.resetType);
     await usageRecord.save();
   }
 
+  // If incrementBy === 0, just check access without consuming usage
+  if (incrementBy === 0) {
+    if (usageRecord.usedCount >= limit) {
+      throw new ApiError(
+        402,
+        `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
+        null,
+        "FEATURE_LIMIT_REACHED",
+        {
+          feature: feature.key,
+          used: usageRecord.usedCount,
+          limit,
+          remaining: 0,
+          availablePlans: true,
+        }
+      );
+    }
+    return true;
+  }
+
+  // Atomic conditional increment: guarantees concurrency safety at the database level
+  const updateOp = {
+    $inc: { usedCount: incrementBy },
+    $set: { lastUsedAt: new Date() },
+  };
+
+  if (reservationId) {
+    // Retain in embedded array as lightweight backward-compatible record
+    updateOp.$push = {
+      reservations: {
+        $each: [
+          {
+            reservationId,
+            count: incrementBy,
+            status: "ACTIVE",
+            createdAt: new Date(),
+          },
+        ],
+        $slice: -200,
+      },
+    };
+  }
+
+  // 4. If reservationId is present, execute atomic usage increment and FeatureReservation creation inside an ACID transaction
+  if (reservationId) {
+    const leaseMs = options.leaseMs || 15 * 60 * 1000;
+    await withSubscriptionTransaction(async (session) => {
+      const sessionOpt = session ? { session } : {};
+      const updated = await UserFeatureUsage.findOneAndUpdate(
+        {
+          _id: usageRecord._id,
+          usedCount: { $lte: limit - incrementBy },
+        },
+        updateOp,
+        { new: true, ...sessionOpt }
+      );
+
+      if (!updated) {
+        throw new ApiError(
+          402,
+          `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
+          null,
+          "FEATURE_LIMIT_REACHED",
+          {
+            feature: feature.key,
+            used: usageRecord.usedCount,
+            limit,
+            remaining: Math.max(0, limit - usageRecord.usedCount),
+            availablePlans: true,
+          }
+        );
+      }
+
+      await FeatureReservation.create(
+        [
+          {
+            reservationId,
+            userId,
+            featureId: feature._id,
+            featureKey: feature.key,
+            count: incrementBy,
+            status: "PENDING",
+            leaseExpiresAt: new Date(Date.now() + leaseMs),
+            metadata: options.metadata || {},
+          },
+        ],
+        sessionOpt
+      );
+    });
+
+    return true;
+  }
+
+  // Fallback for non-reserved USAGE increment
+  const updatedUsage = await UserFeatureUsage.findOneAndUpdate(
+    {
+      _id: usageRecord._id,
+      usedCount: { $lte: limit - incrementBy },
+    },
+    updateOp,
+    { new: true }
+  );
+
+  if (!updatedUsage) {
+    throw new ApiError(
+      402,
+      `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
+      null,
+      "FEATURE_LIMIT_REACHED",
+      {
+        feature: feature.key,
+        used: usageRecord.usedCount,
+        limit,
+        remaining: Math.max(0, limit - usageRecord.usedCount),
+        availablePlans: true,
+      }
+    );
+  }
+
   return true;
+
+  return true;
+};
+
+/**
+ * Commits a previously reserved feature usage slot upon confirmed business operation success.
+ * Transition: PENDING -> COMMITTED.
+ * Guaranteed idempotent against multiple commit calls.
+ */
+export const commitFeatureUsage = async (
+  target,
+  targetResourceId = null,
+  targetResourceType = null
+) => {
+  let resId = null;
+  if (typeof target === "string") {
+    resId = target;
+  } else if (target && typeof target === "object" && target.featureReservation) {
+    resId = target.featureReservation.reservationId;
+  }
+
+  if (!resId) return null;
+
+  const updateFields = {
+    status: "COMMITTED",
+  };
+  if (targetResourceId) updateFields.targetResourceId = targetResourceId;
+  if (targetResourceType) updateFields.targetResourceType = targetResourceType;
+
+  const reservation = await FeatureReservation.findOneAndUpdate(
+    { reservationId: resId, status: "PENDING" },
+    { $set: updateFields },
+    { new: true }
+  );
+
+  if (reservation) {
+    await UserFeatureUsage.updateOne(
+      { userId: reservation.userId, featureId: reservation.featureId },
+      { $set: { "reservations.$[elem].status": "COMMITTED" } },
+      { arrayFilters: [{ "elem.reservationId": resId }] }
+    );
+  }
+
+  return reservation;
+};
+
+/**
+ * Safely releases (refunds) a previously reserved feature usage slot if downstream
+ * operation fails before completion. Guaranteed idempotent against duplicate refunds.
+ * Transition: PENDING -> RELEASED.
+ */
+export const releaseFeatureUsage = async (
+  target,
+  featureKey = null,
+  count = 1,
+  reservationId = null
+) => {
+  let userId = target;
+  let resId = reservationId;
+  let targetCount = count;
+  let key = featureKey;
+
+  // Request context polymorphism: supports passing `req` directly
+  if (target && typeof target === "object" && target.featureReservation) {
+    if (target.featureReservation.released) {
+      return; // Already released for this request (idempotent in-memory)
+    }
+    target.featureReservation.released = true;
+    userId = target.featureReservation.userId;
+    key = key || target.featureReservation.featureKey;
+    resId = resId || target.featureReservation.reservationId;
+    targetCount = target.featureReservation.count || 1;
+  }
+
+  if (!userId || !key || typeof targetCount !== "number" || targetCount <= 0)
+    return;
+
+  try {
+    const feature = await Feature.findOne({ key: key, active: true });
+    if (!feature || feature.type !== "USAGE") return;
+
+    // 1. If reservationId is present, check dedicated FeatureReservation collection first
+    if (resId) {
+      await withSubscriptionTransaction(async (session) => {
+        const sessionOpt = session ? { session } : {};
+        const existingRes = await FeatureReservation.findOne({ reservationId: resId }).session(session || null);
+        if (existingRes) {
+          if (existingRes.status === "PENDING") {
+            const updated = await FeatureReservation.findOneAndUpdate(
+              { reservationId: resId, status: "PENDING" },
+              { $set: { status: "RELEASED" } },
+              { new: true, ...sessionOpt }
+            );
+
+            if (updated) {
+              // Exactly-once decrement of usedCount
+              await UserFeatureUsage.findOneAndUpdate(
+                {
+                  userId,
+                  featureId: feature._id,
+                  usedCount: { $gte: existingRes.count },
+                },
+                {
+                  $inc: { usedCount: -existingRes.count },
+                  $set: { "reservations.$[elem].status": "RELEASED" },
+                },
+                {
+                  arrayFilters: [{ "elem.reservationId": resId }],
+                  ...sessionOpt,
+                }
+              );
+            }
+          }
+          // Found in FeatureReservation collection (PENDING, COMMITTED, RELEASED or EXPIRED).
+          // Return immediately to guarantee idempotent state and never fall through to legacy check.
+          return;
+        }
+
+        // Backward compatibility check for legacy embedded reservation test fixtures
+        await UserFeatureUsage.findOneAndUpdate(
+          {
+            userId,
+            featureId: feature._id,
+            usedCount: { $gte: targetCount },
+            reservations: {
+              $elemMatch: { reservationId: resId, status: "ACTIVE" },
+            },
+          },
+          {
+            $inc: { usedCount: -targetCount },
+            $set: { "reservations.$.status": "RELEASED" },
+          },
+          { new: true, ...sessionOpt }
+        );
+      });
+      return;
+    }
+
+    // 2. Fallback for calls without a specific reservationId
+    await UserFeatureUsage.findOneAndUpdate(
+      { userId, featureId: feature._id, usedCount: { $gte: targetCount } },
+      { $inc: { usedCount: -targetCount } }
+    );
+  } catch (err) {
+    logger.warn(`Failed to release feature usage for ${key}: ${err.message}`);
+  }
+};
+
+/**
+ * Extends the lease for long-running operations (e.g. active AI interviews).
+ */
+export const extendFeatureLease = async (
+  reservationId,
+  extensionMs = 15 * 60 * 1000
+) => {
+  if (!reservationId) return null;
+  return FeatureReservation.findOneAndUpdate(
+    { reservationId, status: "PENDING" },
+    { $set: { leaseExpiresAt: new Date(Date.now() + extensionMs) } },
+    { new: true }
+  );
+};
+
+/**
+ * Reconciles stale PENDING reservations whose lease has expired.
+ * Verifies business entity creation before deciding to COMMIT or EXPIRE/refund.
+ */
+export const reconcileStaleReservations = async ({
+  batchSize = 50,
+  now = new Date(),
+} = {}) => {
+  const staleDocs = await FeatureReservation.find({
+    status: "PENDING",
+    leaseExpiresAt: { $lt: now },
+  })
+    .limit(batchSize)
+    .lean();
+
+  const results = {
+    processed: 0,
+    committed: 0,
+    released: 0,
+    skipped: 0,
+  };
+
+  for (const doc of staleDocs) {
+    results.processed++;
+
+    let entityExists = false;
+    try {
+      if (doc.featureKey === "CREATE_TEST") {
+        const Test = (await import("../../../models/test.model.js")).default;
+        // 1. Exact correlation ID check
+        let test = await Test.findOne({ reservationId: doc.reservationId }).lean();
+        if (!test && doc.targetResourceId) {
+          test = await Test.findById(doc.targetResourceId).lean();
+        }
+        if (!test) {
+          // Fallback legacy window check
+          test = await Test.findOne({
+            $or: [
+              { "createdBy.userId": doc.userId },
+              { createdBy: doc.userId },
+            ],
+            createdAt: {
+              $gte: new Date(new Date(doc.createdAt).getTime() - 15000),
+              $lte: new Date(new Date(doc.leaseExpiresAt).getTime() + 60000),
+            },
+          }).lean();
+        }
+        if (test) entityExists = true;
+      } else if (doc.featureKey === "TEST_SERIES") {
+        const TestSeries = (await import("../../../models/testSeries.model.js")).default;
+        if (TestSeries) {
+          let series = await TestSeries.findOne({ reservationId: doc.reservationId }).lean();
+          if (!series && doc.targetResourceId) {
+            series = await TestSeries.findById(doc.targetResourceId).lean();
+          }
+          if (series) entityExists = true;
+        }
+      } else if (doc.featureKey === "AI_INTERVIEW") {
+        const { InterviewSession } = await import(
+          "../../../ai-interview/schemas/interview-session.schema.js"
+        );
+        if (InterviewSession) {
+          let session = await InterviewSession.findOne({ reservationId: doc.reservationId }).lean();
+          if (!session && doc.targetResourceId) {
+            session = await InterviewSession.findById(doc.targetResourceId).lean();
+          }
+          if (session) entityExists = true;
+        }
+      }
+    } catch (checkErr) {
+      logger.warn(
+        `Verification check failed for reservation ${doc.reservationId}: ${checkErr.message}`
+      );
+      results.skipped++;
+      continue;
+    }
+
+    if (entityExists) {
+      // Operation actually succeeded before crash! Transition PENDING -> COMMITTED without refund
+      const updated = await FeatureReservation.findOneAndUpdate(
+        { reservationId: doc.reservationId, status: "PENDING" },
+        { $set: { status: "COMMITTED" } }
+      );
+      if (updated) results.committed++;
+    } else {
+      // Operation confirmed NOT created. Atomically transition PENDING -> EXPIRED and refund usedCount within ACID transaction
+      await withSubscriptionTransaction(async (session) => {
+        const sessionOpt = session ? { session } : {};
+        const updated = await FeatureReservation.findOneAndUpdate(
+          { reservationId: doc.reservationId, status: "PENDING" },
+          { $set: { status: "EXPIRED" } },
+          { new: true, ...sessionOpt }
+        );
+        if (updated) {
+          await UserFeatureUsage.findOneAndUpdate(
+            {
+              userId: doc.userId,
+              featureId: doc.featureId,
+              usedCount: { $gte: doc.count },
+            },
+            { $inc: { usedCount: -doc.count } },
+            sessionOpt
+          );
+          results.released++;
+        }
+      });
+    }
+  }
+
+  return results;
 };
 
 /**
@@ -235,15 +857,17 @@ export const checkFeatureAccess = async (userId, featureKey, incrementBy = 0) =>
  */
 export const getUserUsageDetails = async (userId) => {
   const sub = await getUserSubscription(userId);
-  if (!sub) return null;
+  if (!sub || !sub.planId) return null;
 
   // usageRecords only needs userId (already known) — it doesn't depend on
   // `plan`, so fetch it in parallel instead of after. planFeatures does
   // depend on plan._id, so it still has to wait for that one.
+  const targetPlanId = sub.planId._id ? sub.planId._id : sub.planId;
   const [plan, usageRecords] = await Promise.all([
-    Plan.findById(sub.planId._id ? sub.planId._id : sub.planId).populate("roleId"),
+    Plan.findById(targetPlanId).populate("roleId"),
     UserFeatureUsage.find({ userId }),
   ]);
+  if (!plan) return null;
   const planFeatures = await PlanFeature.find({ planId: plan._id }).populate("featureId");
 
   const featureDetails = await Promise.all(
@@ -271,6 +895,7 @@ export const getUserUsageDetails = async (userId) => {
         key: feature.key,
         displayName: feature.displayName,
         description: feature.description,
+        type: feature.type,
         enabled: pf.enabled,
         limit: pf.limit,
         used: usedCount,
@@ -369,8 +994,7 @@ const safeCompare = (a, b) => {
  * be able to originate a ₹0/$0 Razorpay order.
  */
 export const createRazorpayOrder = async (userId, planId) => {
-  const plan = await Plan.findById(planId);
-  if (!plan || !plan.active) throw new ApiError(404, "Plan not found");
+  const { plan } = await validatePlanEligibility(userId, planId);
   if (plan.price === 0) {
     throw new ApiError(400, "Free plans do not require checkout — use the upgrade endpoint instead.");
   }

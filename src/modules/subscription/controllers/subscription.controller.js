@@ -1,6 +1,7 @@
 import {
   getUserUsageDetails,
   upgradeUserPlan,
+  validatePlanEligibility,
   createRazorpayOrder,
   verifyRazorpayPayment,
   processRazorpayWebhookEvent,
@@ -39,22 +40,9 @@ export const upgradeMyPlan = async (req, res, next) => {
       return res.status(400).json({ success: false, message: "planId is required" });
     }
 
-    // This is the self-service, unauthenticated-against-payment path — the
-    // frontend only calls it for the $0 plan (createCheckoutOrder is the
-    // paid-plan path, and it already rejects a $0 order the mirror-image
-    // way). Without this check, calling this endpoint with ANY planId
-    // silently downgrades/overwrites an active paid subscription with no
-    // payment, no confirmation, and no trace connecting it to a purchase —
-    // exactly what happened to a real user: a paid checkout correctly
-    // activated Premium, then some later call to this same endpoint with
-    // the Free plan's id silently reverted it, while leaving the original
-    // payment's lastPaymentId/razorpayOrderId/razorpayPaymentId stamped on
-    // the subscription untouched (upgradeUserPlan doesn't clear those),
-    // which is exactly the fingerprint that traced this bug back here.
-    const plan = await Plan.findById(planId);
-    if (!plan) {
-      return res.status(404).json({ success: false, message: "Plan not found" });
-    }
+    // Centralized plan eligibility check: ensures user is an independent student
+    // and plan belongs to STUDENT role and is active.
+    const { plan } = await validatePlanEligibility(userId, planId);
     if (plan.price > 0) {
       return res.status(400).json({
         success: false,
@@ -151,14 +139,42 @@ export const assignUserPlanController = async (req, res, next) => {
 
 export const getAvailablePlansForMyRole = async (req, res, next) => {
   try {
+    // Org-affiliated students have full organization access and no individual purchase plans
+    if (req.user.role === "STUDENT" && req.user.organizationId) {
+      return res.json({ success: true, data: [] });
+    }
+
     const roleName = req.user.role.toUpperCase();
     const role = await Role.findOne({ name: roleName });
     if (!role) {
       return res.status(404).json({ success: false, message: "Role not found" });
     }
     
-    const plans = await Plan.find({ roleId: role._id, active: true });
-    res.json({ success: true, data: plans });
+    const plans = await Plan.find({ roleId: role._id, active: true }).lean();
+    
+    // Attach configured features for each plan
+    const plansWithFeatures = await Promise.all(
+      plans.map(async (plan) => {
+        const planFeatures = await PlanFeature.find({ planId: plan._id }).populate("featureId").lean();
+        const features = planFeatures
+          .filter((pf) => pf.featureId && pf.featureId.active !== false)
+          .map((pf) => ({
+            key: pf.featureId.key,
+            displayName: pf.featureId.displayName,
+            description: pf.featureId.description,
+            type: pf.featureId.type,
+            enabled: pf.enabled,
+            limit: pf.limit,
+            resetType: pf.resetType,
+          }));
+        return {
+          ...plan,
+          features,
+        };
+      })
+    );
+
+    res.json({ success: true, data: plansWithFeatures });
   } catch (error) {
     next(error);
   }
@@ -264,7 +280,23 @@ export const getPlans = async (req, res, next) => {
 
 export const createPlan = async (req, res, next) => {
   try {
-    const plan = await Plan.create(req.body);
+    const { features, ...planData } = req.body;
+    const plan = await Plan.create(planData);
+    if (Array.isArray(features) && features.length > 0) {
+      await Promise.all(
+        features.map((f) =>
+          PlanFeature.findOneAndUpdate(
+            { planId: plan._id, featureId: f.featureId },
+            {
+              enabled: Boolean(f.enabled),
+              limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
+              resetType: f.resetType || "LIFETIME",
+            },
+            { new: true, upsert: true }
+          )
+        )
+      );
+    }
     res.status(201).json({ success: true, data: plan });
   } catch (error) {
     next(error);
@@ -273,8 +305,24 @@ export const createPlan = async (req, res, next) => {
 
 export const updatePlan = async (req, res, next) => {
   try {
-    const plan = await Plan.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    const { features, ...planData } = req.body;
+    const plan = await Plan.findByIdAndUpdate(req.params.id, planData, { new: true, runValidators: true });
     if (!plan) return res.status(404).json({ success: false, message: "Plan not found" });
+    if (Array.isArray(features) && features.length > 0) {
+      await Promise.all(
+        features.map((f) =>
+          PlanFeature.findOneAndUpdate(
+            { planId: plan._id, featureId: f.featureId },
+            {
+              enabled: Boolean(f.enabled),
+              limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
+              resetType: f.resetType || "LIFETIME",
+            },
+            { new: true, upsert: true }
+          )
+        )
+      );
+    }
     res.json({ success: true, data: plan });
   } catch (error) {
     next(error);
@@ -283,11 +331,24 @@ export const updatePlan = async (req, res, next) => {
 
 export const deletePlan = async (req, res, next) => {
   try {
-    const plan = await Plan.findByIdAndDelete(req.params.id);
+    const plan = await Plan.findById(req.params.id);
     if (!plan) return res.status(404).json({ success: false, message: "Plan not found" });
-    // Delete any PlanFeatures related to this plan
+
+    // Check if active user subscriptions exist for this plan
+    const activeSubCount = await UserSubscription.countDocuments({ planId: plan._id, status: "ACTIVE" });
+    if (activeSubCount > 0) {
+      // Soft-deactivate so existing subscribers keep uninterrupted access
+      plan.active = false;
+      await plan.save();
+      return res.json({
+        success: true,
+        message: "Plan has active subscribers. It has been deactivated to preserve existing subscriptions.",
+        data: plan,
+      });
+    }
+
+    await Plan.findByIdAndDelete(req.params.id);
     await PlanFeature.deleteMany({ planId: req.params.id });
-    // Also mark active UserSubscriptions as cancelled? We'll leave them for now.
     res.json({ success: true, message: "Plan deleted successfully" });
   } catch (error) {
     next(error);
@@ -316,6 +377,34 @@ export const updatePlanFeature = async (req, res, next) => {
     );
     
     res.json({ success: true, message: "Plan feature updated", data: pf });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const bulkUpdatePlanFeatures = async (req, res, next) => {
+  try {
+    const { planId } = req.params;
+    const { features } = req.body;
+    if (!Array.isArray(features)) {
+      return res.status(400).json({ success: false, message: "Features array is required" });
+    }
+
+    const updated = await Promise.all(
+      features.map((f) =>
+        PlanFeature.findOneAndUpdate(
+          { planId, featureId: f.featureId },
+          {
+            enabled: Boolean(f.enabled),
+            limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
+            resetType: f.resetType || "LIFETIME",
+          },
+          { new: true, upsert: true }
+        )
+      )
+    );
+
+    res.json({ success: true, message: "Plan features updated successfully", data: updated });
   } catch (error) {
     next(error);
   }

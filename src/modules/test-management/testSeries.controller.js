@@ -1,11 +1,16 @@
 import * as service from "./testSeries.service.js";
 import logger from "../../config/logger.js";
+import {
+  releaseFeatureUsage,
+  commitFeatureUsage,
+} from "../subscription/services/subscription.service.js";
 import mongoose from "mongoose";
-import TestSeries from "../../models/testSeries.model.js";
+import TestSeries from "./models/testSeries.model.js";
 import TestSeriesAssignment from "../../models/testSeriesAssignment.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { broadcastAssignedTestsChanged } from "../notification/notification.service.js";
 import UserModel from "../../models/user.model.js";
+import { hasTestEnded } from "./utils/status.js";
 
 // Fall back to a DB lookup for tokens issued before organizationId was
 // embedded in the JWT payload.
@@ -253,12 +258,14 @@ export const createSeries = async (req, res, next) => {
     } = req.body;
 
     if (!title?.trim()) {
+      await releaseFeatureUsage(req);
       return res
         .status(400)
         .json({ success: false, message: "Title is required" });
     }
 
     if (category === "COMPANY" && req.user?.role !== "IQPATH_ADMIN") {
+      await releaseFeatureUsage(req);
       return res.status(403).json({
         success: false,
         message: "Only IQPATH_ADMIN is authorized to create company placement tracks",
@@ -269,6 +276,7 @@ export const createSeries = async (req, res, next) => {
     if (plannedTestCount !== undefined && plannedTestCount !== null && plannedTestCount !== "") {
       const parsed = Number(plannedTestCount);
       if (!Number.isInteger(parsed) || parsed < 0) {
+        await releaseFeatureUsage(req);
         return res.status(400).json({
           success: false,
           message: "Total tests planned must be a whole number of 0 or more",
@@ -314,9 +322,12 @@ export const createSeries = async (req, res, next) => {
         targetRole: targetRole || null,
         hiringRounds: validatedHiringRounds,
         launchDate,
+        reservationId: req.featureReservation?.reservationId || req.reservationId,
       },
       req.user
     );
+
+    await commitFeatureUsage(req, series?._id, "TestSeries");
 
     return res.status(201).json({
       success: true,
@@ -324,6 +335,7 @@ export const createSeries = async (req, res, next) => {
       data: series,
     });
   } catch (err) {
+    await releaseFeatureUsage(req);
     logger.error(`createSeries error: ${err.message}`);
     const statusCode = err.statusCode || 500;
     return res.status(statusCode).json({
@@ -537,15 +549,39 @@ export const acceptSeriesAssignment = async (req, res, next) => {
     const series = req.series;
     const seriesId = series._id;
 
+    const now = new Date();
+    const childTests = Array.isArray(series.tests) && series.tests.length
+      ? await Test.find({ _id: { $in: series.tests }, isDeleted: 0, isPublished: true })
+          .select("_id scheduleType startTime endTime isPublished")
+          .lean()
+      : [];
+
+    if (childTests.length > 0) {
+      const allExpired = childTests.every(
+        (t) => hasTestEnded(t, now) || (t.endTime && now > new Date(t.endTime))
+      );
+      if (allExpired) {
+        return res.status(400).json({
+          success: false,
+          message: "This test series has already ended and can no longer be accepted.",
+        });
+      }
+    }
+
     const assignment = await TestSeriesAssignment.findOneAndUpdate(
       { seriesId, studentId },
       { status: "ACCEPTED", acceptedAt: new Date() },
       { new: true, upsert: true }
     );
 
-    if (Array.isArray(series.tests) && series.tests.length) {
+    // Rule E: When accepting the series, do not newly accept already-expired child tests
+    const eligibleTestIds = childTests
+      .filter((t) => !hasTestEnded(t, now) && !(t.endTime && now > new Date(t.endTime)))
+      .map((t) => t._id);
+
+    if (eligibleTestIds.length) {
       await TestAssignment.bulkWrite(
-        series.tests.map((testId) => ({
+        eligibleTestIds.map((testId) => ({
           updateOne: {
             filter: { testId, studentId },
             update: {
@@ -573,6 +609,25 @@ export const declineSeriesAssignment = async (req, res, next) => {
     const studentId = req.user?._id || req.user?.id;
     const series = req.series;
     const seriesId = series._id;
+
+    const now = new Date();
+    const childTests = Array.isArray(series.tests) && series.tests.length
+      ? await Test.find({ _id: { $in: series.tests }, isDeleted: 0, isPublished: true })
+          .select("_id scheduleType startTime endTime isPublished")
+          .lean()
+      : [];
+
+    if (childTests.length > 0) {
+      const allExpired = childTests.every(
+        (t) => hasTestEnded(t, now) || (t.endTime && now > new Date(t.endTime))
+      );
+      if (allExpired) {
+        return res.status(400).json({
+          success: false,
+          message: "This test series has already ended and can no longer be declined.",
+        });
+      }
+    }
 
     const assignment = await TestSeriesAssignment.findOneAndUpdate(
       { seriesId, studentId },

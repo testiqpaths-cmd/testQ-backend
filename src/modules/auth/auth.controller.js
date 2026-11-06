@@ -6,6 +6,9 @@ import {
   verifySsoTicket as verifySsoTicketService,
   verifyCredentials as verifyCredentialsService,
   setPassword as setPasswordService,
+  forgotPassword as forgotPasswordService,
+  verifyResetOtp as verifyResetOtpService,
+  resetPassword as resetPasswordService,
   firebaseAuth as firebaseAuthService,
   githubAuth as githubAuthService,
   checkUserExists as checkUserExistsService,
@@ -460,5 +463,86 @@ export const updateProfileController = async (req, res) => {
     } });
   } catch (error) {
     return res.status(500).json({ success: false, message: error.message || "Failed to update profile" });
+  }
+};
+
+/**
+ * Initiates forgot password flow by generating OTP and sending email
+ */
+export const forgotPasswordController = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: "Email is required" });
+    }
+    const result = await forgotPasswordService(email);
+    return res.status(200).json({
+      success: true,
+      message: "A 6-digit OTP has been sent to your email address.",
+      ...result,
+    });
+  } catch (err) {
+    logger.error(`Forgot password error: ${err.message}`);
+    return res.status(err instanceof AuthError ? 400 : 500).json({
+      success: false,
+      message: err.message || "Failed to process forgot password request",
+    });
+  }
+};
+
+/**
+ * Verifies OTP code for password reset
+ */
+export const verifyResetOtpController = async (req, res) => {
+  try {
+    const { email, otp } = req.body;
+    if (!email || !otp) {
+      return res.status(400).json({ success: false, message: "Email and OTP code are required" });
+    }
+    const result = await verifyResetOtpService(email, otp);
+    return res.status(200).json({
+      success: true,
+      message: "OTP verified successfully.",
+      ...result,
+    });
+  } catch (err) {
+    logger.error(`Verify reset OTP error: ${err.message}`);
+    return res.status(err instanceof AuthError ? 400 : 500).json({
+      success: false,
+      message: err.message || "Invalid or expired OTP code",
+    });
+  }
+};
+
+/**
+ * Resets user's password using verified OTP
+ */
+export const resetPasswordController = async (req, res) => {
+  try {
+    const { email, otp, newPassword } = req.body;
+    if (!email || !otp || !newPassword) {
+      return res.status(400).json({
+        success: false,
+        message: "Email, OTP code, and new password are required",
+      });
+    }
+    if (String(newPassword).length < 8) {
+      return res.status(400).json({
+        success: false,
+        message: "Password must be at least 8 characters long",
+      });
+    }
+    const result = await resetPasswordService(email, otp, newPassword);
+    return res.status(200).json({
+      success: true,
+      message: "Password reset successfully. You can now login with your new password.",
+      ...result,
+    });
+  } catch (err) {
+    logger.error(`Reset password error: ${err.message}`);
+    return res.status(err instanceof AuthError ? 400 : 500).json({
+      success: false,
+      message: err.message || "Failed to reset password",
+    });
   }
 };

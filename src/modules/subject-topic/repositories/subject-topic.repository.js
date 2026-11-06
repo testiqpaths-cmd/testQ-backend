@@ -1,5 +1,5 @@
-import Subject from "../../../models/subject.model.js";
-import Topic from "../../../models/topic.model.js";
+import Subject from "../models/subject.model.js";
+import Topic from "../models/topic.model.js";
 
 const escapeRegex = (value) => String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 

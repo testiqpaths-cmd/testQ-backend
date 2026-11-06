@@ -19,11 +19,24 @@ export const errorMiddleware = (err, req, res, next) => {
     }
   }
 
-  res.status(statusCode).json({
+  const response = {
     success: false,
     message,
     errors: err.errors || null,
-    stack: process.env.NODE_ENV === 'development' ? err.stack : undefined,
-  });
+  };
+
+  if (err.code && typeof err.code === "string") {
+    response.code = err.code;
+  }
+
+  if (err.data !== undefined && err.data !== null) {
+    response.data = err.data;
+  }
+
+  if (process.env.NODE_ENV === "development") {
+    response.stack = err.stack;
+  }
+
+  res.status(statusCode).json(response);
 };
 

@@ -1,4 +1,4 @@
-// import TestSeries from "../../../models/testSeries.model.js";
+// import TestSeries from "../models/testSeries.model.js";
 // import mongoose from "mongoose";
 
 // const loadSeries = async (req, res, next) => {
@@ -12,7 +12,7 @@
 
 // export default loadSeries;
 import mongoose from "mongoose";
-import TestSeries from "../../../models/testSeries.model.js";
+import TestSeries from "../models/testSeries.model.js";
 
 const loadSeries = async (req, res, next) => {
   try {

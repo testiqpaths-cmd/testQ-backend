@@ -1,8 +1,2 @@
-export const Difficulty = Object.freeze({
-  EASY: "EASY",
-  MEDIUM: "MEDIUM",
-  HARD: "HARD",
-  ADAPTIVE: "ADAPTIVE",
-});
-
-export default Difficulty;
+export * from "../../modules/ai-interview/enums/difficulty.enum.js";
+export { default } from "../../modules/ai-interview/enums/difficulty.enum.js";

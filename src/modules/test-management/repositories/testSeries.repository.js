@@ -1,4 +1,4 @@
-import TestSeries from "../../models/testSeries.model.js";
+import TestSeries from "../models/testSeries.model.js";
 
 const create = (data) => {
   return TestSeries.create(data);

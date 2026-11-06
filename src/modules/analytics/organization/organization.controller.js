@@ -1,4 +1,4 @@
-import Organization from "../../../models/organization.model.js";
+import Organization from "../../company/models/organization.model.js";
 import xlsx from "xlsx";
 import {
   getOrganizationAnalyticsService,

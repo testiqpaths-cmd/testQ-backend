@@ -1,0 +1,326 @@
+{
+  "reconciliationKey": "B5_NINE_ATTEMPTS_RECONCILIATION_2026_10",
+  "mode": "EXECUTE",
+  "generatedAt": "2026-10-27T09:09:34.048Z",
+  "executionTimestamp": "2026-10-27T09:09:32.258Z",
+  "databaseWritesExecuted": true,
+  "summary": {
+    "totalTargetAttempts": 9,
+    "totalAffectedStudents": 6,
+    "attemptsVerified": true,
+    "studentSummariesVerified": true,
+    "allLedgersRemainLegacy": true,
+    "difficultyBucketsUntouched": true,
+    "dailySummariesUntouched": true
+  },
+  "attemptResults": [
+    {
+      "attemptId": "6a622d45e63c0d5942732bf5",
+      "studentId": "6a4a12d9e0e39456cabb3738",
+      "stored": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 8
+      },
+      "expected": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 8
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a62374be63c0d5942733855",
+      "studentId": "6a6235d7e63c0d5942732e4e",
+      "stored": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 30
+      },
+      "expected": {
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 30
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a623768e63c0d59427343e3",
+      "studentId": "6a1a92d5d16ff8d60649a349",
+      "stored": {
+        "correct": 6,
+        "wrong": 11,
+        "skipped": 13
+      },
+      "expected": {
+        "correct": 6,
+        "wrong": 11,
+        "skipped": 13
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a623b86e63c0d5942749f25",
+      "studentId": "6a608d6f597a907f90b646d7",
+      "stored": {
+        "correct": 5,
+        "wrong": 14,
+        "skipped": 11
+      },
+      "expected": {
+        "correct": 5,
+        "wrong": 14,
+        "skipped": 11
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a648d927971b3b0b7e4dd5f",
+      "studentId": "6a58fcec24446ef390bf4cf5",
+      "stored": {
+        "correct": 1,
+        "wrong": 3,
+        "skipped": 16
+      },
+      "expected": {
+        "correct": 1,
+        "wrong": 3,
+        "skipped": 16
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a73f850e972feee804d8bd8",
+      "studentId": "6a73f850e972feee804d8bca",
+      "stored": {
+        "correct": 9,
+        "wrong": 1,
+        "skipped": 0
+      },
+      "expected": {
+        "correct": 9,
+        "wrong": 1,
+        "skipped": 0
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a73f850e972feee804d8be5",
+      "studentId": "6a73f850e972feee804d8bca",
+      "stored": {
+        "correct": 0,
+        "wrong": 2,
+        "skipped": 0
+      },
+      "expected": {
+        "correct": 0,
+        "wrong": 2,
+        "skipped": 0
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a93c64016a484fd00cf5e21",
+      "studentId": "6a58fcec24446ef390bf4cf5",
+      "stored": {
+        "correct": 1,
+        "wrong": 0,
+        "skipped": 19
+      },
+      "expected": {
+        "correct": 1,
+        "wrong": 0,
+        "skipped": 19
+      },
+      "isConsistent": true
+    },
+    {
+      "attemptId": "6a982aaccc0c59832224097d",
+      "studentId": "6a4a12d9e0e39456cabb3738",
+      "stored": {
+        "correct": 1,
+        "wrong": 5,
+        "skipped": 4
+      },
+      "expected": {
+        "correct": 1,
+        "wrong": 5,
+        "skipped": 4
+      },
+      "isConsistent": true
+    }
+  ],
+  "studentResults": [
+    {
+      "studentId": "6a4a12d9e0e39456cabb3738",
+      "current": {
+        "answered": 124,
+        "correct": 73,
+        "wrong": 51,
+        "skipped": 504,
+        "tests": 38
+      },
+      "expected": {
+        "answered": 124,
+        "correct": 73,
+        "wrong": 51,
+        "skipped": 504,
+        "tests": 38
+      },
+      "isConsistent": true,
+      "mathInvariantPassed": true
+    },
+    {
+      "studentId": "6a6235d7e63c0d5942732e4e",
+      "current": {
+        "answered": 0,
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 30,
+        "tests": 1
+      },
+      "expected": {
+        "answered": 0,
+        "correct": 0,
+        "wrong": 0,
+        "skipped": 30,
+        "tests": 1
+      },
+      "isConsistent": true,
+      "mathInvariantPassed": true
+    },
+    {
+      "studentId": "6a1a92d5d16ff8d60649a349",
+      "current": {
+        "answered": 17,
+        "correct": 6,
+        "wrong": 11,
+        "skipped": 13,
+        "tests": 1
+      },
+      "expected": {
+        "answered": 17,
+        "correct": 6,
+        "wrong": 11,
+        "skipped": 13,
+        "tests": 1
+      },
+      "isConsistent": true,
+      "mathInvariantPassed": true
+    },
+    {
+      "studentId": "6a608d6f597a907f90b646d7",
+      "current": {
+        "answered": 32,
+        "correct": 14,
+        "wrong": 18,
+        "skipped": 23,
+        "tests": 2
+      },
+      "expected": {
+        "answered": 32,
+        "correct": 14,
+        "wrong": 18,
+        "skipped": 23,
+        "tests": 2
+      },
+      "isConsistent": true,
+      "mathInvariantPassed": true
+    },
+    {
+      "studentId": "6a58fcec24446ef390bf4cf5",
+      "current": {
+        "answered": 473,
+        "correct": 356,
+        "wrong": 117,
+        "skipped": 734,
+        "tests": 59
+      },
+      "expected": {
+        "answered": 473,
+        "correct": 356,
+        "wrong": 117,
+        "skipped": 734,
+        "tests": 59
+      },
+      "isConsistent": true,
+      "mathInvariantPassed": true
+    },
+    {
+      "studentId": "6a73f850e972feee804d8bca",
+      "current": {
+        "answered": 12,
+        "correct": 9,
+        "wrong": 3,
+        "skipped": 0,
+        "tests": 2
+      },
+      "expected": {
+        "answered": 12,
+        "correct": 9,
+        "wrong": 3,
+        "skipped": 0,
+        "tests": 2
+      },
+      "isConsistent": true,
+      "mathInvariantPassed": true
+    }
+  ],
+  "ledgerResults": [
+    {
+      "attemptId": "6a622d45e63c0d5942732bf5",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a62374be63c0d5942733855",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a623768e63c0d59427343e3",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a623b86e63c0d5942749f25",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a648d927971b3b0b7e4dd5f",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a73f850e972feee804d8bd8",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a73f850e972feee804d8be5",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a93c64016a484fd00cf5e21",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    },
+    {
+      "attemptId": "6a982aaccc0c59832224097d",
+      "ledgerState": "LEGACY_BASELINE_REQUIRED",
+      "metricsVersion": null,
+      "remainsLegacy": true
+    }
+  ],
+  "matchedDailySummaryCount": 6
+}
