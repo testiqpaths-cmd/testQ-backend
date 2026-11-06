@@ -28,3 +28,4 @@ mkdir -p tmp logs
 touch tmp/restart.txt
 
 echo "✅ Deployment finished successfully! App will restart on next request."
+
