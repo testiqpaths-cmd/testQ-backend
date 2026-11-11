@@ -439,7 +439,7 @@ export const checkFeatureAccess = async (
           lastUsedAt: new Date(),
         },
       },
-      { upsert: true, new: true, setDefaultsOnInsert: true }
+      { upsert: true, new: true, returnDocument: "after", setDefaultsOnInsert: true }
     );
   } catch (err) {
     // In rare race where unique index collides before upsert commits, retrieve existing doc
@@ -448,6 +448,14 @@ export const checkFeatureAccess = async (
     } else {
       throw err;
     }
+  }
+
+  if (!usageRecord) {
+    usageRecord = await UserFeatureUsage.findOne({ userId, featureId: feature._id });
+  }
+
+  if (!usageRecord) {
+    throw new ApiError(500, "Unable to resolve feature usage counter. Please try again.");
   }
 
   const now = new Date();
@@ -511,7 +519,7 @@ export const checkFeatureAccess = async (
           usedCount: { $lte: limit - incrementBy },
         },
         updateOp,
-        { new: true, ...sessionOpt }
+        { new: true, returnDocument: "after", ...sessionOpt }
       );
 
       if (!updated) {
@@ -668,7 +676,7 @@ export const releaseFeatureUsage = async (
             const updated = await FeatureReservation.findOneAndUpdate(
               { reservationId: resId, status: "PENDING" },
               { $set: { status: "RELEASED" } },
-              { new: true, ...sessionOpt }
+              { new: true, returnDocument: "after", ...sessionOpt }
             );
 
             if (updated) {
@@ -709,7 +717,7 @@ export const releaseFeatureUsage = async (
             $inc: { usedCount: -targetCount },
             $set: { "reservations.$.status": "RELEASED" },
           },
-          { new: true, ...sessionOpt }
+          { new: true, returnDocument: "after", ...sessionOpt }
         );
       });
       return;
@@ -831,7 +839,7 @@ export const reconcileStaleReservations = async ({
         const updated = await FeatureReservation.findOneAndUpdate(
           { reservationId: doc.reservationId, status: "PENDING" },
           { $set: { status: "EXPIRED" } },
-          { new: true, ...sessionOpt }
+          { new: true, returnDocument: "after", ...sessionOpt }
         );
         if (updated) {
           await UserFeatureUsage.findOneAndUpdate(
