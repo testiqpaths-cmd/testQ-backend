@@ -420,15 +420,23 @@ export const startTestAttemptController = async (req, res, next) => {
         }
       }
 
+      const isOwnTest = test.createdBy?.userId && String(test.createdBy.userId) === String(studentId);
+
       const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
       let assignment = await TestAssignment.findOne({ testId, studentId });
-      if (!assignment && isCompanyTest) {
+      if (!assignment && (isCompanyTest || isOwnTest)) {
         assignment = await TestAssignment.create({
           testId,
           studentId,
           status: "ACCEPTED",
           acceptedAt: new Date(),
         });
+      }
+
+      if (isOwnTest && assignment && (!assignment.acceptedAt || assignment.status !== "ACCEPTED")) {
+        assignment.status = "ACCEPTED";
+        assignment.acceptedAt = assignment.acceptedAt || new Date();
+        await assignment.save();
       }
 
       if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {

@@ -542,7 +542,26 @@ export const startTestAssignment = async (req, res, next) => {
     const testId = req.params.id;
 
     const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-    const assignment = await TestAssignment.findOne({ testId, studentId });
+    const Test = (await import("./models/test.model.js")).default;
+    const test = await Test.findById(testId).select("createdBy").lean();
+    const isOwnTest = test && test.createdBy?.userId && String(test.createdBy.userId) === String(studentId);
+
+    let assignment = await TestAssignment.findOne({ testId, studentId });
+
+    if (!assignment && isOwnTest) {
+      assignment = await TestAssignment.create({
+        testId,
+        studentId,
+        status: "ACCEPTED",
+        acceptedAt: new Date(),
+      });
+    }
+
+    if (isOwnTest && assignment && (!assignment.acceptedAt || assignment.status === "DECLINED")) {
+      assignment.status = "ACCEPTED";
+      assignment.acceptedAt = assignment.acceptedAt || new Date();
+      await assignment.save();
+    }
 
     if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
       return res.status(400).json({

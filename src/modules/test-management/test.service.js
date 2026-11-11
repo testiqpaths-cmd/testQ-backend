@@ -112,6 +112,16 @@ export async function createTest(data, user) {
   }
   await test.save();
 
+  // A student's own created test is created for their own practice and is
+  // pre-accepted immediately, so they never encounter an "accept assignment" gate.
+  if (user.role === "STUDENT") {
+    await TestAssignment.findOneAndUpdate(
+      { testId: test._id, studentId: user._id || user.id },
+      { $set: { status: "ACCEPTED", acceptedAt: new Date() } },
+      { upsert: true, returnDocument: "after" }
+    );
+  }
+
   return test;
 }
 
