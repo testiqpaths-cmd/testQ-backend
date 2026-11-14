@@ -29,11 +29,12 @@ const router = express.Router();
 
 // Specific routes MUST come before generic /:id routes
 // Student CRUD (role = STUDENT)
-router.get("/students", authMiddleware, featureMiddleware("USER_MANAGEMENT"), asyncHandler(listStudentsController));
+router.get("/students", authMiddleware, roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"), featureMiddleware("USER_MANAGEMENT"), asyncHandler(listStudentsController));
 // Must come before /students/:id — see comment above.
 router.get(
 	"/students/filter-options",
 	authMiddleware,
+	roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"),
 	featureMiddleware("USER_MANAGEMENT"),
 	asyncHandler(getStudentEducationFilterOptionsController)
 );
@@ -79,8 +80,8 @@ router.post(
 router.get("/bulk-import/template", asyncHandler(generateUserTemplateController));
 
 // Generic user CRUD
-router.get("/", authMiddleware, featureMiddleware("USER_MANAGEMENT"), asyncHandler(listUsersController));
-router.post("/", authMiddleware, featureMiddleware("USER_MANAGEMENT"), asyncHandler(createUserController));
+router.get("/", authMiddleware, roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"), featureMiddleware("USER_MANAGEMENT"), asyncHandler(listUsersController));
+router.post("/", authMiddleware, roleMiddleware("ORGANIZATION", "IQPATH_ADMIN"), featureMiddleware("USER_MANAGEMENT"), asyncHandler(createUserController));
 router.get("/:id", authMiddleware, asyncHandler(getUserController));
 router.put("/:id", authMiddleware, asyncHandler(updateUserController));
 router.delete("/:id", authMiddleware, asyncHandler(deleteUserController));
