@@ -46,7 +46,7 @@ export const getCompaniesWithStats = async ({ search = "" } = {}) => {
     _id: comp._id,
     name: comp.name,
     slug: comp.slug,
-    logoUrl: comp.logoUrl || null,
+    logoUrl: comp.logoUrl || comp.logo || null,
     website: comp.website || null,
     description: comp.description || null,
     seriesCount: seriesCountMap.get(String(comp._id)) || 0,
@@ -1539,7 +1539,7 @@ export const getCompanyTracksBySlug = async (slug, { studentId = null } = {}) =>
       _id: company._id,
       name: company.name,
       slug: company.slug,
-      logoUrl: company.logoUrl || null,
+      logoUrl: company.logoUrl || company.logo || null,
       website: company.website || null,
       description: company.description || null,
     },
@@ -1775,13 +1775,13 @@ export const getCompanyResultsByStudent = async (studentId, { companyId = null, 
       path: "trackId",
       select: "title description category experienceLevel targetRole mode progressionMode passingPercentage hiringRounds tests",
       populate: [
-        { path: "companyId", select: "name slug logoUrl description website" },
+        { path: "companyId", select: "name slug logo logoUrl description website" },
         { path: "tests", select: "title duration totalMarks totalQuestions companyStage" },
       ],
     })
     .populate({
       path: "companyId",
-      select: "name slug logoUrl description website",
+      select: "name slug logo logoUrl description website",
     })
     .populate({
       path: "roundAttempts.testAttemptIds",
@@ -1911,7 +1911,7 @@ export const getCompanyResultsByStudent = async (studentId, { companyId = null, 
         id: String(company._id || ""),
         name: company.name || "Company",
         slug: company.slug || "",
-        logoUrl: company.logoUrl || null,
+        logoUrl: company.logoUrl || company.logo || null,
         description: company.description || null,
       },
       driveAttemptNumber: att.driveAttemptNumber || 1,
@@ -1948,12 +1948,12 @@ export const getCompanyResultsByStudent = async (studentId, { companyId = null, 
       select: "title duration totalQuestions testSeriesId totalMarks createdBy companyId companyStage",
       populate: [
         { path: "testSeriesId", select: "title category companyId" },
-        { path: "companyId", select: "name slug logoUrl" },
+        { path: "companyId", select: "name slug logo logoUrl" },
       ],
     })
     .populate({
       path: "companyId",
-      select: "name slug logoUrl",
+      select: "name slug logo logoUrl",
     })
     .sort({ submittedAt: -1 })
     .lean();
@@ -1984,7 +1984,7 @@ export const getCompanyResultsByStudent = async (studentId, { companyId = null, 
       testType,
       seriesName,
       testCategory: "COMPANY",
-      company: company ? { id: String(company._id), name: company.name, slug: company.slug, logoUrl: company.logoUrl } : null,
+      company: company ? { id: String(company._id), name: company.name, slug: company.slug, logoUrl: company.logoUrl || company.logo || null } : null,
       companyStage: test.companyStage || null,
       attemptDate: a.submittedAt ? new Date(a.submittedAt).toISOString().split("T")[0] : null,
       attemptTime: a.submittedAt ? new Date(a.submittedAt).toISOString().split("T")[1]?.slice(0, 5) : null,
@@ -2027,11 +2027,11 @@ export const getCompanyTrackAttemptById = async ({ attemptId, requestingUser }) 
       path: "trackId",
       select: "title description category experienceLevel targetRole mode progressionMode passingPercentage hiringRounds tests",
       populate: [
-        { path: "companyId", select: "name slug logoUrl description website" },
+        { path: "companyId", select: "name slug logo logoUrl description website" },
         { path: "tests", select: "title duration totalMarks totalQuestions companyStage" },
       ],
     })
-    .populate({ path: "companyId", select: "name slug logoUrl description website" })
+    .populate({ path: "companyId", select: "name slug logo logoUrl description website" })
     .populate({ path: "roundAttempts.testAttemptIds" })
     .lean();
 
@@ -2156,7 +2156,7 @@ export const getCompanyTrackAdminAnalytics = async (requestingUser, query = {}) 
   const attempts = await CompanyTrackAttempt.find(matchFilter)
     .populate({ path: "studentId", select: "firstName lastName email" })
     .populate({ path: "trackId", select: "title targetRole experienceLevel category mode hiringRounds" })
-    .populate({ path: "companyId", select: "name slug logoUrl" })
+    .populate({ path: "companyId", select: "name slug logo logoUrl" })
     .sort({ createdAt: -1 })
     .lean();
 
@@ -2330,7 +2330,7 @@ export const getCompanyTrackAdminAnalytics = async (requestingUser, query = {}) 
       studentEmail: student.email || "No email",
       companyName: company.name || "Company",
       companySlug: company.slug || "",
-      companyLogoUrl: company.logoUrl || null,
+      companyLogoUrl: company.logoUrl || company.logo || null,
       trackTitle: track.title || "Placement Track",
       targetRole: track.targetRole || "Software Engineer",
       experienceLevel: track.experienceLevel || "1-3 Years",
