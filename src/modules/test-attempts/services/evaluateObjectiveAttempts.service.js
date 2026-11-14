@@ -141,7 +141,9 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       const studentAnswer = resolveStudentAnswer(ans, snapshot || q);
       const isCorrect = normalizeValue(studentAnswer) === normalizeValue(q.correctAnswer);
 
-      ans.isCorrect = isCorrect;
+      // A cleared/skipped question (entry exists but holds no answer) is
+      // unattempted, not incorrect.
+      ans.isCorrect = answerHasValue(ans) ? isCorrect : null;
       
       const marksForQ = test?.marksPerQuestion || q.marks || 1;
       const negPercentage = test?.negativeMarkingPercentage || 0;

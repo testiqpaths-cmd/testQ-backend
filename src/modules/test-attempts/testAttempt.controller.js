@@ -1262,12 +1262,20 @@ export const getMyAttemptForTestController = async (req, res, next) => {
       .select("_id status")
       .lean();
 
+    // Lets callers (e.g. notification clicks) know whether the student has
+    // accepted the assignment yet. null when no assignment record exists.
+    const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
+    const assignment = await TestAssignment.findOne({ testId, studentId })
+      .select("status")
+      .lean();
+
     return res.json({
       success: true,
       data: {
         hasCompletedAttempt: Boolean(attempt),
         attemptId: attempt?._id || null,
         status: attempt?.status || null,
+        assignmentStatus: assignment?.status || null,
       },
     });
   } catch (err) {
