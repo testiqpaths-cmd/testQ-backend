@@ -16,6 +16,26 @@ const COMPETENCY_LABELS = {
   behavioral: "Behavioral",
 };
 
+const ANALYTICS_PROJECTION = {
+  interviewId: 1,
+  userId: 1,
+  role: 1,
+  company: 1,
+  techStack: 1,
+  interviewType: 1,
+  interviewTypes: 1,
+  interviewState: 1,
+  questionCount: 1,
+  duration: 1,
+  endTime: 1,
+  createdAt: 1,
+  "resultsSummary.score": 1,
+  "resultsSummary.readinessScore": 1,
+  "resultsSummary.weaknesses": 1,
+  "resultsSummary.competencyScores": 1,
+  "resultsSummary.scores": 1,
+};
+
 export class InterviewAdminAnalyticsService {
   /**
    * Resolves in-scope student IDs based on user role.
@@ -84,10 +104,14 @@ export class InterviewAdminAnalyticsService {
     }
 
     // Query all sessions matching date & student scope for aggregate analytics
-    const allSessions = await InterviewSession.find(dateQuery)
+    // Project only the fields the aggregation reads. Full session documents
+    // embed resumeData, preparedQuestions and prefetchedProbes, which made
+    // this query load hundreds of MB and exceed the 15s client timeout.
+    const allSessions = await InterviewSession.find(dateQuery, ANALYTICS_PROJECTION)
       .populate("userId", "firstName lastName email")
       .sort({ createdAt: -1 })
-      .lean();
+      .lean()
+      .maxTimeMS(12000);
 
     // ── 1. Overview Statistics ──
     const totalInterviews = allSessions.length;

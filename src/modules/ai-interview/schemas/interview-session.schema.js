@@ -395,6 +395,7 @@ interviewSessionSchema.index(
 
 // Helpful compound indexes
 interviewSessionSchema.index({ userId: 1, createdAt: -1 });
+interviewSessionSchema.index({ createdAt: -1 });
 interviewSessionSchema.index({ userId: 1, interviewState: 1 });
 interviewSessionSchema.index({ trackAttemptId: 1, companyRoundOrder: 1 });
 
