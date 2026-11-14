@@ -74,17 +74,30 @@ export const syncAllMissedAttempts = async () => {
 
 export const syncMissedAttemptsForStudent = async (studentId) => {
   try {
-    const student = await User.findById(studentId);
-    if (!student) return;
-
     const now = new Date();
-    // Find all expired tests that are published, not deleted, and not IQ room tests
+
+    // Start from this student's own live assignments. syncMissed() only ever
+    // acts on ACCEPTED/STARTED ones, so scanning every expired test on the
+    // platform (one query each, run one after another) was pure overhead that
+    // grew with the total number of tests ever created, not with this student.
+    const liveAssignments = await TestAssignment.find({
+      studentId,
+      status: { $in: ["ACCEPTED", "STARTED"] },
+    })
+      .select("testId")
+      .lean();
+
+    if (liveAssignments.length === 0) return;
+
     const expiredTests = await Test.find({
+      _id: { $in: liveAssignments.map((a) => a.testId) },
       isPublished: true,
       isDeleted: { $ne: 1 },
       isIQRoomTest: { $ne: true },
-      endTime: { $lt: now }
-    });
+      endTime: { $lt: now },
+    })
+      .select("_id endTime totalMarks duration startTime createdAt")
+      .lean();
 
     for (const test of expiredTests) {
       await syncMissed(studentId, test, now);

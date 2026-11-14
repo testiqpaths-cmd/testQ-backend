@@ -80,6 +80,22 @@ const resolveStudentAnswer = (answer, snapshot) => {
   return answer?.textAnswer ?? null;
 };
 
+// Difficulty lookup for every question in the attempt — including ones the
+// student skipped. Skipped questions have no answer entry, and question
+// snapshots don't store difficulty, so building this from answers alone made
+// every skipped question fall back to "Medium" in the difficulty analysis.
+const buildQuestionDifficultyMap = async (attempt) => {
+  const ids = new Set();
+  (attempt.answers || []).forEach((a) => a?.questionId && ids.add(String(a.questionId)));
+  (attempt.questionSnapshots || []).forEach((q) => q?.questionId && ids.add(String(q.questionId)));
+  if (ids.size === 0) return new Map();
+
+  const docs = await Question.find({ _id: { $in: Array.from(ids) } })
+    .select("_id difficulty")
+    .lean();
+  return new Map(docs.map((q) => [String(q._id), q.difficulty]));
+};
+
 export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
@@ -105,7 +121,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     attempt.analyticsSnapshot = buildAttemptAnalyticsSnapshot({
       attempt,
       test,
-      questionDifficultyMap: new Map(),
+      questionDifficultyMap: await buildQuestionDifficultyMap(attempt),
     });
     await attempt.save();
     return attempt;
@@ -117,9 +133,7 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   const questions = await Question.find({ _id: { $in: qIds } }).select(
     "_id type correctAnswer difficulty"
   );
-  const questionDifficultyMap = new Map(
-    questions.map((q) => [String(q._id), q.difficulty])
-  );
+  const questionDifficultyMap = await buildQuestionDifficultyMap(attempt);
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
   const snapshotMap = new Map(
