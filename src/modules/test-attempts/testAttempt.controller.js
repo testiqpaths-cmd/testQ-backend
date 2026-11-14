@@ -680,6 +680,15 @@ export const startTestAttemptController = async (req, res, next) => {
         endsAt: attempt.endsAt,
         duration: attempt.duration,
         maxScore: attempt.maxScore,
+        // Lets the frontend render the attempt page straight from this
+        // response instead of re-fetching it via GET /getattempt.
+        test: {
+          _id: test._id,
+          title: test.title,
+          duration: test.duration,
+          createdBy: test.createdBy,
+          isIQRoomTest: test.isIQRoomTest,
+        },
         questions,
         timing, // ✅ backend remaining time
       },

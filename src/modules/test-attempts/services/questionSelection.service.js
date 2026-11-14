@@ -84,10 +84,25 @@ export const selectAttemptQuestions = async (test) => {
       .select("_id questionText type options correctAnswer imageUrl")
       .lean();
   } else {
+    // Let MongoDB pick the random subset instead of loading every matching
+    // question into Node just to shuffle and slice it. Filter values are
+    // already ObjectId/String (read from a lean Test doc), so the missing
+    // schema casting of aggregate() is not a concern here.
     const filters = buildFilters(test);
-    questions = await Question.find(filters)
-      .select("_id questionText type options correctAnswer imageUrl")
-      .lean();
+    questions = await Question.aggregate([
+      { $match: filters },
+      { $sample: { size: desiredCount } },
+      {
+        $project: {
+          _id: 1,
+          questionText: 1,
+          type: 1,
+          options: 1,
+          correctAnswer: 1,
+          imageUrl: 1,
+        },
+      },
+    ]);
   }
 
   const selectedQuestions = shuffle(questions).slice(0, Math.min(desiredCount, questions.length));
