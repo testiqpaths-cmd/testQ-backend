@@ -45,7 +45,14 @@ export class InterviewDashboardService {
       interviewState: { $in: ["COMPLETED", "EVALUATED"] },
     })
       .sort({ createdAt: -1 })
-      .select("questionCount createdAt resultsSummary role company difficulty interviewId")
+      // resultsSummary also holds per-question detail, topic breakdowns etc.
+      // (hundreds of KB over a few dozen sessions) that this dashboard never
+      // reads, so only the fields used below are fetched.
+      .select(
+        "questionCount createdAt role company difficulty interviewId " +
+          "resultsSummary.score resultsSummary.readinessScore resultsSummary.competencyScores " +
+          "resultsSummary.strengths resultsSummary.weaknesses"
+      )
       .lean();
 
     const validScores = sessions
