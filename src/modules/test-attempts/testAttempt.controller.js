@@ -18,6 +18,8 @@ import IQRoom from "../../models/iqRoom.model.js";
 import UserModel from "../../models/user.model.js";
 import { createNotification } from "../notification/notification.service.js";
 import { hasTestEnded } from "../test-management/utils/status.js";
+import { hasCompanyFields, isCompanySeries } from "../test-management/utils/testContext.js";
+import { ensureAssignmentAccepted } from "./services/assignmentGate.service.js";
 import env from "../../config/env.js";
 
 // Let an organization know when a student completes one of its tests —
@@ -189,11 +191,11 @@ export const startTestAttemptController = async (req, res, next) => {
     }
 
     // Company Sequential Progression Gate & Track Attempt Integration
-    if (req.user?.role === "STUDENT" && test.testSeriesId && (test.companyId || test.companyStageKey)) {
+    if (req.user?.role === "STUDENT" && test.testSeriesId && hasCompanyFields(test)) {
       const TestSeries = (await import("../../models/testSeries.model.js")).default;
       const series = await TestSeries.findById(test.testSeriesId).select("category progressionMode passingPercentage roundsConfig hiringRounds").lean();
 
-      if (series && series.category === "COMPANY") {
+      if (isCompanySeries(series)) {
         try {
           const { startOrResumeTrackAttempt } = await import("../company-exams/companyExam.service.js");
           const trackResult = await startOrResumeTrackAttempt({
@@ -401,37 +403,10 @@ export const startTestAttemptController = async (req, res, next) => {
       }
     }
 
-    // Verify assignment is accepted for student. Acceptance only needs to happen
-    // once per test — `acceptedAt` is the persistent record of that, unlike
-    // `status`, which also tracks per-attempt lifecycle (STARTED/SUBMITTED) and
-    // gets overwritten after every attempt, so it can't be used as the gate here.
-    // A self-authored test is auto-accepted (a real ACCEPTED TestAssignment
-    // record) the moment it appears on getAssignedTests's list — see
-    // test.service.js's ownTestIds — so this gate needs no special-casing
-    // for it; the record is simply already there by the time a student
-    // reaches this endpoint.
+    // Verify assignment is accepted for student (see assignmentGate.service.js).
     if (req.user?.role === "STUDENT" && !iqRoomId) {
-      let isCompanyTest = Boolean(test.companyId);
-      if (!isCompanyTest && test.testSeriesId) {
-        const TestSeries = (await import("../../models/testSeries.model.js")).default;
-        const series = await TestSeries.findById(test.testSeriesId).select("category companyId").lean();
-        if (series && (series.category === "COMPANY" || series.companyId)) {
-          isCompanyTest = true;
-        }
-      }
-
-      const TestAssignment = (await import("../../models/testAssignment.model.js")).default;
-      let assignment = await TestAssignment.findOne({ testId, studentId });
-      if (!assignment && isCompanyTest) {
-        assignment = await TestAssignment.create({
-          testId,
-          studentId,
-          status: "ACCEPTED",
-          acceptedAt: new Date(),
-        });
-      }
-
-      if (!assignment || !assignment.acceptedAt || assignment.status === "DECLINED") {
+      const accepted = await ensureAssignmentAccepted({ test, testId, studentId });
+      if (!accepted) {
         return res.status(400).json({
           success: false,
           message: "You must accept the test assignment before starting the test"
@@ -551,7 +526,7 @@ export const startTestAttemptController = async (req, res, next) => {
     if (test.testSeriesId) {
       const TestSeries = (await import("../../models/testSeries.model.js")).default;
       const series = await TestSeries.findById(test.testSeriesId).select("category companyId mode progressionMode roundsConfig").lean();
-      if (series && series.category === "COMPANY") {
+      if (isCompanySeries(series)) {
         testCategory = "COMPANY";
         if (series.companyId) companyId = series.companyId;
 

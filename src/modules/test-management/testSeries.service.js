@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { NOT_COMPANY_SERIES_FILTER } from "./utils/testContext.js";
 import crypto from "crypto";
 import TestSeries from "./models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
@@ -537,7 +538,9 @@ export const createSeriesTest = async (seriesId, data, user) => {
 };
 
 export const getAssignedSeries = async ({ studentId = null, userRole = null, search = "" } = {}) => {
-  const filters = {};
+  // Company-wise tracks live in the Company Hub (always open for practice, no
+  // acceptance step), so they are not part of the assigned series list.
+  const filters = { ...NOT_COMPANY_SERIES_FILTER };
 
   if (String(search || "").trim()) {
     filters.$or = [

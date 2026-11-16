@@ -100,19 +100,22 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
   const attempt = await TestAttempt.findById(attemptId);
   if (!attempt) return null;
 
-  const test = await Test.findById(attempt.testId)
-    .populate("topicIds", "name")
-    .populate("subjectIds", "name")
-    .populate("subjectId", "name")
-    .lean();
-
   // only run after submission (or re-run if already evaluated or expired)
   if (attempt.status !== "SUBMITTED" && attempt.status !== "EVALUATED" && attempt.status !== "EXPIRED") {
     return attempt;
   }
 
+  // Each database round trip is slow, so the reads below that do not depend on
+  // each other are started together instead of one after another.
+  const testPromise = Test.findById(attempt.testId)
+    .populate("topicIds", "name")
+    .populate("subjectIds", "name")
+    .populate("subjectId", "name")
+    .lean();
+
   // If no answers, don't mark evaluated (could be subjective test with no answers too)
   if (!attempt.answers || attempt.answers.length === 0) {
+    const test = await testPromise;
     attempt.totalScore = 0;
     attempt.percentage = 0;
     updateAttemptStats(attempt);
@@ -130,10 +133,11 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
 
 
   const qIds = attempt.answers.map((a) => a.questionId);
-  const questions = await Question.find({ _id: { $in: qIds } }).select(
-    "_id type correctAnswer difficulty"
-  );
-  const questionDifficultyMap = await buildQuestionDifficultyMap(attempt);
+  const [test, questions, questionDifficultyMap] = await Promise.all([
+    testPromise,
+    Question.find({ _id: { $in: qIds } }).select("_id type correctAnswer difficulty"),
+    buildQuestionDifficultyMap(attempt),
+  ]);
 
   const qMap = new Map(questions.map((q) => [q._id.toString(), q]));
   const snapshotMap = new Map(
@@ -223,7 +227,9 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     questionDifficultyMap,
   });
 
-  if (!attempt.iqRoomId) {
+  // The assignment sync and the attempt save are independent writes, so they run together.
+  const syncAssignment = async () => {
+    if (attempt.iqRoomId) return;
     try {
       const TestAssignment = (await import("../../../models/testAssignment.model.js")).default;
       await TestAssignment.updateOne(
@@ -240,26 +246,32 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
     } catch (err) {
       console.error("Failed to sync TestAssignment during evaluateObjectiveForAttempt:", err);
     }
-  }
+  };
+  await Promise.all([syncAssignment(), attempt.save()]);
 
-  await attempt.save();
-
-  if (attempt.testCategory === "COMPANY" || attempt.companyTrackAttemptId || attempt.companyTrackId) {
+  // After the attempt is saved, the company track progress update (reads attempts,
+  // writes the track attempt) and the analytics summary update (writes analytics
+  // records) do not depend on each other, so they run together. Both still finish
+  // before this function returns, and each handles its own errors as before.
+  const updateTrackProgress = async () => {
+    if (!(attempt.testCategory === "COMPANY" || attempt.companyTrackAttemptId || attempt.companyTrackId)) return;
     try {
       const { updateTrackAttemptProgress } = await import("../../company-exams/companyExam.service.js");
       await updateTrackAttemptProgress(attempt);
     } catch (err) {
       console.error("Failed to update company track progress in evaluateObjectiveForAttempt:", err);
     }
-  }
-
-  // Record attempt in pre-aggregated analytics summaries (idempotent & non-blocking)
-  try {
-    const { processCompletedAttemptAnalytics } = await import("../../../services/analyticsSummary.service.js");
-    await processCompletedAttemptAnalytics(attempt._id);
-  } catch (err) {
-    console.error("Failed to process analytics summary for attempt:", attempt._id, err);
-  }
+  };
+  // Record attempt in pre-aggregated analytics summaries (idempotent)
+  const updateAnalytics = async () => {
+    try {
+      const { processCompletedAttemptAnalytics } = await import("../../../services/analyticsSummary.service.js");
+      await processCompletedAttemptAnalytics(attempt._id);
+    } catch (err) {
+      console.error("Failed to process analytics summary for attempt:", attempt._id, err);
+    }
+  };
+  await Promise.all([updateTrackProgress(), updateAnalytics()]);
 
   return attempt;
 };
