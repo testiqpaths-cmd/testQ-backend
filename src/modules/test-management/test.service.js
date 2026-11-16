@@ -3,6 +3,7 @@ import Test from "./models/test.model.js";
 import TestSeries from "./models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
+import { NOT_COMPANY_TEST_FILTER, isInCompanySeries } from "./utils/testContext.js";
 import { ensureCreatorOrgIncluded, resolveAllowedStudents, resolveMandatoryOrgTestIds } from "./utils/visibility.js";
 import UserModel from "../../models/user.model.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
@@ -417,6 +418,10 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     isPublished: true,
     isDeleted: { $ne: 1 },
     isIQRoomTest: { $ne: true },
+    // Company-wise tests are a separate feature (Company Hub): they are always
+    // available for practice, have no schedule and need no acceptance, so they
+    // never belong on the assigned-tests list.
+    ...NOT_COMPANY_TEST_FILTER,
   };
 
   // Combined into $and (rather than competing top-level $or keys) since the
@@ -472,15 +477,18 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
   // flow loads it from the test document itself). allowedStudents is only
   // needed for the filter above and would otherwise expose other students'
   // ids in the response.
-  const tests = await Test.find(filters)
+  const allTests = await Test.find(filters)
     .select("-questionSnapshot -allowedStudents")
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
-      select: "title description visibility createdAt plannedTestCount createdBy allowedOrganizations",
+      select: "title description visibility createdAt plannedTestCount createdBy allowedOrganizations category",
     })
     .sort({ createdAt: -1 })
     .lean();
+  // A test inside a company-wise series stays out of this list even if the
+  // test document itself carries no company id.
+  const tests = allTests.filter((t) => !isInCompanySeries(t));
 
   // Resolve Organization Names for tests created by or assigned from an ORGANIZATION
   const orgCreatorUserIds = [
