@@ -20,6 +20,20 @@ const ensureCriticalIndexes = async () => {
       TestAttempt.createIndexes(),
       TestAssignment.createIndexes(),
     ]);
+
+    // Cleanup legacy stale index from older schema version on userfeatureusages
+    try {
+      const userFeatureUsages = mongoose.connection.collection("userfeatureusages");
+      const indexes = await userFeatureUsages.indexes();
+      const hasStaleIndex = indexes.some((i) => i.name === "userId_1_featureKey_1");
+      if (hasStaleIndex) {
+        await userFeatureUsages.dropIndex("userId_1_featureKey_1");
+        logger.info("Dropped legacy stale index userId_1_featureKey_1 on userfeatureusages");
+      }
+    } catch (e) {
+      // Ignore if index doesn't exist
+    }
+
     logger.info("Subject/Topic/TestAttempt/TestAssignment indexes ensured successfully (non-destructive)");
   } catch (error) {
     logger.warn(`Index verification skipped: ${error.message}`);
