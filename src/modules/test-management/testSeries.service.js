@@ -1,4 +1,5 @@
 import mongoose from "mongoose";
+import { NOT_COMPANY_SERIES_FILTER } from "./utils/testContext.js";
 import crypto from "crypto";
 import TestSeries from "./models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
@@ -429,6 +430,13 @@ export const getLeaderboardSeriesList = async ({ userId = null, userRole = null,
     { $sort: { createdAt: -1 } },
   ]);
 
+  // creatorUser / creatorOrganization are looked up only to filter and to
+  // build the creator name/email/organization fields. They hold the creator's
+  // whole user record (including the password hash and one-time codes), so
+  // they must never be sent to the client.
+  const stripCreatorRecords = (list) =>
+    list.map(({ creatorUser: _creatorUser, creatorOrganization: _creatorOrganization, ...rest }) => rest);
+
   // Same reasoning as getLeaderboardTests: a student should only see a series'
   // leaderboard if they accepted at least one test within it — otherwise every
   // published admin/org series shows up regardless of assignment/acceptance.
@@ -451,8 +459,10 @@ export const getLeaderboardSeriesList = async ({ userId = null, userRole = null,
         .map((a) => String(a.testId))
     );
 
-    return series.filter(
-      (s) => Array.isArray(s.tests) && s.tests.some((t) => acceptedTestIds.has(String(t)))
+    return stripCreatorRecords(
+      series.filter(
+        (s) => Array.isArray(s.tests) && s.tests.some((t) => acceptedTestIds.has(String(t)))
+      )
     );
   }
 
@@ -464,7 +474,7 @@ export const getLeaderboardSeriesList = async ({ userId = null, userRole = null,
     const orgId = userOrganizationId ? String(userOrganizationId) : null;
     if (!orgId) return [];
 
-    return series.filter((s) => {
+    return stripCreatorRecords(series.filter((s) => {
       const creatorOrgId = s.creatorUser?.organizationId ? String(s.creatorUser.organizationId) : null;
       const isOwnSeries = creatorOrgId === orgId;
       const isAdminSeriesTargetingUs =
@@ -474,10 +484,10 @@ export const getLeaderboardSeriesList = async ({ userId = null, userRole = null,
         s.allowedOrganizations.some((id) => String(id) === orgId);
 
       return isOwnSeries || isAdminSeriesTargetingUs;
-    });
+    }));
   }
 
-  return series;
+  return stripCreatorRecords(series);
 };
 
 // Create a new test that belongs to a series. The test will be marked as a series test
@@ -528,7 +538,9 @@ export const createSeriesTest = async (seriesId, data, user) => {
 };
 
 export const getAssignedSeries = async ({ studentId = null, userRole = null, search = "" } = {}) => {
-  const filters = {};
+  // Company-wise tracks live in the Company Hub (always open for practice, no
+  // acceptance step), so they are not part of the assigned series list.
+  const filters = { ...NOT_COMPANY_SERIES_FILTER };
 
   if (String(search || "").trim()) {
     filters.$or = [

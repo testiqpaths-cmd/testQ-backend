@@ -234,19 +234,25 @@ export const getAssignedTests = async (req, res) => {
       }
     }
 
-    const tests = await service.getAssignedTests({ search, userCreatedAt, studentId: userId, userRole: req.user?.role });
-
-    let assignedSeries = [];
-    try {
-      const testSeriesService = await import("./testSeries.service.js");
-      assignedSeries = await testSeriesService.getAssignedSeries({
-        studentId: userId,
-        userRole: req.user?.role,
-        search,
-      });
-    } catch (seriesErr) {
-      logger.error(`getAssignedTests getAssignedSeries error: ${seriesErr.message}`);
-    }
+    // Tests and series are independent reads, so fetch them in parallel
+    // (run one after the other they added up past the client's timeout).
+    const [tests, assignedSeries0] = await Promise.all([
+      service.getAssignedTests({ search, userCreatedAt, studentId: userId, userRole: req.user?.role }),
+      (async () => {
+        try {
+          const testSeriesService = await import("./testSeries.service.js");
+          return await testSeriesService.getAssignedSeries({
+            studentId: userId,
+            userRole: req.user?.role,
+            search,
+          });
+        } catch (seriesErr) {
+          logger.error(`getAssignedTests getAssignedSeries error: ${seriesErr.message}`);
+          return [];
+        }
+      })(),
+    ]);
+    let assignedSeries = assignedSeries0;
 
     // Attach current user's attempt count, latest completed attempt score and percentage,
     // so the UI can hide Start when attempts are exhausted, and link to their latest result

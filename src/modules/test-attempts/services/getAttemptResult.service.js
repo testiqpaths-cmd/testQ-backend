@@ -94,9 +94,18 @@ export const getAttemptResult = async (attemptId) => {
     const snapshot = snapshotMap.get(qId) || {};
     const a = answerMap.get(qId) || null;
 
+    // An entry can exist without any answer (the student selected something
+    // and then cleared it, or time was only tracked) — that is just as
+    // unattempted as having no entry at all, never "incorrect".
+    const hasValue =
+      a &&
+      ((a.selectedOption !== undefined && a.selectedOption !== null && String(a.selectedOption).trim() !== '') ||
+        (a.textAnswer !== undefined && a.textAnswer !== null && String(a.textAnswer).trim() !== '') ||
+        (Array.isArray(a.selectedOptions) && a.selectedOptions.length > 0));
+
     // No answer entry at all means the question was never clicked/answered —
     // explicitly unattempted, not "unknown".
-    if (!a) {
+    if (!a || !hasValue) {
       return {
         questionId: qId,
         questionText: snapshot.questionText || '',
@@ -106,7 +115,7 @@ export const getAttemptResult = async (attemptId) => {
         isCorrect: null,
         marks: Number.isFinite(snapshot.marks) ? snapshot.marks : 0,
         marksObtained: 0,
-        timeSpentMs: 0,
+        timeSpentMs: a?.timeSpentMs ?? 0,
       };
     }
 

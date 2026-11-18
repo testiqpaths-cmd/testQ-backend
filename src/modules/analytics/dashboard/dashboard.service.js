@@ -7,6 +7,7 @@ import TestAssignment from "../../../models/testAssignment.model.js";
 import TestSeries from "../../../models/testSeries.model.js";
 import TestSeriesAssignment from "../../../models/testSeriesAssignment.model.js";
 import Question from "../../../models/question.model.js";
+import Subject from "../../../models/subject.model.js";
 import HelpSupport from "../../help-support/helpSupport.model.js";
 import UserSubscription from "../../subscription/models/UserSubscription.model.js";
 import StudentPerformanceSummary from "../../../models/studentPerformanceSummary.model.js";
@@ -256,7 +257,13 @@ export const getStudentDashboardData = async (studentId) => {
     status: { $in: ["SUBMITTED", "EVALUATED"] },
   })
     .select(
-      "-questionSnapshots.questionText -questionSnapshots.options -questionSnapshots.correctAnswer -questionSnapshots.imageUrl -violations"
+      // Only questionSnapshots.questionId and each answer's questionId /
+      // selectedOption / textAnswer / isCorrect are read below; everything
+      // else on those arrays is dropped to keep the read small.
+      "-questionSnapshots.questionText -questionSnapshots.options -questionSnapshots.correctAnswer -questionSnapshots.imageUrl " +
+        "-questionSnapshots.type -questionSnapshots.marks -questionSnapshots.order -questionSnapshots.startedAt " +
+        "-questionSnapshots.lastViewedAt -questionSnapshots.timeSpentMs -questionSnapshots._id " +
+        "-answers.answeredAt -answers.timeSpentMs -answers._id -answers.marksObtained -violations"
     )
     .sort({ submittedAt: 1 }); // Sort chronological to build timelines
 
@@ -297,14 +304,18 @@ export const getStudentDashboardData = async (studentId) => {
     };
   }
 
-  // Verify whether all attempts have a complete, valid analytics snapshot
-  const allSnapshotsValid =
-    isAnalyticsSnapshotsEnabled() &&
-    attempts.every((a) => isValidSnapshot(a.analyticsSnapshot));
-
   let questionDifficultyMap = null;
 
-  // Fallback path: If any attempt lacks a valid snapshot, populate test & fetch question difficulties
+  // Verify whether all attempts have a complete, valid analytics snapshot.
+  // One attempt without it sends the whole student down the fallback path,
+  // exactly as before (so the figures shown do not change).
+  const snapshotsOn = isAnalyticsSnapshotsEnabled();
+  const allSnapshotsValid =
+    snapshotsOn && attempts.every((a) => isValidSnapshot(a.analyticsSnapshot));
+  const fallbackAttempts = allSnapshotsValid ? [] : attempts;
+  let difficultyPromise = Promise.resolve(null);
+
+  // Fallback path: populate test & fetch question difficulties
   if (!allSnapshotsValid) {
     if (isAnalyticsSnapshotsEnabled()) {
       let missingCount = 0;
@@ -326,11 +337,11 @@ export const getStudentDashboardData = async (studentId) => {
             : "MALFORMED_SNAPSHOTS",
       });
     }
-    const needsTestPopulate = attempts.some(
+    const needsTestPopulate = fallbackAttempts.some(
       (a) => !a.testId || typeof a.testId !== "object" || !a.testId.title
     );
     if (needsTestPopulate) {
-      await TestAttempt.populate(attempts, {
+      await TestAttempt.populate(fallbackAttempts, {
         path: "testId",
         select: "title visibility type duration topicIds subjectIds subjectId difficulty passingPercentage",
         populate: [
@@ -342,19 +353,120 @@ export const getStudentDashboardData = async (studentId) => {
     }
 
     const allQuestionIds = new Set();
-    attempts.forEach((attempt) => {
+    fallbackAttempts.forEach((attempt) => {
       (attempt.answers || []).forEach((a) => {
         if (a.questionId) allQuestionIds.add(String(a.questionId));
       });
+      // Skipped questions have no answer entry; include them so they get
+      // their real difficulty instead of defaulting to "Medium".
+      (attempt.questionSnapshots || []).forEach((q) => {
+        if (q?.questionId) allQuestionIds.add(String(q.questionId));
+      });
     });
 
-    const questions = await Question.find({ _id: { $in: Array.from(allQuestionIds) } })
+    // Started now, awaited together with the other independent lookups below.
+    difficultyPromise = Question.find({ _id: { $in: Array.from(allQuestionIds) } })
       .select("difficulty")
       .lean();
+  }
+
+  // The analytics snapshot only keeps ONE subject per attempt, and in the
+  // snapshot fast path attempt.testId isn't populated at all — so read the
+  // real subject list of every attempted test in one small query. A test built
+  // from several subjects then shows under each of them.
+  const attemptedTestIds = [
+    ...new Set(
+      attempts
+        .map((a) => String(a.testId?._id || a.testId || ""))
+        .filter((id) => mongoose.Types.ObjectId.isValid(id))
+    ),
+  ];
+  const attemptedTestsPromise = attemptedTestIds.length
+    ? Test.find({ _id: { $in: attemptedTestIds } })
+        .select("subjectIds")
+        .populate({ path: "subjectIds", select: "name" })
+        .lean()
+    : Promise.resolve([]);
+
+  // Per-subject results for each attempt, taken from each question's OWN
+  // subject. Without this every subject of a test could only inherit the whole
+  // test's score. Batched lookups for all the student's attempts.
+  const snapshotQuestionIds = new Set();
+  attempts.forEach((attempt) => {
+    (attempt.questionSnapshots || []).forEach((q) => {
+      if (q?.questionId) snapshotQuestionIds.add(String(q.questionId));
+    });
+  });
+  const subjectQuestionsPromise = snapshotQuestionIds.size > 0
+    ? Question.find({ _id: { $in: Array.from(snapshotQuestionIds) } })
+        .select("subjectId")
+        .lean()
+    : Promise.resolve([]);
+
+  // The three lookups above are independent of each other, so they run
+  // together instead of one after another (each is a separate round trip).
+  const [difficultyQuestions, attemptedTests, subjectQuestions] = await Promise.all([
+    difficultyPromise,
+    attemptedTestsPromise,
+    subjectQuestionsPromise,
+  ]);
+  if (difficultyQuestions) {
     questionDifficultyMap = new Map(
-      questions.map((q) => [String(q._id), toDifficultyLabel(q.difficulty)])
+      difficultyQuestions.map((q) => [String(q._id), toDifficultyLabel(q.difficulty)])
     );
   }
+  const testSubjectNamesMap = new Map(
+    attemptedTests.map((t) => [
+      String(t._id),
+      (t.subjectIds || [])
+        .map((subject) => subject?.name?.trim())
+        .filter(Boolean),
+    ])
+  );
+
+  const questionSubjectIdMap = new Map();
+  const subjectNameById = new Map();
+  if (snapshotQuestionIds.size > 0) {
+    const subjectIds = new Set();
+    subjectQuestions.forEach((q) => {
+      if (q.subjectId) {
+        questionSubjectIdMap.set(String(q._id), String(q.subjectId));
+        subjectIds.add(String(q.subjectId));
+      }
+    });
+    if (subjectIds.size > 0) {
+      const subjectDocs = await Subject.find({ _id: { $in: Array.from(subjectIds) } })
+        .select("name")
+        .lean();
+      subjectDocs.forEach((sub) => {
+        if (sub?.name?.trim()) subjectNameById.set(String(sub._id), sub.name.trim());
+      });
+    }
+  }
+
+  const buildSubjectStats = (attempt) => {
+    const answerByQuestion = new Map(
+      (attempt.answers || []).map((a) => [String(a.questionId), a])
+    );
+    const stats = new Map();
+    (attempt.questionSnapshots || []).forEach((q) => {
+      const qId = String(q.questionId);
+      const subject = subjectNameById.get(questionSubjectIdMap.get(qId));
+      if (!subject) return;
+      const entry = stats.get(subject) || { subject, correct: 0, wrong: 0, skipped: 0, total: 0 };
+      const answer = answerByQuestion.get(qId);
+      entry.total += 1;
+      if (!answer || !answerHasValue(answer)) entry.skipped += 1;
+      else if (answer.isCorrect === true) entry.correct += 1;
+      else if (answer.isCorrect === false) entry.wrong += 1;
+      // answered but not yet evaluated: counted in total only
+      stats.set(subject, entry);
+    });
+    return Array.from(stats.values()).map((e) => ({
+      ...e,
+      percentage: e.total > 0 ? Math.round((e.correct / e.total) * 100) : 0,
+    }));
+  };
 
   let totalQuestionsAttempted = 0;
   let totalCorrectAnswers = 0;
@@ -439,22 +551,36 @@ export const getStudentDashboardData = async (studentId) => {
     // Keep topic information separate for the allTests.topic field.
     const subjectNames = new Set();
 
-    if (snapshot?.subject?.trim()) {
-      subjectNames.add(snapshot.subject.trim());
-    } else if (Array.isArray(attempt.testId?.subjectIds)) {
+    // Every subject the test was built from, so a multi-subject test shows up
+    // under each of them. The analytics snapshot only stores the first subject,
+    // so it is just a fallback for when the test's subjects aren't available.
+    // Subjects come from the questions themselves; the test's own subject
+    // list is the fallback when no question subject could be resolved.
+    const subjectStats = buildSubjectStats(attempt);
+    subjectStats.forEach((st) => subjectNames.add(st.subject));
+
+    if (subjectNames.size === 0) {
+      (testSubjectNamesMap.get(String(attempt.testId?._id || attempt.testId)) || []).forEach(
+        (name) => subjectNames.add(name)
+      );
+    }
+
+    if (subjectNames.size === 0 && Array.isArray(attempt.testId?.subjectIds)) {
       attempt.testId.subjectIds.forEach((subject) => {
         if (subject?.name?.trim()) {
           subjectNames.add(subject.name.trim());
         }
       });
+    }
 
-      // Legacy/single-subject schema fallback.
-      if (subjectNames.size === 0) {
-        const subjectName = resolveSubjectName(attempt.testId);
-        if (subjectName) subjectNames.add(subjectName);
-      }
-    } else {
-      subjectNames.add(resolveSubjectName(attempt.testId));
+    if (subjectNames.size === 0 && snapshot?.subject?.trim()) {
+      subjectNames.add(snapshot.subject.trim());
+    }
+
+    // Legacy/single-subject schema fallback.
+    if (subjectNames.size === 0) {
+      const subjectName = resolveSubjectName(attempt.testId);
+      if (subjectName) subjectNames.add(subjectName);
     }
 
     if (subjectNames.size === 0) {
@@ -556,6 +682,8 @@ export const getStudentDashboardData = async (studentId) => {
         snapshot?.difficulty || attempt.testId?.difficulty
       ),
       subject: subject,
+      subjects: Array.from(subjectNames),
+      subjectStats,
       topic: primaryTopic,
       difficultyBreakdown,
       totalQuestions: totalQ,

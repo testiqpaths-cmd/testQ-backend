@@ -3,6 +3,7 @@ import Test from "./models/test.model.js";
 import TestSeries from "./models/testSeries.model.js";
 import TestAssignment from "../../models/testAssignment.model.js";
 import { computeTestStatus } from "./utils/status.js";
+import { NOT_COMPANY_TEST_FILTER, isInCompanySeries } from "./utils/testContext.js";
 import { ensureCreatorOrgIncluded, resolveAllowedStudents, resolveMandatoryOrgTestIds } from "./utils/visibility.js";
 import UserModel from "../../models/user.model.js";
 import { dispatchNotificationToStudents } from "../notification/notification.service.js";
@@ -203,6 +204,10 @@ export const getLeaderboardTests = async ({ userId = null, userRole = null, user
         "createdBy.role": { $in: creatorRoleFilter },
       },
     },
+    // Leaderboard lists never read the question snapshots, and carrying them
+    // through the lookups below made this query heavy; allowedStudents would
+    // expose other students' ids.
+    { $project: { questionSnapshot: 0, allowedStudents: 0 } },
     {
       $lookup: {
         from: "users",
@@ -255,6 +260,13 @@ export const getLeaderboardTests = async ({ userId = null, userRole = null, user
     status: computeTestStatus(test),
   }));
 
+  // creatorUser / creatorOrganization are looked up only to filter and to
+  // build creatorName / creatorEmail / creatorOrganizationName. They hold the
+  // creator's whole user record (including the password hash and one-time
+  // codes), so they must never be sent to the client.
+  const stripCreatorRecords = (list) =>
+    list.map(({ creatorUser: _creatorUser, creatorOrganization: _creatorOrganization, ...rest }) => rest);
+
   // A student should only be offered a leaderboard for a test they actually
   // accepted — otherwise every published admin/org test shows up as a
   // selectable leaderboard source regardless of whether this student was ever
@@ -274,7 +286,7 @@ export const getLeaderboardTests = async ({ userId = null, userRole = null, user
         .map((a) => String(a.testId))
     );
 
-    return withLiveStatus.filter((t) => acceptedTestIds.has(String(t._id)));
+    return stripCreatorRecords(withLiveStatus.filter((t) => acceptedTestIds.has(String(t._id))));
   }
 
   // An organization should only see its own tests' leaderboards, plus any
@@ -286,20 +298,22 @@ export const getLeaderboardTests = async ({ userId = null, userRole = null, user
     const orgId = userOrganizationId ? String(userOrganizationId) : null;
     if (!orgId) return [];
 
-    return withLiveStatus.filter((t) => {
-      const creatorOrgId = t.creatorUser?.organizationId ? String(t.creatorUser.organizationId) : null;
-      const isOwnTest = creatorOrgId === orgId;
-      const isAdminTestTargetingUs =
-        t.createdBy?.role === "IQPATH_ADMIN" &&
-        t.visibility === "ORG_ONLY" &&
-        Array.isArray(t.allowedOrganizations) &&
-        t.allowedOrganizations.some((id) => String(id) === orgId);
+    return stripCreatorRecords(
+      withLiveStatus.filter((t) => {
+        const creatorOrgId = t.creatorUser?.organizationId ? String(t.creatorUser.organizationId) : null;
+        const isOwnTest = creatorOrgId === orgId;
+        const isAdminTestTargetingUs =
+          t.createdBy?.role === "IQPATH_ADMIN" &&
+          t.visibility === "ORG_ONLY" &&
+          Array.isArray(t.allowedOrganizations) &&
+          t.allowedOrganizations.some((id) => String(id) === orgId);
 
-      return isOwnTest || isAdminTestTargetingUs;
-    });
+        return isOwnTest || isAdminTestTargetingUs;
+      })
+    );
   }
 
-  return withLiveStatus;
+  return stripCreatorRecords(withLiveStatus);
 };
 
 export const getMyTests = async ({ userId, search = "" }) => {
@@ -414,6 +428,10 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     isPublished: true,
     isDeleted: { $ne: 1 },
     isIQRoomTest: { $ne: true },
+    // Company-wise tests are a separate feature (Company Hub): they are always
+    // available for practice, have no schedule and need no acceptance, so they
+    // never belong on the assigned-tests list.
+    ...NOT_COMPANY_TEST_FILTER,
   };
 
   // Combined into $and (rather than competing top-level $or keys) since the
@@ -463,14 +481,24 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
   // Read-only list view; .lean() below means `test` is already a plain
   // object, so the two spreads further down use `...test` directly instead
   // of `...test.toObject()` (which would throw on a lean result).
-  const tests = await Test.find(filters)
+  // questionSnapshot (full question text, options and correct answers for
+  // every question) is by far the heaviest field and this list never reads
+  // it, so it is excluded to keep the response small and fast (the attempt
+  // flow loads it from the test document itself). allowedStudents is only
+  // needed for the filter above and would otherwise expose other students'
+  // ids in the response.
+  const allTests = await Test.find(filters)
+    .select("-questionSnapshot -allowedStudents")
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
-      select: "title description visibility createdAt plannedTestCount createdBy allowedOrganizations",
+      select: "title description visibility createdAt plannedTestCount createdBy allowedOrganizations category",
     })
     .sort({ createdAt: -1 })
     .lean();
+  // A test inside a company-wise series stays out of this list even if the
+  // test document itself carries no company id.
+  const tests = allTests.filter((t) => !isInCompanySeries(t));
 
   // Resolve Organization Names for tests created by or assigned from an ORGANIZATION
   const orgCreatorUserIds = [
