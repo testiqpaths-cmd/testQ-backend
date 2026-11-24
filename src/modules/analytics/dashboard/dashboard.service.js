@@ -25,6 +25,28 @@ export const isAnalyticsSummariesEnabled = () => process.env.USE_ANALYTICS_SUMMA
 export const isSummaryEngagementTrendEnabled = () => process.env.USE_SUMMARY_ENGAGEMENT_TREND !== "false";
 export const isAnalyticsSnapshotsEnabled = () => process.env.USE_ANALYTICS_SNAPSHOTS !== "false";
 
+let subjectCache = {
+  expiresAt: 0,
+  map: new Map(),
+};
+
+const getSubjectMap = async () => {
+  if (Date.now() < subjectCache.expiresAt && subjectCache.map.size > 0) {
+    return subjectCache.map;
+  }
+  try {
+    const subjects = await Subject.find().select("name").lean();
+    const map = new Map(subjects.map((s) => [String(s._id), (s.name || "").trim()]));
+    subjectCache = {
+      expiresAt: Date.now() + 10 * 60 * 1000,
+      map,
+    };
+    return map;
+  } catch (e) {
+    return subjectCache.map;
+  }
+};
+
 
 const DIFFICULTY_LABELS = ["Easy", "Medium", "Hard"];
 
@@ -425,23 +447,13 @@ export const getStudentDashboardData = async (studentId) => {
   );
 
   const questionSubjectIdMap = new Map();
-  const subjectNameById = new Map();
+  const subjectNameById = await getSubjectMap();
   if (snapshotQuestionIds.size > 0) {
-    const subjectIds = new Set();
     subjectQuestions.forEach((q) => {
       if (q.subjectId) {
         questionSubjectIdMap.set(String(q._id), String(q.subjectId));
-        subjectIds.add(String(q.subjectId));
       }
     });
-    if (subjectIds.size > 0) {
-      const subjectDocs = await Subject.find({ _id: { $in: Array.from(subjectIds) } })
-        .select("name")
-        .lean();
-      subjectDocs.forEach((sub) => {
-        if (sub?.name?.trim()) subjectNameById.set(String(sub._id), sub.name.trim());
-      });
-    }
   }
 
   const buildSubjectStats = (attempt) => {
@@ -1082,9 +1094,9 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
 
   const supportFilter = orgId ? { organizationId: orgId } : {};
   const testFilter = isAdmin
-    ? { isDeleted: { $ne: 1 } }
+    ? { isDeleted: 0 }
     : {
-      isDeleted: { $ne: 1 },
+      isDeleted: 0,
       $or: [
         ...(adminUserId ? [{ "createdBy.userId": adminUserId }] : []),
         ...(orgId ? [{ allowedOrganizations: orgId }] : []),
@@ -1156,57 +1168,114 @@ const buildAdminOrgDashboardData = async ({ orgId = null, adminUserId = null, is
       })();
 
   // Stream 1: Overview and KPI counts (launches immediately in parallel with scoping)
-  const countsPromise = Promise.all([
-    User.countDocuments(studentFilter),
-    isAdmin ? Organization.countDocuments() : Promise.resolve(0),
-    Test.countDocuments(withTestFilter(liveActiveCondition)),
-    isAdmin ? Test.countDocuments({ ...testFilter, ...liveActiveCondition, "createdBy.role": "IQPATH_ADMIN" }) : Promise.resolve(0),
-    isAdmin ? Test.countDocuments({ ...testFilter, ...liveActiveCondition, "createdBy.role": "ORGANIZATION" }) : Promise.resolve(0),
-    // The real "how many tests exist" count — every status, not just active.
-    Test.countDocuments(testFilter),
-    Test.countDocuments(withTestFilter(liveCompletedCondition)),
-    Test.countDocuments(withTestFilter({
-      $or: [
-        { startTime: { $gte: start, $lt: end } },
-        { createdAt: { $gte: start, $lt: end } },
-      ],
-    })),
-    Test.countDocuments(withTestFilter(liveScheduledCondition)),
-    HelpSupport.countDocuments(supportFilter),
-    HelpSupport.countDocuments({ ...supportFilter, status: "pending" }),
-    HelpSupport.countDocuments({ ...supportFilter, status: "resolved" }),
-    UserSubscription.aggregate([
-      { $match: { status: "ACTIVE" } },
-      {
-        $lookup: {
-          from: "plans",
-          localField: "planId",
-          foreignField: "_id",
-          as: "plan"
-        }
-      },
-      { $unwind: "$plan" },
-      {
-        $lookup: {
-          from: "roles",
-          localField: "plan.roleId",
-          foreignField: "_id",
-          as: "role"
-        }
-      },
-      { $unwind: "$role" },
-      {
-        $group: {
-          _id: { roleName: "$role.name", planName: "$plan.name", planId: "$plan._id", price: "$plan.price" },
-          count: { $sum: 1 }
-        }
-      }
-    ]),
-    Test.countDocuments({ ...testFilter, isPublished: false }),
-    Test.countDocuments({ ...testFilter, isPublished: true }),
-    TestSeries.countDocuments(isAdmin ? {} : seriesFilter),
-    User.countDocuments({ ...studentFilter, createdAt: { $gte: monthStart } }),
-  ]);
+  // Single aggregated $facet pass for all test counts instead of 9 individual count scans
+  const testCountsPromise = (async () => {
+    try {
+      const [facetResult] = await Test.aggregate([
+        { $match: testFilter },
+        {
+          $facet: {
+            active: [{ $match: liveActiveCondition }, { $count: "c" }],
+            adminActive: isAdmin ? [{ $match: { ...liveActiveCondition, "createdBy.role": "IQPATH_ADMIN" } }, { $count: "c" }] : [],
+            orgActive: isAdmin ? [{ $match: { ...liveActiveCondition, "createdBy.role": "ORGANIZATION" } }, { $count: "c" }] : [],
+            total: [{ $count: "c" }],
+            completed: [{ $match: liveCompletedCondition }, { $count: "c" }],
+            today: [{ $match: { $or: [{ startTime: { $gte: start, $lt: end } }, { createdAt: { $gte: start, $lt: end } }] } }, { $count: "c" }],
+            scheduled: [{ $match: liveScheduledCondition }, { $count: "c" }],
+            draft: [{ $match: { isPublished: false } }, { $count: "c" }],
+            published: [{ $match: { isPublished: true } }, { $count: "c" }],
+          },
+        },
+      ]);
+      return {
+        active: facetResult?.active?.[0]?.c || 0,
+        adminActive: facetResult?.adminActive?.[0]?.c || 0,
+        orgActive: facetResult?.orgActive?.[0]?.c || 0,
+        total: facetResult?.total?.[0]?.c || 0,
+        completed: facetResult?.completed?.[0]?.c || 0,
+        today: facetResult?.today?.[0]?.c || 0,
+        scheduled: facetResult?.scheduled?.[0]?.c || 0,
+        draft: facetResult?.draft?.[0]?.c || 0,
+        published: facetResult?.published?.[0]?.c || 0,
+      };
+    } catch (e) {
+      // Fallback
+      return {
+        active: 0, adminActive: 0, orgActive: 0, total: 0,
+        completed: 0, today: 0, scheduled: 0, draft: 0, published: 0,
+      };
+    }
+  })();
+
+  const countsPromise = (async () => {
+    const [
+      totalStudents,
+      totalOrganizations,
+      testCounts,
+      supportTotal,
+      supportPending,
+      supportCompleted,
+      planDistributionRaw,
+      totalTestSeries,
+      newStudentsThisMonth,
+    ] = await Promise.all([
+      User.countDocuments(studentFilter),
+      isAdmin ? Organization.countDocuments() : Promise.resolve(0),
+      testCountsPromise,
+      HelpSupport.countDocuments(supportFilter),
+      HelpSupport.countDocuments({ ...supportFilter, status: "pending" }),
+      HelpSupport.countDocuments({ ...supportFilter, status: "resolved" }),
+      UserSubscription.aggregate([
+        { $match: { status: "ACTIVE" } },
+        {
+          $lookup: {
+            from: "plans",
+            localField: "planId",
+            foreignField: "_id",
+            as: "plan",
+          },
+        },
+        { $unwind: "$plan" },
+        {
+          $lookup: {
+            from: "roles",
+            localField: "plan.roleId",
+            foreignField: "_id",
+            as: "role",
+          },
+        },
+        { $unwind: "$role" },
+        {
+          $group: {
+            _id: { roleName: "$role.name", planName: "$plan.name", planId: "$plan._id", price: "$plan.price" },
+            count: { $sum: 1 },
+          },
+        },
+      ]),
+      TestSeries.countDocuments(isAdmin ? {} : seriesFilter),
+      User.countDocuments({ ...studentFilter, createdAt: { $gte: monthStart } }),
+    ]);
+
+    return [
+      totalStudents,
+      totalOrganizations,
+      testCounts.active,
+      testCounts.adminActive,
+      testCounts.orgActive,
+      testCounts.total,
+      testCounts.completed,
+      testCounts.today,
+      testCounts.scheduled,
+      supportTotal,
+      supportPending,
+      supportCompleted,
+      planDistributionRaw,
+      testCounts.draft,
+      testCounts.published,
+      totalTestSeries,
+      newStudentsThisMonth,
+    ];
+  })();
 
   // Stream 2: Assignment counts
   const assignmentsPromise = (async () => {

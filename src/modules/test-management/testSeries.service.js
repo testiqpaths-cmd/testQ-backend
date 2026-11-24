@@ -594,26 +594,28 @@ export const getAssignedSeries = async ({ studentId = null, userRole = null, sea
     .lean();
 
   const Organization = (await import("../../models/organization.model.js")).default;
+  const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
   const orgIds = [
     ...new Set(
       seriesList.flatMap((s) => s.allowedOrganizations || []).filter(Boolean).map(String)
     ),
   ];
-  const orgs = orgIds.length ? await Organization.find({ _id: { $in: orgIds } }).select("name").lean() : [];
-  const orgNameMap = new Map(orgs.map((o) => [String(o._id), o.name]));
-
   const seriesIds = seriesList.map((s) => s._id);
-  let seriesAssignmentMap = new Map();
-  if (studentId && seriesIds.length) {
-    const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
-    const assignments = await TestSeriesAssignment.find({
-      studentId,
-      seriesId: { $in: seriesIds },
-    }).lean();
-    seriesAssignmentMap = new Map(
-      assignments.map((a) => [String(a.seriesId), a.status])
-    );
-  }
+
+  const [orgs, assignments] = await Promise.all([
+    orgIds.length ? Organization.find({ _id: { $in: orgIds } }).select("name").lean() : Promise.resolve([]),
+    studentId && seriesIds.length
+      ? TestSeriesAssignment.find({
+          studentId,
+          seriesId: { $in: seriesIds },
+        }).lean()
+      : Promise.resolve([]),
+  ]);
+
+  const orgNameMap = new Map(orgs.map((o) => [String(o._id), o.name]));
+  const seriesAssignmentMap = new Map(
+    assignments.map((a) => [String(a.seriesId), a.status])
+  );
 
   return seriesList
     .map((s) => {

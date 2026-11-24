@@ -162,31 +162,15 @@ const userSchema = new Schema(
 );
 
 // Only enforce uniqueness when value is present and non-empty.
-userSchema.index(
-  { firebaseUid: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      firebaseUid: { $exists: true, $type: "string", $ne: "" },
-    },
-  },
-);
-
-userSchema.index(
-  { phone: 1 },
-  {
-    unique: true,
-    partialFilterExpression: {
-      phone: { $exists: true, $type: "string", $ne: "" },
-    },
-  },
-);
+userSchema.index({ firebaseUid: 1 }, { unique: true, sparse: true });
+userSchema.index({ phone: 1 }, { unique: true, sparse: true });
 
 // "List this org's students" (role+organizationId) is the standard filter
 // shape used repeatedly across leaderboards, dashboards, and admin user
 // lists — every isDeleted find/findOneAndUpdate implicitly includes that
 // field too via the hook below, so it's part of the index as well.
 userSchema.index({ role: 1, organizationId: 1, isDeleted: 1 });
+userSchema.index({ role: 1, isDeleted: 1, createdAt: -1 });
 
 userSchema.pre(/^find/, function () {
   if (this.getOptions?.().includeDeleted === true) return;

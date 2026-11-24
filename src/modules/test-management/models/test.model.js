@@ -72,6 +72,7 @@ const testSchema = new Schema({
 // lookups) — every one of those was a full collection scan that gets slower
 // as the platform's total test count grows.
 testSchema.index({ isDeleted: 1, isPublished: 1, isIQRoomTest: 1, createdAt: -1 });
+testSchema.index({ isDeleted: 1, isPublished: 1, isIQRoomTest: 1, companyId: 1, createdAt: -1 });
 testSchema.index({ "createdBy.userId": 1, isDeleted: 1, createdAt: -1 });
 testSchema.index({ status: 1, isDeleted: 1 });
 testSchema.index({ testSeriesId: 1, companyStageOrder: 1 });

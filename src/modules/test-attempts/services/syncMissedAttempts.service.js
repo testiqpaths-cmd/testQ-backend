@@ -92,8 +92,8 @@ export const syncMissedAttemptsForStudent = async (studentId) => {
     const expiredTests = await Test.find({
       _id: { $in: liveAssignments.map((a) => a.testId) },
       isPublished: true,
-      isDeleted: { $ne: 1 },
-      isIQRoomTest: { $ne: true },
+      isDeleted: 0,
+      isIQRoomTest: false,
       endTime: { $lt: now },
     })
       .select("_id endTime totalMarks duration startTime createdAt")
