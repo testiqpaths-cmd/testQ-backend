@@ -5,6 +5,15 @@ import Subject from "../models/subject.model.js";
 import Topic from "../models/topic.model.js";
 import TestAttempt from "../models/testAttempt.model.js";
 import TestAssignment from "../models/testAssignment.model.js";
+import Test from "../models/test.model.js";
+import User from "../modules/auth/models/User.model.js";
+import Question from "../models/question.model.js";
+import TestSeries from "../models/testSeries.model.js";
+import TestSeriesAssignment from "../models/testSeriesAssignment.model.js";
+import Organization from "../models/organization.model.js";
+import StudentPerformanceSummary from "../models/studentPerformanceSummary.model.js";
+import DailyStudentActivity from "../models/dailyStudentActivity.model.js";
+import PlatformDailySummary from "../models/platformDailySummary.model.js";
 
 const ensureCriticalIndexes = async () => {
   // Safe, non-destructive: creates missing schema indexes without dropping unmanaged database indexes.
@@ -19,6 +28,15 @@ const ensureCriticalIndexes = async () => {
       Topic.createIndexes(),
       TestAttempt.createIndexes(),
       TestAssignment.createIndexes(),
+      Test.createIndexes(),
+      User.createIndexes(),
+      Question.createIndexes(),
+      TestSeries.createIndexes(),
+      TestSeriesAssignment.createIndexes(),
+      Organization.createIndexes(),
+      StudentPerformanceSummary.createIndexes(),
+      DailyStudentActivity.createIndexes(),
+      PlatformDailySummary.createIndexes(),
     ]);
 
     // Cleanup legacy stale index from older schema version on userfeatureusages
@@ -34,7 +52,7 @@ const ensureCriticalIndexes = async () => {
       // Ignore if index doesn't exist
     }
 
-    logger.info("Subject/Topic/TestAttempt/TestAssignment indexes ensured successfully (non-destructive)");
+    logger.info("Critical indexes ensured successfully (non-destructive)");
   } catch (error) {
     logger.warn(`Index verification skipped: ${error.message}`);
   }
@@ -43,7 +61,13 @@ const ensureCriticalIndexes = async () => {
 export const connectDB = async () => {
   try {
     logger.info(`Connecting to MongoDB: ${env.MONGO_URI}`);
-    await mongoose.connect(env.MONGO_URI);
+    await mongoose.connect(env.MONGO_URI, {
+      maxPoolSize: 50,
+      minPoolSize: 10,
+      maxIdleTimeMS: 60000,
+      serverSelectionTimeoutMS: 15000,
+      socketTimeoutMS: 45000,
+    });
     await ensureCriticalIndexes();
     logger.info("MongoDB connected successfully");
   } catch (err) {
