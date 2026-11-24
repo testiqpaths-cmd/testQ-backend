@@ -21,7 +21,10 @@ router.get("/audio/stream/:audioHash", aiInterviewController.streamQuestionAudio
 // database/migrations/seed-ai-interview-feature.js — so this is the gating
 // hook, not an active restriction yet).
 router.use(authMiddleware);
-router.use(featureMiddleware("AI_INTERVIEW"));
+// Plan must include AI interviews, but don't require remaining quota here:
+// that would block loading/starting/answering/viewing a session that used
+// the user's last slot. Quota is enforced on the create routes below.
+router.use(featureMiddleware("AI_INTERVIEW", false, { enforceLimit: false }));
 
 // Org/Admin monitoring — must precede the "/:id" catch-all
 const orgOnly = roleMiddleware("ORGANIZATION", "IQPATH_ADMIN");

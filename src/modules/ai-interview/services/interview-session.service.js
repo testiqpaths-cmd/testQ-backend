@@ -331,7 +331,7 @@ export class InterviewSessionService {
     // 3. Create Session
     const session = new InterviewSession({
       userId,
-      reservationId: (data && data.reservationId) || (payload && payload.reservationId) || null,
+      reservationId: payload?.reservationId || null,
       interviewId,
       interviewType: "RESUME",
       role,
