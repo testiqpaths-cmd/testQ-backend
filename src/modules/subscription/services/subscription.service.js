@@ -465,9 +465,12 @@ export const checkFeatureAccess = async (
     await usageRecord.save();
   }
 
-  // If incrementBy === 0, just check access without consuming usage
+  // If incrementBy === 0, just check access without consuming usage.
+  // options.skipLimitCheck: only verify the plan includes the feature, don't
+  // require remaining quota. Used to gate access to things the user already
+  // created (e.g. an AI interview session that consumed their last slot).
   if (incrementBy === 0) {
-    if (usageRecord.usedCount >= limit) {
+    if (!options.skipLimitCheck && usageRecord.usedCount >= limit) {
       throw new ApiError(
         402,
         `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,

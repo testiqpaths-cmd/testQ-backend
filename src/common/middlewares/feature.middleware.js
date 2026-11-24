@@ -6,8 +6,10 @@ import { checkFeatureAccess } from "../../modules/subscription/services/subscrip
  * Middleware to restrict access based on feature availability in the user's plan.
  * @param {string} featureKey - The unique key of the feature to check (e.g., 'IQ_ROOM', 'CREATE_TEST')
  * @param {boolean} incrementUsage - Whether to increment the usage count for this feature on this request
+ * @param {{ enforceLimit?: boolean }} [opts] - enforceLimit=false only checks the plan includes the
+ *   feature, without requiring remaining quota (for accessing already-created resources).
  */
-export const featureMiddleware = (featureKey, incrementUsage = false) => {
+export const featureMiddleware = (featureKey, incrementUsage = false, { enforceLimit = true } = {}) => {
   return async (req, res, next) => {
     try {
       const userId = req.user?._id;
@@ -23,7 +25,8 @@ export const featureMiddleware = (featureKey, incrementUsage = false) => {
         userId,
         featureKey,
         incrementUsage ? 1 : 0,
-        reservationId
+        reservationId,
+        { skipLimitCheck: !incrementUsage && !enforceLimit }
       );
 
       if (reservationId) {
