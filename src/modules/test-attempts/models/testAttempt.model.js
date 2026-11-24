@@ -329,13 +329,9 @@ testAttemptSchema.index(
 // admin dashboard's platform-wide "most recent 100" query.
 testAttemptSchema.index({ studentId: 1, status: 1, submittedAt: 1 });
 testAttemptSchema.index({ status: 1, submittedAt: -1 });
-
-// The only index touching testId is a unique partial index scoped to
-// status:"IN_PROGRESS" (above), which the query planner can't use for any
-// query that isn't also filtering that exact status — so every testId-only
-// or testId+status lookup (leaderboards, per-test stats, detailed analysis)
-// was a full collection scan.
+testAttemptSchema.index({ studentId: 1, testId: 1, status: 1 });
 testAttemptSchema.index({ testId: 1, status: 1 });
+testAttemptSchema.index({ studentId: 1, testCategory: 1, status: 1, submittedAt: -1 });
 // Backs the auto-submit cron, which runs every 5 minutes scanning for
 // expired in-progress attempts.
 testAttemptSchema.index({ status: 1, endsAt: 1 });

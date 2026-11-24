@@ -181,11 +181,23 @@ export async function deleteTest(test) {
   }
 }
 
+let orgCache = {
+  expiresAt: 0,
+  orgNameById: new Map(),
+  orgNameByAdminId: new Map(),
+  creatorOrgIdMap: new Map(),
+};
+
 export const getAllTests = async () => {
   // Exclude tests that belong to a series or IQ Room. Read-only list view —
-  // the controller already handles either a Mongoose doc or a plain object
-  // (`t.toObject ? t.toObject() : {...t}`), so .lean() is a safe, free win.
-  return await Test.find({ isSeriesTest: { $ne: true }, isIQRoomTest: { $ne: true } })
+  // exclude questionSnapshot and allowedStudents to prevent huge payload transfers.
+  return await Test.find({
+    isDeleted: 0,
+    isSeriesTest: { $ne: true },
+    isIQRoomTest: false,
+  })
+    .select("-questionSnapshot -allowedStudents")
+    .populate("subjectId", "name")
     .sort({ createdAt: -1 })
     .lean();
 };
@@ -319,7 +331,7 @@ export const getLeaderboardTests = async ({ userId = null, userRole = null, user
 export const getMyTests = async ({ userId, search = "" }) => {
   const filters = {
     "createdBy.userId": userId,
-    isDeleted: { $ne: 1 },
+    isDeleted: 0,
   };
 
   if (String(search || "").trim()) {
@@ -331,10 +343,11 @@ export const getMyTests = async ({ userId, search = "" }) => {
 
   // Exclude series and IQ Room tests from normal user's test listings
   filters.isSeriesTest = { $ne: true };
-  filters.isIQRoomTest = { $ne: true };
+  filters.isIQRoomTest = false;
 
-  // Read-only list view — same defensive controller handling as getAllTests.
+  // Read-only list view — drop questionSnapshot and allowedStudents to keep payload small.
   return Test.find(filters)
+    .select("-questionSnapshot -allowedStudents")
     .populate("subjectId", "name")
     .sort({ createdAt: -1 })
     .lean();
@@ -426,8 +439,8 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
   // published (which recomputes status away from "PUBLISHED" too).
   const filters = {
     isPublished: true,
-    isDeleted: { $ne: 1 },
-    isIQRoomTest: { $ne: true },
+    isDeleted: 0,
+    isIQRoomTest: false,
     // Company-wise tests are a separate feature (Company Hub): they are always
     // available for practice, have no schedule and need no acceptance, so they
     // never belong on the assigned-tests list.
@@ -524,44 +537,57 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     ]),
   ];
 
-  const creatorUsers = orgCreatorUserIds.length
-    ? await UserModel.find({ _id: { $in: orgCreatorUserIds } }).select("organizationId").lean()
-    : [];
+  let creatorOrgIdMap = orgCache.creatorOrgIdMap;
+  let orgNameById = orgCache.orgNameById;
+  let orgNameByAdminId = orgCache.orgNameByAdminId;
 
-  const creatorOrgIdMap = new Map(
-    creatorUsers
-      .filter((c) => c.organizationId)
-      .map((c) => [String(c._id), String(c.organizationId)])
-  );
+  if (Date.now() > orgCache.expiresAt || !orgNameById.size) {
+    const creatorUsers = orgCreatorUserIds.length
+      ? await UserModel.find({ _id: { $in: orgCreatorUserIds } }).select("organizationId").lean()
+      : [];
 
-  const allOrgIds = [
-    ...new Set([
-      ...allowedOrgIds,
-      ...Array.from(creatorOrgIdMap.values()),
-    ]),
-  ];
+    creatorOrgIdMap = new Map(
+      creatorUsers
+        .filter((c) => c.organizationId)
+        .map((c) => [String(c._id), String(c.organizationId)])
+    );
 
-  const Organization = (await import("../../models/organization.model.js")).default;
-  const orgConditions = [];
-  if (allOrgIds.length) {
-    orgConditions.push({ _id: { $in: allOrgIds } });
-  }
-  if (orgCreatorUserIds.length) {
-    orgConditions.push({ admins: { $in: orgCreatorUserIds } });
-  }
+    const allOrgIds = [
+      ...new Set([
+        ...allowedOrgIds,
+        ...Array.from(creatorOrgIdMap.values()),
+      ]),
+    ];
 
-  const orgs = orgConditions.length
-    ? await Organization.find({ $or: orgConditions }).select("name admins").lean()
-    : [];
+    const Organization = (await import("../../models/organization.model.js")).default;
+    const orgConditions = [];
+    if (allOrgIds.length) {
+      orgConditions.push({ _id: { $in: allOrgIds } });
+    }
+    if (orgCreatorUserIds.length) {
+      orgConditions.push({ admins: { $in: orgCreatorUserIds } });
+    }
 
-  const orgNameById = new Map(orgs.map((o) => [String(o._id), o.name]));
-  const orgNameByAdminId = new Map();
-  for (const org of orgs) {
-    if (Array.isArray(org.admins)) {
-      for (const adminId of org.admins) {
-        orgNameByAdminId.set(String(adminId), org.name);
+    const orgs = orgConditions.length
+      ? await Organization.find({ $or: orgConditions }).select("name admins").lean()
+      : [];
+
+    orgNameById = new Map(orgs.map((o) => [String(o._id), o.name]));
+    orgNameByAdminId = new Map();
+    for (const org of orgs) {
+      if (Array.isArray(org.admins)) {
+        for (const adminId of org.admins) {
+          orgNameByAdminId.set(String(adminId), org.name);
+        }
       }
     }
+
+    orgCache = {
+      expiresAt: Date.now() + 5 * 60 * 1000,
+      orgNameById,
+      orgNameByAdminId,
+      creatorOrgIdMap,
+    };
   }
 
   const resolveTestOrgName = (test) => {
@@ -596,13 +622,35 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
   };
 
   if (studentId) {
-    const assignments = await TestAssignment.find({
-      studentId,
-      testId: { $in: tests.map((t) => t._id) },
-    }).lean();
+    const seriesIds = [
+      ...new Set(
+        tests
+          .map((t) => t.testSeriesId?._id || t.testSeriesId)
+          .filter(Boolean)
+          .map(String)
+      ),
+    ];
+
+    const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
+    const [assignments, student, seriesAssignments] = await Promise.all([
+      TestAssignment.find({
+        studentId,
+        testId: { $in: tests.map((t) => t._id) },
+      }).lean(),
+      UserModel.findById(studentId).select("organizationId").lean(),
+      seriesIds.length
+        ? TestSeriesAssignment.find({
+            studentId,
+            seriesId: { $in: seriesIds },
+          }).lean()
+        : Promise.resolve([]),
+    ]);
 
     const assignmentMap = new Map(
       assignments.map((a) => [String(a.testId), a])
+    );
+    const seriesAssignmentMap = new Map(
+      seriesAssignments.map((a) => [String(a.seriesId), a])
     );
 
     // Org students can't opt out of their own organization's tests — auto-
@@ -615,7 +663,6 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
     // (e.g. the org enrolled the student after they'd already declined) —
     // only STARTED/SUBMITTED/MISSED are left alone, since those reflect an
     // attempt that already happened.
-    const student = await UserModel.findById(studentId).select("organizationId").lean();
     const standaloneTests = tests.filter((t) => !t.testSeriesId);
     const mandatoryTestIds = await resolveMandatoryOrgTestIds(standaloneTests, student?.organizationId);
     // Same self-healing reasoning as mandatory org tests above: a student
@@ -646,31 +693,6 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
       needsAutoAccept.forEach((testId) => {
         assignmentMap.set(testId, { status: "ACCEPTED", acceptedAt });
       });
-    }
-
-    // A series test's own visibility on this list is gated by whether the
-    // STUDENT accepted the series as a whole, not by its individual
-    // TestAssignment — accepting a series bulk-accepts every test in it
-    // (see testSeries.controller.js's acceptSeriesAssignment), so
-    // assignmentStatus alone would otherwise never reflect "not yet decided".
-    const seriesIds = [
-      ...new Set(
-        tests
-          .map((t) => t.testSeriesId?._id || t.testSeriesId)
-          .filter(Boolean)
-          .map(String)
-      ),
-    ];
-    let seriesAssignmentMap = new Map();
-    if (seriesIds.length) {
-      const TestSeriesAssignment = (await import("../../models/testSeriesAssignment.model.js")).default;
-      const seriesAssignments = await TestSeriesAssignment.find({
-        studentId,
-        seriesId: { $in: seriesIds },
-      }).lean();
-      seriesAssignmentMap = new Map(
-        seriesAssignments.map((a) => [String(a.seriesId), a])
-      );
     }
 
     return tests
