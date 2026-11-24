@@ -40,7 +40,7 @@ const userFeatureUsageSchema = new mongoose.Schema(
         },
         status: {
           type: String,
-          enum: ["ACTIVE", "RELEASED"],
+          enum: ["ACTIVE", "COMMITTED", "RELEASED", "EXPIRED"],
           default: "ACTIVE",
         },
         createdAt: {
