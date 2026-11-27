@@ -537,7 +537,7 @@ export const createSeriesTest = async (seriesId, data, user) => {
   return test;
 };
 
-export const getAssignedSeries = async ({ studentId = null, userRole = null, search = "" } = {}) => {
+export const getAssignedSeries = async ({ studentId = null, userRole = null, search = "", studentOrgId: passedOrgId = undefined } = {}) => {
   // Company-wise tracks live in the Company Hub (always open for practice, no
   // acceptance step), so they are not part of the assigned series list.
   const filters = { ...NOT_COMPANY_SERIES_FILTER };
@@ -549,9 +549,9 @@ export const getAssignedSeries = async ({ studentId = null, userRole = null, sea
     ];
   }
 
-  let studentOrgId = null;
+  let studentOrgId = passedOrgId ? String(passedOrgId) : null;
   const UserModel = (await import("../../models/user.model.js")).default;
-  if (studentId) {
+  if (studentId && passedOrgId === undefined) {
     const student = await UserModel.findById(studentId).select("organizationId").lean();
     studentOrgId = student?.organizationId ? String(student.organizationId) : null;
   }
@@ -586,6 +586,7 @@ export const getAssignedSeries = async ({ studentId = null, userRole = null, sea
   }
 
   const seriesList = await TestSeries.find(filters)
+    .select("-allowedStudents -__v")
     .populate({
       path: "tests",
       select: "title totalQuestions duration visibility createdAt startTime endTime isPublished scheduleType status companyStageOrder maxAttempts totalMarks",

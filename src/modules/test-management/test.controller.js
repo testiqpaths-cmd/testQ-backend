@@ -66,14 +66,15 @@ export const createTest = async (req, res) => {
 
 export async function getTest(req, res) {
   try {
-    if (req.user?.role === "STUDENT") {
+    if (req.user?.role === "STUDENT" && hasTestEnded(req.test)) {
       const User = (await import("../../modules/auth/models/User.model.js")).default;
-      const dbUser = await User.findById(req.user._id || req.user.id).select("createdAt");
+      const dbUser = await User.findById(req.user._id || req.user.id)
+        .select("createdAt")
+        .lean();
       if (
         dbUser &&
         req.test?.createdAt &&
-        new Date(req.test.createdAt) < new Date(dbUser.createdAt) &&
-        hasTestEnded(req.test)
+        new Date(req.test.createdAt) < new Date(dbUser.createdAt)
       ) {
         return res.status(403).json({
           success: false,
@@ -225,19 +226,27 @@ export const getAssignedTests = async (req, res) => {
     const userId = req.user?._id || req.user?.id;
     const search = req.query.search || "";
 
-    let userCreatedAt = null;
-    if (userId && req.user?.role === "STUDENT") {
+    let userCreatedAt = req.user?.createdAt ?? null;
+    if (userId && req.user?.role === "STUDENT" && !userCreatedAt) {
       const User = (await import("../../modules/auth/models/User.model.js")).default;
-      const dbUser = await User.findById(userId).select("createdAt");
+      const dbUser = await User.findById(userId).select("createdAt").lean();
       if (dbUser) {
         userCreatedAt = dbUser.createdAt;
       }
     }
 
+    const studentOrgId = req.user?.organizationId !== undefined ? req.user.organizationId : undefined;
+
     // Tests and series are independent reads, so fetch them in parallel
     // (run one after the other they added up past the client's timeout).
     const [tests, assignedSeries0] = await Promise.all([
-      service.getAssignedTests({ search, userCreatedAt, studentId: userId, userRole: req.user?.role }),
+      service.getAssignedTests({
+        search,
+        userCreatedAt,
+        studentId: userId,
+        userRole: req.user?.role,
+        studentOrgId,
+      }),
       (async () => {
         try {
           const testSeriesService = await import("./testSeries.service.js");
@@ -245,6 +254,7 @@ export const getAssignedTests = async (req, res) => {
             studentId: userId,
             userRole: req.user?.role,
             search,
+            studentOrgId,
           });
         } catch (seriesErr) {
           logger.error(`getAssignedTests getAssignedSeries error: ${seriesErr.message}`);

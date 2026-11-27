@@ -26,6 +26,10 @@ coverage/
 # Generated templates / exports
 *.xlsx.tmp
 
+# Load test generated fixtures & reports
+load-tests/.generated/
+load-tests/reports/
+
 # OS and IDE files
 .DS_Store
 Thumbs.db

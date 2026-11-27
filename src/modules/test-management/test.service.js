@@ -430,7 +430,7 @@ export const getTestStats = async (testId) => {
   };
 };
 
-export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null, userRole = null } = {}) => {
+export const getAssignedTests = async ({ search = "", userCreatedAt = null, studentId = null, userRole = null, studentOrgId = undefined } = {}) => {
   // `isPublished` is the canonical "is this live" flag (see computeTestStatus,
   // which every publish/update path derives `status` from). Matching on the
   // literal string "PUBLISHED" instead used to exclude every series test
@@ -501,7 +501,7 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
   // needed for the filter above and would otherwise expose other students'
   // ids in the response.
   const allTests = await Test.find(filters)
-    .select("-questionSnapshot -allowedStudents")
+    .select("-questions -questionSnapshot -allowedStudents -reservationId -excelBatchId -__v")
     .populate("subjectId", "name")
     .populate({
       path: "testSeriesId",
@@ -637,7 +637,9 @@ export const getAssignedTests = async ({ search = "", userCreatedAt = null, stud
         studentId,
         testId: { $in: tests.map((t) => t._id) },
       }).lean(),
-      UserModel.findById(studentId).select("organizationId").lean(),
+      studentOrgId !== undefined
+        ? Promise.resolve({ organizationId: studentOrgId })
+        : UserModel.findById(studentId).select("organizationId").lean(),
       seriesIds.length
         ? TestSeriesAssignment.find({
             studentId,

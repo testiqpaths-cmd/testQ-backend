@@ -62,8 +62,8 @@ export const connectDB = async () => {
   try {
     logger.info(`Connecting to MongoDB: ${env.MONGO_URI}`);
     await mongoose.connect(env.MONGO_URI, {
-      maxPoolSize: 50,
-      minPoolSize: 10,
+      maxPoolSize: Number(process.env.MONGO_MAX_POOL_SIZE) || 100,
+      minPoolSize: Number(process.env.MONGO_MIN_POOL_SIZE) || 20,
       maxIdleTimeMS: 60000,
       serverSelectionTimeoutMS: 15000,
       socketTimeoutMS: 45000,
