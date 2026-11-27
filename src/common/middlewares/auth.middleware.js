@@ -5,6 +5,47 @@ import { getAuth as getFirebaseAuth } from "../../firebase/firebaseAdmin.js";
 import User from "../../modules/auth/models/User.model.js";
 import logger from "../../config/logger.js";
 
+const AUTH_CACHE_TTL_MS =
+  process.env.NODE_ENV === "test"
+    ? 0
+    : Math.max(0, Number(process.env.AUTH_CACHE_TTL_MS ?? 15000));
+const AUTH_CACHE_MAX_SIZE = 10000;
+const authUserCache = new Map();
+
+export const invalidateAuthUserCache = (userId) => {
+  if (!userId) return;
+  authUserCache.delete(String(userId));
+};
+
+const getCachedUserStatus = async (userId) => {
+  const key = String(userId);
+  const now = Date.now();
+
+  if (AUTH_CACHE_TTL_MS > 0) {
+    const cached = authUserCache.get(key);
+    if (cached && cached.expiresAt > now) {
+      return cached.user;
+    }
+  }
+
+  const dbUser = await User.findById(userId)
+    .select("status role organizationId createdAt")
+    .lean();
+
+  if (AUTH_CACHE_TTL_MS > 0 && dbUser) {
+    if (authUserCache.size >= AUTH_CACHE_MAX_SIZE) {
+      const oldestKey = authUserCache.keys().next().value;
+      if (oldestKey !== undefined) authUserCache.delete(oldestKey);
+    }
+    authUserCache.set(key, {
+      user: dbUser,
+      expiresAt: now + AUTH_CACHE_TTL_MS,
+    });
+  }
+
+  return dbUser;
+};
+
 /** Protect routes */
 export const authMiddleware = async (req, res, next) => {
   try {
@@ -29,7 +70,7 @@ export const authMiddleware = async (req, res, next) => {
       const decoded = verifyAccessToken(token); // backend JWT
       logger.debug(`auth.middleware: backend JWT verified id=${decoded.id}`);
 
-      const dbUser = await User.findById(decoded.id).select("status role organizationId");
+      const dbUser = await getCachedUserStatus(decoded.id);
       if (!dbUser) {
         return res.status(401).json({
           success: false,
@@ -46,7 +87,8 @@ export const authMiddleware = async (req, res, next) => {
       req.user = {
         _id: decoded.id,
         role: decoded.role,
-        organizationId: decoded.organizationId ?? null,
+        organizationId: decoded.organizationId ?? dbUser.organizationId ?? null,
+        createdAt: dbUser.createdAt ?? null,
       };
 
       return next();

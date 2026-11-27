@@ -24,10 +24,13 @@ const startServer = async () => {
 
     // Start Express server wrapped in HTTP server
     const server = http.createServer(app);
+    server.keepAliveTimeout = 65000;
+    server.headersTimeout = 66000;
     setupSockets(server);
 
-    server.listen(PORT, () => {
-      logger.info(`Server running on port ${PORT}`);
+    const backlog = Number(process.env.HTTP_LISTEN_BACKLOG) || 2048;
+    server.listen({ port: PORT, backlog }, () => {
+      logger.info(`Server running on port ${PORT} (backlog=${backlog})`);
     });
   } catch (err) {
     logger.error(`Failed to start server: ${err.message}`);

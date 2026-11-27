@@ -1,7 +1,14 @@
 import logger from "../../config/logger.js";
 
 export const requestLogger = (req, res, next) => {
-  const { method, url, headers, body, params, query } = req;
+  // Full body/response pretty-printing is opt-in because synchronous JSON.stringify
+  // on every request/response saturates the event loop and disk I/O under load;
+  // morgan in app.js already records method, URL, status, and response time.
+  if (process.env.VERBOSE_REQUEST_LOGGING !== "true") {
+    return next();
+  }
+
+  const { method, url, body, params, query } = req;
 
   // Log request info
   logger.info(`\n📥 API REQUEST`);

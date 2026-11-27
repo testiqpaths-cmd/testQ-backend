@@ -4,6 +4,25 @@ import Notification from "../../../modules/notification/notification.model.js";
 import Test from "../../../models/test.model.js";
 import { buildAttemptAnalyticsSnapshot } from "../utils/attemptAnalyticsSnapshot.util.js";
 
+// Serialize analytics summary transactions so concurrent test submissions never
+// contend on the shared PlatformDailySummary document and abort each other.
+let analyticsQueueTail = Promise.resolve();
+const enqueueAttemptAnalytics = (attemptId) => {
+  const run = async () => {
+    try {
+      const { processCompletedAttemptAnalytics } = await import(
+        "../../../services/analyticsSummary.service.js"
+      );
+      await processCompletedAttemptAnalytics(attemptId);
+    } catch (err) {
+      console.error("Failed to process analytics summary for attempt:", attemptId, err);
+    }
+  };
+
+  analyticsQueueTail = analyticsQueueTail.then(run, run);
+  return analyticsQueueTail;
+};
+
 const normalizeValue = (value) => String(value ?? "").trim().toLowerCase();
 
 const answerHasValue = (answer) => {
@@ -262,16 +281,14 @@ export const evaluateObjectiveForAttempt = async (attemptId) => {
       console.error("Failed to update company track progress in evaluateObjectiveForAttempt:", err);
     }
   };
-  // Record attempt in pre-aggregated analytics summaries (idempotent)
-  const updateAnalytics = async () => {
-    try {
-      const { processCompletedAttemptAnalytics } = await import("../../../services/analyticsSummary.service.js");
-      await processCompletedAttemptAnalytics(attempt._id);
-    } catch (err) {
-      console.error("Failed to process analytics summary for attempt:", attempt._id, err);
-    }
-  };
-  await Promise.all([updateTrackProgress(), updateAnalytics()]);
+  // Record attempt in pre-aggregated analytics summaries (serialized in background
+  // outside NODE_ENV=test so concurrent submits don't abort on PlatformDailySummary locks)
+  if (process.env.NODE_ENV === "test") {
+    await Promise.all([updateTrackProgress(), enqueueAttemptAnalytics(attempt._id)]);
+  } else {
+    enqueueAttemptAnalytics(attempt._id);
+    await updateTrackProgress();
+  }
 
   return attempt;
 };
