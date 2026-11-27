@@ -12,7 +12,14 @@
     "test:subscription": "node --test-concurrency=1 --test tests/subscription/entitlement.test.js tests/subscription/usage-concurrency.test.js tests/subscription/payment-idempotency.test.js tests/subscription/subscription-lifecycle.test.js",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "build": "esbuild src/server.js --bundle --platform=node --outfile=dist/server.js --target=node16"
+    "build": "esbuild src/server.js --bundle --platform=node --outfile=dist/server.js --target=node16",
+    "loadtest:seed": "node load-tests/seed-load-test-data.js",
+    "loadtest:cleanup": "node load-tests/cleanup-load-test-data.js",
+    "loadtest:smoke": "node load-tests/run-k6.js run load-tests/k6/smoke.js",
+    "loadtest:login": "node load-tests/run-k6.js run load-tests/k6/login-burst.js",
+    "loadtest:1000": "node load-tests/run-k6.js run -e LOAD_PROFILE=stress_1000 load-tests/k6/exam-1000-users.js",
+    "loadtest:spike1000": "node load-tests/run-k6.js run -e LOAD_PROFILE=spike_1000 load-tests/k6/exam-1000-users.js",
+    "loadtest:sockets1000": "node load-tests/run-k6.js run load-tests/k6/socket-1000-users.js"
   },
   "dependencies": {
     "@getbrevo/brevo": "^6.0.2",

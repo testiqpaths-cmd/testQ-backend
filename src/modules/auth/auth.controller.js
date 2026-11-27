@@ -26,6 +26,7 @@ import {
 } from "../../modules/auth/utils/token.service.js";
 import { AuthError } from "../../common/exceptions/AuthError.js";
 import { findUserById } from "./repositories/auth.repository.js";
+import User from "./models/User.model.js";
 
 // "Complete" means enough to be worth collecting before someone pays:
 // phone number + full education details. Address is deliberately not
@@ -302,10 +303,12 @@ export const logoutController = (req, res) => {
 /** /me - get current user */
 export const meController = async (req, res) => {
   try {
-    const user = await findUserById(req.user._id);
+    const user = await User.findById(req.user._id)
+      .select("email role organizationId hasSetPassword phone education")
+      .lean();
     if (!user) throw new AuthError("User not found");
     res.json({
-      id: user.id,
+      id: user._id,
       email: user.email,
       role: user.role,
       organizationId: user.organizationId ?? null,

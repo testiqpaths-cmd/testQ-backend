@@ -1,4 +1,4 @@
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 import crypto from "crypto";
 import UserModel from "../../models/user.model.js";
 import Organization from "../../models/organization.model.js";

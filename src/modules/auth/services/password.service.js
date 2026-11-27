@@ -1,5 +1,5 @@
 // src/modules/auth/services/password.service.js
-import bcrypt from "bcryptjs";
+import bcrypt from "bcrypt";
 
 export const passwordService = {
   hash: async (password) => {

@@ -167,14 +167,13 @@ export const startTestAttemptController = async (req, res, next) => {
       });
     }
 
-    if (req.user?.role === "STUDENT") {
+    if (req.user?.role === "STUDENT" && hasTestEnded(test)) {
       const User = (await import("../../modules/auth/models/User.model.js")).default;
-      const dbUser = await User.findById(studentId).select("createdAt");
+      const dbUser = await User.findById(studentId).select("createdAt").lean();
       if (
         dbUser &&
         test.createdAt &&
-        new Date(test.createdAt) < new Date(dbUser.createdAt) &&
-        hasTestEnded(test)
+        new Date(test.createdAt) < new Date(dbUser.createdAt)
       ) {
         return res.status(403).json({
           success: false,
@@ -403,18 +402,7 @@ export const startTestAttemptController = async (req, res, next) => {
       }
     }
 
-    // Verify assignment is accepted for student (see assignmentGate.service.js).
-    if (req.user?.role === "STUDENT" && !iqRoomId) {
-      const accepted = await ensureAssignmentAccepted({ test, testId, studentId });
-      if (!accepted) {
-        return res.status(400).json({
-          success: false,
-          message: "You must accept the test assignment before starting the test"
-        });
-      }
-    }
-
-    // 4) Prevent multiple in-progress attempts and enforce maxAttempts
+    // 4) Run assignment gate + existing in-progress check + completed count in parallel
     const baseQuery = { testId, studentId };
     if (iqRoomId) {
       baseQuery.iqRoomId = iqRoomId;
@@ -422,13 +410,34 @@ export const startTestAttemptController = async (req, res, next) => {
       baseQuery.$or = [{ iqRoomId: null }, { iqRoomId: { $exists: false } }];
     }
 
-    // Check if there is an in-progress attempt for this specific context
-    const existingInProgress = await TestAttempt.findOne({ ...baseQuery, status: 'IN_PROGRESS' }).lean();
+    const countQuery = { ...baseQuery };
+    if (currentTrackAttempt) {
+      countQuery.companyTrackAttemptId = currentTrackAttempt._id;
+    }
+
+    const [accepted, existingInProgress, completedAttemptsCount] = await Promise.all([
+      req.user?.role === "STUDENT" && !iqRoomId
+        ? ensureAssignmentAccepted({ test, testId, studentId })
+        : Promise.resolve(true),
+      TestAttempt.findOne({ ...baseQuery, status: "IN_PROGRESS" }).lean(),
+      TestAttempt.countDocuments({
+        ...countQuery,
+        status: { $in: ["SUBMITTED", "EVALUATED"] },
+      }),
+    ]);
+
+    if (!accepted) {
+      return res.status(400).json({
+        success: false,
+        message: "You must accept the test assignment before starting the test",
+      });
+    }
+
     if (existingInProgress) {
       const existingTiming = computeAttemptTiming(existingInProgress);
       return res.status(409).json({
         success: false,
-        message: 'Attempt already exists for this test',
+        message: "Attempt already exists for this test",
         data: {
           attemptId: existingInProgress._id,
           status: existingInProgress.status,
@@ -440,16 +449,6 @@ export const startTestAttemptController = async (req, res, next) => {
         },
       });
     }
-
-    // Count completed/submitted attempts to enforce maxAttempts
-    const countQuery = { ...baseQuery };
-    if (currentTrackAttempt) {
-      countQuery.companyTrackAttemptId = currentTrackAttempt._id;
-    }
-    const completedAttemptsCount = await TestAttempt.countDocuments({
-      ...countQuery,
-      status: { $in: ['SUBMITTED', 'EVALUATED'] },
-    });
 
     if (iqRoomId) {
       // IQ Room attempts are strictly 1 per user per room
