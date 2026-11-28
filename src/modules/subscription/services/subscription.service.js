@@ -864,6 +864,24 @@ export const reconcileStaleReservations = async ({
 };
 
 /**
+ * Mirrors the deny rules of checkFeatureAccess so the client can disable a
+ * feature *before* the user hits a 402. Keep the two in sync.
+ *   SUBSCRIPTION_EXPIRED — plan's expiresAt has passed
+ *   NOT_INCLUDED         — disabled on the plan, or limit is 0
+ *   LIMIT_REACHED        — USAGE/CAPACITY quota used up for the period
+ */
+const getFeatureBlockState = ({ isExpired, enabled, limit, type, used }) => {
+  if (isExpired) return { blocked: true, blockReason: "SUBSCRIPTION_EXPIRED" };
+  if (!enabled) return { blocked: true, blockReason: "NOT_INCLUDED" };
+  if (limit === null || limit === undefined) return { blocked: false, blockReason: null };
+  if (limit === 0) return { blocked: true, blockReason: "NOT_INCLUDED" };
+  if (type !== "BOOLEAN" && used >= limit) {
+    return { blocked: true, blockReason: "LIMIT_REACHED" };
+  }
+  return { blocked: false, blockReason: null };
+};
+
+/**
  * Returns a detailed breakdown of a user's subscription and usage for the dashboard.
  */
 export const getUserUsageDetails = async (userId) => {
@@ -880,6 +898,11 @@ export const getUserUsageDetails = async (userId) => {
   ]);
   if (!plan) return null;
   const planFeatures = await PlanFeature.find({ planId: plan._id }).populate("featureId");
+
+  // getUserSubscription only flips status to EXPIRED lazily inside
+  // checkFeatureAccess, so compute it here too — otherwise the UI would show
+  // features as usable that the API is about to reject.
+  const isExpired = Boolean(sub.expiresAt && sub.expiresAt <= new Date());
 
   const featureDetails = await Promise.all(
     planFeatures.map(async (pf) => {
@@ -902,6 +925,14 @@ export const getUserUsageDetails = async (userId) => {
          usedCount = simUsage.usedCount;
       }
 
+      const { blocked, blockReason } = getFeatureBlockState({
+        isExpired,
+        enabled: pf.enabled,
+        limit: pf.limit,
+        type: feature.type,
+        used: usedCount,
+      });
+
       return {
         key: feature.key,
         displayName: feature.displayName,
@@ -913,6 +944,8 @@ export const getUserUsageDetails = async (userId) => {
         remaining: pf.limit === null ? "Unlimited" : Math.max(0, pf.limit - usedCount),
         resetType: pf.resetType,
         periodEnd: usage ? usage.periodEnd : null,
+        blocked,
+        blockReason,
       };
     })
   );
@@ -930,7 +963,9 @@ export const getUserUsageDetails = async (userId) => {
       durationDays: plan.durationDays,
       isDefault: plan.isDefault,
     },
-    status: sub.status,
+    status: isExpired ? "EXPIRED" : sub.status,
+    expiresAt: sub.expiresAt || null,
+    isExpired,
     features: featureDetails.filter(f => f !== null),
   };
 };
