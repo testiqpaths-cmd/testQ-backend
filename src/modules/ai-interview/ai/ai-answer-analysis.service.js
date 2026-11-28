@@ -4,6 +4,7 @@ import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { interviewStateBuilderService } from "../services/interview-state-builder.service.js";
 import { resolveInterviewTypeForTopic, getTypePersonaAndConfig, INTERVIEW_TYPES } from "../constants/interview-types.js";
+import { getBandStrategy } from "../constants/experience-bands.js";
 import logger from "../../../config/logger.js";
 
 export const aiAnswerAnalysisSchema = z.object({
@@ -58,6 +59,29 @@ export const aiAnswerAnalysisSchema = z.object({
   evaluationSource: z.enum(["AI", "FALLBACK"]).default("AI"),
 });
 
+/**
+ * Experience-calibrated expectations for answer scoring. A fresher is not
+ * marked down for lacking production war stories; a senior's textbook
+ * definition is shallow. Empty for sessions without an experience profile.
+ */
+export function buildExperienceCalibration(experienceProfile, questionCategory = null) {
+  if (!experienceProfile?.band) return "";
+  const s = getBandStrategy(experienceProfile.band);
+  const lines = [
+    `\n\nEXPERIENCE CALIBRATION (${s.label}):`,
+    `- Evaluation priorities for this level: ${s.evaluationPriorities.join(", ")}.`,
+    `- Expected depth: ${s.expectedDepth}`,
+    "- Score against what is expected at this level: meeting it is ACCURATE/STRONG; exceeding it can be EXCELLENT.",
+  ];
+  if (["FRESHER", "JUNIOR"].includes(experienceProfile.band)) {
+    lines.push("- Do not penalise missing production, scale or leadership experience at this level; reward correct fundamentals and clear reasoning.");
+  } else {
+    lines.push("- A correct but purely textbook answer without trade-offs or real-world reasoning is SHALLOW at this level.");
+  }
+  if (questionCategory) lines.push(`- Question category: ${questionCategory}.`);
+  return lines.join("\n");
+}
+
 export class AiAnswerAnalysisService {
   constructor(llm = aiService) {
     this.llm = llm;
@@ -90,9 +114,12 @@ export class AiAnswerAnalysisService {
     previousTurns = [],
     interviewId = null,
     customRubric = null,
+    experienceProfile = null,
+    questionCategory = null,
   }) {
     const resolvedType = resolveInterviewTypeForTopic(topic, [interviewType]);
     const typeConfig = getTypePersonaAndConfig(resolvedType, role, experienceLevel);
+    const experienceCalibration = buildExperienceCalibration(experienceProfile, questionCategory);
 
     let roleEvaluationCriteria = "technical correctness, relevance, completeness, depth, practical understanding, contradictions, misconceptions, and experience authenticity";
     if (resolvedType === INTERVIEW_TYPES.HR) {
@@ -112,7 +139,7 @@ export class AiAnswerAnalysisService {
     const systemPrompt = `${typeConfig.persona}
 STRICT TASK:
 Analyze the candidate's answer for the question asked in this ${resolvedType} interview.
-Assess ${roleEvaluationCriteria}.${customRubric ? `\n\nCUSTOM COMPANY EVALUATION RUBRIC:\n${customRubric}\nIncorporate this company-specific rubric into your assessment and scoring.` : ""}
+Assess ${roleEvaluationCriteria}.${experienceCalibration}${customRubric ? `\n\nCUSTOM COMPANY EVALUATION RUBRIC:\n${customRubric}\nIncorporate this company-specific rubric into your assessment and scoring.` : ""}
 
 STRICT JSON OUTPUT FORMAT:
 {

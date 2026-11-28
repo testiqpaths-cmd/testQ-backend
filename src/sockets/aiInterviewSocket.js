@@ -1,7 +1,7 @@
 import logger from "../config/logger.js";
 import { verifyAccessToken } from "../modules/auth/utils/token.service.js";
-import { interviewSessionService } from "../ai-interview/services/interview-session.service.js";
-import { integrityService } from "../ai-interview/services/integrity.service.js";
+import { interviewSessionService } from "../modules/ai-interview/services/interview-session.service.js";
+import { integrityService } from "../modules/ai-interview/services/integrity.service.js";
 
 /**
  * Real-time channel for the AI interview room. It's a thin transport over

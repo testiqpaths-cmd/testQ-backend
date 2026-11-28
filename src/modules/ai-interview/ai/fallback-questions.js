@@ -663,6 +663,83 @@ export const FALLBACK_QUESTION_BANK = {
   },
 };
 
+// Phase topics introduced by experience-aware planning
+// (services/interview-strategy.service.js).
+Object.assign(FALLBACK_QUESTION_BANK, {
+  WORK_EXPERIENCE: {
+    EASY: [
+      "Walk me through your current or most recent role: what were you responsible for day to day?",
+      "Which technologies did you use most in your recent work, and what did you personally build with them?",
+    ],
+    MEDIUM: [
+      "Tell me about a feature you owned from start to finish at work. What was your exact contribution?",
+      "How has your responsibility grown from your first role to your current one?",
+    ],
+    HARD: [
+      "Describe a technical decision at work that you were accountable for. What alternatives did you weigh and what happened?",
+    ],
+  },
+  TECHNICAL_SCENARIOS: {
+    EASY: [
+      "A page in your application suddenly loads slowly. What would you check first, and why?",
+      "A user reports that a form submits but nothing is saved. How would you track down the problem?",
+    ],
+    MEDIUM: [
+      "An API endpoint that used to respond in 200 ms now takes five seconds. How would you investigate it?",
+      "Your React application re-renders far more than expected. How would you find and fix the cause?",
+      "Database queries are getting slower as traffic grows. What would you investigate?",
+    ],
+    HARD: [
+      "Error rates spike right after a deployment, but only for some users. How would you diagnose and contain it?",
+      "A background job queue keeps falling behind at peak load. How would you find the bottleneck and fix it?",
+    ],
+  },
+  LEARNING_ABILITY: {
+    EASY: [
+      "Tell me about a technology you learned recently. How did you go about learning it?",
+      "Describe a time you got stuck on a problem while learning. How did you get unstuck?",
+    ],
+    MEDIUM: [
+      "How do you check that you really understand a new concept rather than just following a tutorial?",
+    ],
+    HARD: [
+      "Tell me about a time you had to learn something quickly to deliver a task. What did you prioritise?",
+    ],
+  },
+  OWNERSHIP: {
+    EASY: [
+      "Tell me about a task you were given where the requirements were unclear. What did you do?",
+    ],
+    MEDIUM: [
+      "Describe a bug or issue you found and fixed without being asked. How did you handle it?",
+      "Tell me about a time you were responsible for a feature going to production. What did you check before release?",
+    ],
+    HARD: [
+      "Describe a time something you owned failed in production. How did you respond and what changed afterwards?",
+    ],
+  },
+});
+
+// Phase topics that reuse an existing bank. ADVANCED_<SKILL> uses the
+// skill's own bank one notch harder.
+const TOPIC_BANK_ALIASES = {
+  PROJECT_DEEP_DIVE: "PROJECT_ARCHITECTURE",
+  TECHNICAL_OWNERSHIP: "OWNERSHIP",
+  TECHNICAL_DECISION_MAKING: "DECISION_MAKING",
+  TECHNICAL_LEADERSHIP: "LEADERSHIP",
+  DISTRIBUTED_SYSTEMS: "FAULT_TOLERANCE",
+};
+
+function resolveBankTopic(normTopic, normDiff) {
+  if (FALLBACK_QUESTION_BANK[normTopic]) return { bankTopic: normTopic, difficulty: normDiff };
+  if (TOPIC_BANK_ALIASES[normTopic]) return { bankTopic: TOPIC_BANK_ALIASES[normTopic], difficulty: normDiff };
+  const adv = normTopic.match(/^ADVANCED_(.+)$/);
+  if (adv && FALLBACK_QUESTION_BANK[adv[1]]) {
+    return { bankTopic: adv[1], difficulty: normDiff === "EASY" ? "MEDIUM" : "HARD" };
+  }
+  return { bankTopic: normTopic, difficulty: normDiff };
+}
+
 const normalize = (str) =>
   String(str || "")
     .toLowerCase()
@@ -717,7 +794,8 @@ export const getFallbackQuestion = (
   interviewType = "technical"
 ) => {
   const normTopic = String(topic || "TECHNICAL_FUNDAMENTALS").toUpperCase().replace(/\s+/g, "_");
-  const normDiff = difficulty === "ADAPTIVE" ? "EASY" : String(difficulty || "EASY").toUpperCase();
+  const requestedDiff = difficulty === "ADAPTIVE" ? "EASY" : String(difficulty || "EASY").toUpperCase();
+  const { bankTopic, difficulty: normDiff } = resolveBankTopic(normTopic, requestedDiff);
   const normInterviewType = String(interviewType || "technical").toLowerCase();
 
   const isExcluded = (q) => {
@@ -729,7 +807,7 @@ export const getFallbackQuestion = (
   };
 
   // 1. Check matching topic bank directly
-  let topicBank = FALLBACK_QUESTION_BANK[normTopic];
+  let topicBank = FALLBACK_QUESTION_BANK[bankTopic];
 
   // 2. If topic bank not found, pick appropriate default bank based on interviewType
   if (!topicBank) {

@@ -1,7 +1,32 @@
 import crypto from "crypto";
 import { InterviewSession } from "../schemas/interview-session.schema.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
+import { phaseService } from "./phase.service.js";
+import { QUESTION_CATEGORIES, topicLabel } from "../constants/interview-phases.js";
 import logger from "../../../config/logger.js";
+
+const probeId = () => `probe-${crypto.randomBytes(4).toString("hex")}`;
+
+// Follow-up templates for non-technical phases: they stay on the parent's
+// topic and phase, and never pivot into a different area.
+const CATEGORY_PROBES = {
+  [QUESTION_CATEGORIES.PROJECT_DEEP_DIVE]: [
+    ["DEPTH_PROBE", "MISSING_CONCEPT", "ownership", "Which part of that did you build yourself, and what was the hardest technical decision you made there?"],
+    ["PRACTICAL", "PRACTICAL_DEPTH", "trade-offs", "What alternative did you consider for that, and why did you choose the approach you did?"],
+  ],
+  [QUESTION_CATEGORIES.SCENARIO_BASED]: [
+    ["DEPTH_PROBE", "MISSING_CONCEPT", "diagnosis", "Suppose your first check shows nothing unusual. What would you look at next, and why?"],
+    ["PRACTICAL", "PRACTICAL_DEPTH", "prevention", "Once it's fixed, what would you change so the same problem is caught earlier next time?"],
+  ],
+  [QUESTION_CATEGORIES.EXPERIENCE]: [
+    ["DEPTH_PROBE", "MISSING_CONCEPT", "responsibility", "Can you give a specific example of something you were responsible for in that role, and how it turned out?"],
+    ["CLARIFICATION", "CLARIFICATION", "contribution", "What exactly was your part in that, compared with the rest of the team?"],
+  ],
+  [QUESTION_CATEGORIES.BEHAVIORAL]: [
+    ["DEPTH_PROBE", "MISSING_CONCEPT", "actions", "What did you personally do in that situation, and what was the result?"],
+    ["PRACTICAL", "PRACTICAL_DEPTH", "reflection", "Looking back, what would you do differently, and why?"],
+  ],
+};
 
 /**
  * FollowUpProbePlannerService
@@ -23,8 +48,26 @@ export class FollowUpProbePlannerService {
    * @param {string} [role="Software Engineer"]
    * @returns {Array<Object>} List of candidate probes
    */
-  synthesizeProbes(currentQuestion, role = "Software Engineer") {
+  synthesizeProbes(currentQuestion, role = "Software Engineer", { category = null, band = null } = {}) {
     const topic = (currentQuestion.topic || "GENERAL").toUpperCase();
+    const label = topicLabel(topic);
+
+    if (category && CATEGORY_PROBES[category]) {
+      const parentQId = currentQuestion.id || currentQuestion.questionId || "q-active";
+      return CATEGORY_PROBES[category].map(([probeType, probeReason, concept, question]) => ({
+        probeId: probeId(),
+        parentQuestionId: parentQId,
+        topic,
+        difficulty: currentQuestion.difficulty || Difficulty.MEDIUM,
+        targetConcept: `${label} ${concept}`,
+        probeType,
+        probeReason,
+        question,
+        status: "READY",
+        createdAt: new Date(),
+      }));
+    }
+    const earlyCareer = band === "FRESHER" || band === "JUNIOR";
     const qText = (currentQuestion.questionText || currentQuestion.question || "").toLowerCase();
     const diff = currentQuestion.difficulty || Difficulty.MEDIUM;
     const parentQId = currentQuestion.id || currentQuestion.questionId || "q-active";
@@ -262,7 +305,9 @@ export class FollowUpProbePlannerService {
         targetConcept: `${topic} internal mechanics`,
         probeType: "DEPTH_PROBE",
         probeReason: "MISSING_CONCEPT",
-        question: `Could you dive deeper into the internal mechanism and data structures that power this in ${topic}?`,
+        question: earlyCareer
+          ? `Can you explain in a bit more detail how that works in ${label}?`
+          : `Could you dive deeper into the internal mechanism and data structures that power this in ${label}?`,
       });
       probes.push({
         probeId: `probe-${crypto.randomBytes(4).toString("hex")}`,
@@ -272,7 +317,9 @@ export class FollowUpProbePlannerService {
         targetConcept: `${topic} production edge case`,
         probeType: "PRACTICAL",
         probeReason: "PRACTICAL_DEPTH",
-        question: `In a high-throughput production environment, what failure mode or bottleneck have you encountered with this in ${topic}?`,
+        question: earlyCareer
+          ? `What could go wrong with this in ${label}, and how would you debug it?`
+          : `In a high-throughput production environment, what failure mode or bottleneck have you encountered with this in ${label}?`,
       });
     }
 
@@ -295,7 +342,12 @@ export class FollowUpProbePlannerService {
     if (!parentQId || (currentQuestion.topic || "").toUpperCase() === "INTRODUCTION") return;
 
     try {
-      const probes = this.synthesizeProbes(currentQuestion, session.role);
+      const probes = this.synthesizeProbes(currentQuestion, session.role, {
+        category: phaseService.hasPlan(session)
+          ? phaseService.categoryFor(session, currentQuestion.topic)
+          : null,
+        band: session.experienceProfile?.band || null,
+      });
 
       await InterviewSession.updateOne(
         { _id: session._id || session.id },

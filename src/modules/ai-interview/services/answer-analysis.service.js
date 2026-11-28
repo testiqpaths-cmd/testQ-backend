@@ -271,6 +271,8 @@ export class AnswerAnalysisService {
         previousTurns: previousSessionTurns,
         interviewId: session.interviewId,
         customRubric: session.customRubric || null,
+        experienceProfile: session.experienceProfile || null,
+        questionCategory: turn.questionCategory || null,
       });
 
       finalStatus = aiResult.answerStatus || AnswerStatus.PARTIAL;

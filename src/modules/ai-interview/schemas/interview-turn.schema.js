@@ -57,6 +57,12 @@ const interviewTurnSchema = new Schema(
       ],
       default: "TECHNICAL",
     },
+    // INTRODUCTION | EXPERIENCE | TECHNICAL_CONCEPT | TECHNICAL_IMPLEMENTATION |
+    // PROJECT_DEEP_DIVE | SCENARIO_BASED | BEHAVIORAL | CLOSING
+    // (constants/interview-phases.js). Null on turns from older sessions.
+    questionCategory: { type: String, default: null },
+    phase: { type: String, default: null },
+    projectTitle: { type: String, default: null },
     difficulty: {
       type: String,
       enum: Object.values(Difficulty),

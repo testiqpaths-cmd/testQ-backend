@@ -5,7 +5,7 @@ import Test from "../../models/test.model.js";
 import Question from "../../models/question.model.js";
 import TestAttempt from "../../models/testAttempt.model.js";
 import User from "../../models/user.model.js";
-import InterviewSession from "../../ai-interview/schemas/interview-session.schema.js";
+import InterviewSession from "../ai-interview/schemas/interview-session.schema.js";
 
 /**
  * Get all companies with counts of company-series, published tests, and questions.
@@ -646,7 +646,7 @@ export const updateTrackAttemptProgress = async (attemptOrId) => {
 export const updateTrackAttemptFromInterviewSession = async (sessionOrId, resultsSummary = null) => {
   let session = sessionOrId;
   if (!session || !session.interviewId) {
-    const InterviewSession = (await import("../../ai-interview/schemas/interview-session.schema.js")).default;
+    const InterviewSession = (await import("../ai-interview/schemas/interview-session.schema.js")).default;
     session = await InterviewSession.findOne({
       $or: [
         { interviewId: String(sessionOrId) },
@@ -940,9 +940,9 @@ export const launchCompanyInterviewRound = async ({
     throw err;
   }
 
-  const InterviewSession = (await import("../../ai-interview/schemas/interview-session.schema.js")).default;
-  const { interviewSessionService } = await import("../../ai-interview/services/interview-session.service.js");
-  const { resumeService } = await import("../../ai-interview/resume/resume.service.js");
+  const InterviewSession = (await import("../ai-interview/schemas/interview-session.schema.js")).default;
+  const { interviewSessionService } = await import("../ai-interview/services/interview-session.service.js");
+  const { resumeService } = await import("../ai-interview/resume/resume.service.js");
 
   // Prevent duplicate sessions / resume existing eligible session
   if (roundAttempt.interviewSessionId) {

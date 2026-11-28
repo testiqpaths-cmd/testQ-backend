@@ -7,7 +7,10 @@ import { questionBankService } from "./question-bank.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { resolveInterviewTypeForTopic } from "../constants/interview-types.js";
-import { findRelevantProjectContext } from "../resume/resume-project-context.js";
+import { buildQuestionContext, countProjectQuestions } from "./question-context.service.js";
+import { phaseService } from "./phase.service.js";
+import { INTERVIEW_PHASES, normalizePhase, phaseIndex } from "../constants/interview-phases.js";
+import { getBandStrategy } from "../constants/experience-bands.js";
 import logger from "../../../config/logger.js";
 
 const MIN_READY = 3;
@@ -360,7 +363,8 @@ export class InterviewQuestionPlannerService {
 
       // Collect previously asked and prepared questions to prevent duplicates
       const pastTurns = await InterviewTurn.find({ sessionId: session._id })
-        .select("question concept topic")
+        .sort({ turnNumber: 1 })
+        .select("question concept topic candidateAnswer questionCategory isFollowUp")
         .lean();
 
       const existingTexts = new Set(pastTurns.map((t) => t.question).filter(Boolean));
@@ -378,6 +382,19 @@ export class InterviewQuestionPlannerService {
       const candidateTopics = this.determineTopicsToBuffer(session, plan, pastTurns);
 
       let generatedThisPass = 0;
+      let projectRotation = countProjectQuestions(pastTurns, session.preparedQuestions);
+      const plannedOnTopic = {};
+      const countOnTopic = (topic) => {
+        const t = String(topic).toUpperCase();
+        if (plannedOnTopic[t] == null) {
+          plannedOnTopic[t] =
+            pastTurns.filter((x) => !x.isFollowUp && String(x.topic || "").toUpperCase() === t).length +
+            (session.preparedQuestions || []).filter(
+              (q) => ["READY", "CLAIMED"].includes(q.status) && String(q.topic || "").toUpperCase() === t
+            ).length;
+        }
+        return plannedOnTopic[t];
+      };
 
       for (const target of candidateTopics) {
         if (generatedThisPass >= neededCount) break;
@@ -391,7 +408,11 @@ export class InterviewQuestionPlannerService {
         }
 
         const qInterviewType = resolveInterviewTypeForTopic(target.topic, session.interviewTypes);
-        const projectContext = findRelevantProjectContext(session.resumeData, target.topic);
+        const qContext = buildQuestionContext(session, target.topic, {
+          topicQuestionIndex: countOnTopic(target.topic),
+          projectRotation,
+          recentTurns: pastTurns,
+        });
 
         try {
           const aiOutput = await this.ai.generateQuestion({
@@ -401,10 +422,15 @@ export class InterviewQuestionPlannerService {
             difficulty: target.difficulty,
             previousQuestions: Array.from(existingTexts),
             conceptsAlreadyTested: Array.from(existingConcepts),
-            resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
-            projectContext,
+            resumeSkills: qContext.resumeSkills,
+            projectContext: qContext.projectContext,
             interviewType: qInterviewType,
             interviewId: session.interviewId,
+            questionCategory: qContext.questionCategory,
+            phase: qContext.phase,
+            experienceProfile: qContext.experienceProfile,
+            workHistory: qContext.workHistory,
+            recentAnswers: qContext.recentAnswers,
           });
 
           if (!aiOutput || !aiOutput.question) continue;
@@ -422,7 +448,10 @@ export class InterviewQuestionPlannerService {
 
           const preparedItem = {
             questionId: `prep-${crypto.randomBytes(6).toString("hex")}`,
-            topic: String(aiOutput.topic || target.topic).toUpperCase(),
+            // Always the planned topic: buffered questions are claimed by topic.
+            topic: String(target.topic).toUpperCase(),
+            questionCategory: qContext.questionCategory,
+            projectTitle: qContext.projectTitle,
             difficulty: String(aiOutput.difficulty || target.difficulty).toUpperCase(),
             questionType: aiOutput.questionType || (qInterviewType === "hr" ? "HR" : qInterviewType === "behavioral" ? "BEHAVIORAL" : "TECHNICAL"),
             competency: aiOutput.competency || (qInterviewType === "hr" ? "Culture & Professionalism" : qInterviewType === "behavioral" ? "Behavioral & Leadership" : "Technical Knowledge"),
@@ -443,6 +472,8 @@ export class InterviewQuestionPlannerService {
           existingHashes.add(qHash);
           if (aiOutput.concept) existingConcepts.add(aiOutput.concept);
           generatedThisPass++;
+          plannedOnTopic[String(target.topic).toUpperCase()] = countOnTopic(target.topic) + 1;
+          if (qContext.projectTitle) projectRotation++;
 
           logger.info(
             `[QuestionPlanner] Stored READY question ${preparedItem.questionId} on ${preparedItem.topic} (${preparedItem.difficulty}) in pool.`
@@ -480,6 +511,50 @@ export class InterviewQuestionPlannerService {
   }
 
   /**
+   * After a phase transition, discard READY buffered questions whose topic
+   * belongs to a phase that is now behind us (completed or skipped). They
+   * can no longer be claimed in order, and leaving them READY would block
+   * buffer room for the phases ahead.
+   *
+   * @returns {Promise<number>} number of discarded questions
+   */
+  async discardOutOfPhaseQuestions(session) {
+    if (!session?._id || !phaseService.hasPlan(session)) return 0;
+    const curIdx = phaseIndex(session.currentPhase);
+    const stale = (session.phasePlan || [])
+      .filter(
+        (p) =>
+          phaseIndex(p.phase) < curIdx ||
+          (phaseIndex(p.phase) > curIdx && p.status === "SKIPPED")
+      )
+      .flatMap((p) => (p.topics || []).map((t) => String(t).toUpperCase()));
+    if (stale.length === 0) return 0;
+
+    const doomed = (session.preparedQuestions || []).filter(
+      (q) => q.status === "READY" && stale.includes(String(q.topic || "").toUpperCase())
+    );
+    if (doomed.length === 0) return 0;
+    try {
+      await InterviewSession.updateOne(
+        { _id: session._id },
+        { $set: { "preparedQuestions.$[elem].status": "DISCARDED" } },
+        { arrayFilters: [{ "elem.status": "READY", "elem.topic": { $in: stale } }] }
+      );
+      // The in-memory document is deliberately left untouched: marking its
+      // subdocuments modified would make the caller's later save() write
+      // array positions that a concurrent background $push may have
+      // shifted. The replenisher re-reads the session from the database.
+      logger.info(
+        `[QuestionPlanner] Discarded ${doomed.length} buffered question(s) from finished phases for session ${session.interviewId}.`
+      );
+      return doomed.length;
+    } catch (err) {
+      logger.warn(`[QuestionPlanner] Failed to discard out-of-phase questions (non-fatal): ${err.message}`);
+      return 0;
+    }
+  }
+
+  /**
    * Dispatches replenishment asynchronously without blocking caller thread.
    */
   replenishPoolInBackground(sessionId) {
@@ -494,8 +569,122 @@ export class InterviewQuestionPlannerService {
   /**
    * Determines a structured list of target { topic, difficulty } slots to prepare.
    * Walks active topic and upcoming topics in topicOrder respecting caps.
+   *
+   * Sessions with a phase plan buffer only the current phase plus a short
+   * lookahead (see #phaseWindow), never more questions per phase than its
+   * remaining budget, at experience-appropriate difficulties. Sessions
+   * without one keep the original behaviour.
    */
   determineTopicsToBuffer(session, plan, pastTurns) {
+    if (phaseService.hasPlan(session) && session.experienceProfile?.band) {
+      return this.#determinePhasedTargets(session, plan, pastTurns);
+    }
+    return this.#determineLegacyTargets(session, plan, pastTurns);
+  }
+
+  /**
+   * Upcoming phase entries eligible for buffering: the current phase, the
+   * next one, and — while still in INTRODUCTION or when the window is
+   * nearly empty — one more, so the first technical questions are ready
+   * the moment the candidate finishes introducing themselves. A project
+   * phase never becomes "immediate" while technical phases remain: claims
+   * are by topic, and targets are ordered current-phase first.
+   */
+  #phaseWindow(session) {
+    const curIdx = phaseIndex(session.currentPhase);
+    const live = (session.phasePlan || [])
+      .filter((p) => (p.topics || []).length > 0 && !["COMPLETED", "SKIPPED"].includes(p.status))
+      .filter((p) => phaseIndex(p.phase) >= curIdx)
+      .filter((p) => !phaseService.shouldSkipPhase(session, p))
+      .sort((a, b) => phaseIndex(a.phase) - phaseIndex(b.phase));
+
+    const window = [];
+    let remaining = 0;
+    const inIntro = normalizePhase(session.currentPhase) === INTERVIEW_PHASES.INTRODUCTION || !session.currentPhase;
+    let upcomingAdded = 0;
+    for (const entry of live) {
+      const isCurrent = phaseIndex(entry.phase) === curIdx;
+      if (!isCurrent) {
+        const limit = inIntro || remaining < 2 ? 2 : 1;
+        if (upcomingAdded >= limit) break;
+        upcomingAdded++;
+      }
+      window.push(entry);
+      remaining += Math.max(0, (entry.questionBudget || 0) - (entry.questionsAsked || 0));
+    }
+    return window;
+  }
+
+  #determinePhasedTargets(session, plan, pastTurns) {
+    const MAX_BUFFER_PER_TOPIC = 2;
+    const band = session.experienceProfile.band;
+    const bandCfg = getBandStrategy(band);
+    const ladder = [Difficulty.EASY, Difficulty.MEDIUM, Difficulty.HARD];
+    const cap = ladder.indexOf(bandCfg.maxPrebufferDifficulty);
+    const planDiff = String(plan?.difficulty || Difficulty.ADAPTIVE).toUpperCase();
+
+    const asked = {};
+    const ready = {};
+    for (const turn of pastTurns || []) {
+      if (turn.isFollowUp) continue;
+      const t = String(turn.topic || "").toUpperCase();
+      asked[t] = (asked[t] || 0) + 1;
+    }
+    for (const pq of session.preparedQuestions || []) {
+      const t = String(pq.topic || "").toUpperCase();
+      if (pq.status === "READY") ready[t] = (ready[t] || 0) + 1;
+      else if (pq.status === "CLAIMED") asked[t] = (asked[t] || 0) + 1;
+    }
+
+    const topicTarget = (topic) => {
+      const b = (plan?.topicBudgets || []).find((x) => x.topic?.toUpperCase() === topic);
+      return typeof b?.targetQuestions === "number" ? b.targetQuestions : plan?.maxQuestionsPerTopic || 4;
+    };
+
+    const difficultiesFor = (phase) => {
+      if (planDiff !== Difficulty.ADAPTIVE) return [planDiff, planDiff];
+      let base = ladder.indexOf(bandCfg.baselineDifficulty);
+      if (normalizePhase(phase) === INTERVIEW_PHASES.ADVANCED_TECHNICAL) base = Math.min(cap, base + 1);
+      const upper = Math.min(cap, base + 1);
+      return [ladder[base], ladder[upper]];
+    };
+
+    const currentTopic = String(session.currentTopic || "").toUpperCase();
+    const targets = [];
+
+    for (const entry of this.#phaseWindow(session)) {
+      let phaseRoom = Math.max(
+        0,
+        (entry.questionBudget || 0) -
+          (entry.questionsAsked || 0) -
+          (entry.topics || []).reduce((n, t) => n + (ready[t.toUpperCase()] || 0), 0)
+      );
+      // Within the current phase, the active topic first.
+      const topics = (entry.topics || [])
+        .map((t) => t.toUpperCase())
+        .filter((t) => t !== "INTRODUCTION")
+        .sort((a, b) => (a === currentTopic ? -1 : b === currentTopic ? 1 : 0));
+      const [baseDiff, upperDiff] = difficultiesFor(entry.phase);
+
+      for (const topic of topics) {
+        if (targets.length >= TARGET_READY || phaseRoom <= 0) break;
+        const topicRoom = Math.max(0, topicTarget(topic) - (asked[topic] || 0) - (ready[topic] || 0));
+        const bufferRoom = Math.max(0, MAX_BUFFER_PER_TOPIC - (ready[topic] || 0));
+        const slots = Math.min(topicRoom, bufferRoom, phaseRoom);
+        if (slots >= 1 && targets.length < TARGET_READY) {
+          targets.push({ topic, difficulty: baseDiff });
+          phaseRoom--;
+        }
+        if (slots >= 2 && targets.length < TARGET_READY) {
+          targets.push({ topic, difficulty: upperDiff });
+          phaseRoom--;
+        }
+      }
+    }
+    return targets;
+  }
+
+  #determineLegacyTargets(session, plan, pastTurns) {
     const rawOrder = session.topicOrder?.length ? session.topicOrder : plan?.topics || ["TECHNICAL_FUNDAMENTALS"];
     // Exclude INTRODUCTION from buffer topics
     const topicOrder = rawOrder

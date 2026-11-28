@@ -5,6 +5,7 @@ import { aiFeedbackService } from "../ai/ai-feedback.service.js";
 import { integrityService } from "./integrity.service.js";
 import { assertCanViewSession } from "../utils/authorize.js";
 import { ApiError } from "../../../common/exceptions/ApiError.js";
+import { getBandStrategy } from "../constants/experience-bands.js";
 import logger from "../../../config/logger.js";
 import {
   COMMON_TECHNICAL_V1,
@@ -419,6 +420,7 @@ export class InterviewResultsService {
       weaknesses: rawWeaknesses,
       turnsSummary,
       interviewId: session.interviewId,
+      experienceProfile: session.experienceProfile || null,
     });
 
     const feedbackByTurn = new Map(feedback.perQuestion.map((f) => [f.turnNumber, f]));
@@ -488,6 +490,20 @@ export class InterviewResultsService {
       roles: [session.role],
       company: session.company,
       experience: session.experienceLevel,
+      // Band the interview was planned and evaluated at, with the inputs it
+      // was reconciled from. Null for interviews created before this.
+      experienceProfile: session.experienceProfile
+        ? {
+            band: session.experienceProfile.band,
+            label: getBandStrategy(session.experienceProfile.band).label,
+            source: session.experienceProfile.source,
+            conflict: Boolean(session.experienceProfile.conflict),
+            note: session.experienceProfile.note || null,
+            selectedLevel: session.experienceProfile.selectedLevel ?? null,
+            resumeYears: session.experienceProfile.resumeYears ?? null,
+            evaluationCriteria: getBandStrategy(session.experienceProfile.band).evaluationPriorities,
+          }
+        : null,
       interviewTypes: session.interviewTypes,
       techStack: session.techStack,
       difficulty: session.difficulty,

@@ -36,7 +36,7 @@ router.post("/tracks/:trackId/start", authMiddleware, startCompanyTrackAttempt);
 router.get("/tracks/:trackId/attempt", authMiddleware, getCompanyTrackAttempt);
 router.post("/tracks/:trackId/retake", authMiddleware, retakeCompanyTrackAttempt);
 
-import { resumeUpload } from "../../ai-interview/middlewares/resume-upload.middleware.js";
+import { resumeUpload } from "../ai-interview/middlewares/resume-upload.middleware.js";
 
 // AI Interview round launch endpoints (supports direct launch or resume upload)
 router.post(

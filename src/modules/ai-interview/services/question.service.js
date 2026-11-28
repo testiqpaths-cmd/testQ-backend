@@ -8,7 +8,9 @@ import { conceptHistoryService } from "./concept-history.service.js";
 import { questionDedupService } from "./question-dedup.service.js";
 import { questionPlannerService } from "./interview-question-planner.service.js";
 import { questionAudioService } from "../tts/question-audio.service.js";
-import { findRelevantProjectContext } from "../resume/resume-project-context.js";
+import { buildQuestionContext, countProjectQuestions } from "./question-context.service.js";
+import { phaseService } from "./phase.service.js";
+import { QUESTION_CATEGORIES, normalizePhase } from "../constants/interview-phases.js";
 import { ApiError } from "../../../common/exceptions/ApiError.js";
 import logger from "../../../config/logger.js";
 
@@ -153,6 +155,8 @@ export class QuestionService {
       questionSource: "predefined",
       questionBankId: null,
       questionTimestamp: new Date(),
+      questionCategory: QUESTION_CATEGORIES.INTRODUCTION,
+      phase: "INTRODUCTION",
     });
 
     const cachedAudioUrl1 = questionAudioService.getCachedStreamUrl(turn.question, 1);
@@ -291,6 +295,11 @@ export class QuestionService {
           difficulty: finalDifficulty,
           competency: claimed.competency || "Technical Knowledge",
           questionSource: "prepared_pool",
+          questionCategory:
+            claimed.questionCategory ||
+            phaseService.categoryFor(session, finalTopic, { topicQuestionIndex: Math.max(0, (session.topicQuestionCount || 1) - 1) }),
+          phase: normalizePhase(phaseService.phaseOfTopic(session, finalTopic)),
+          projectTitle: claimed.projectTitle || null,
           questionTimestamp: new Date(),
           processingState: "QUESTION_GENERATED",
           decisionAudit: decisionAudit || null,
@@ -392,9 +401,11 @@ export class QuestionService {
     // Fetch previous questions and concepts asked in this session to prevent repetition
     let previousQuestions = [];
     let conceptsAlreadyTested = [];
+    let pastTurns = [];
     try {
-      const pastTurns = await InterviewTurn.find({ sessionId: session._id })
-        .select("question concept")
+      pastTurns = await InterviewTurn.find({ sessionId: session._id })
+        .sort({ turnNumber: 1 })
+        .select("question concept topic candidateAnswer questionCategory isFollowUp")
         .lean();
       previousQuestions = pastTurns.map((t) => t.question).filter(Boolean);
       conceptsAlreadyTested = pastTurns.map((t) => t.concept).filter(Boolean);
@@ -404,7 +415,14 @@ export class QuestionService {
     const questionSelectionMs = Math.round(performance.now() - tSelectStart);
 
     const qInterviewType = resolveInterviewTypeForTopic(activeTopic, session.interviewTypes);
-    const projectContext = findRelevantProjectContext(session.resumeData, activeTopic);
+    const askedOnTopic = pastTurns.filter(
+      (t) => !t.isFollowUp && String(t.topic || "").toUpperCase() === activeTopic
+    ).length;
+    const qContext = buildQuestionContext(session, activeTopic, {
+      topicQuestionIndex: askedOnTopic,
+      projectRotation: countProjectQuestions(pastTurns, session.preparedQuestions),
+      recentTurns: pastTurns,
+    });
 
     // Generate question via AI layer (with automatic fallback +
     // cross-interview semantic dedup)
@@ -417,16 +435,22 @@ export class QuestionService {
           difficulty: targetDifficulty,
           previousQuestions: [...previousQuestions, ...exclude],
           conceptsAlreadyTested,
-          resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
-          projectContext,
+          resumeSkills: qContext.resumeSkills,
+          projectContext: qContext.projectContext,
           interviewType: qInterviewType,
           interviewId: session.interviewId,
+          questionCategory: qContext.questionCategory,
+          phase: qContext.phase,
+          experienceProfile: qContext.experienceProfile,
+          workHistory: qContext.workHistory,
+          recentAnswers: qContext.recentAnswers,
         }),
       { userId: session.userId, interviewId: session.interviewId, topic: activeTopic, sessionQuestions: previousQuestions }
     );
 
     const finalQuestion = aiOutput.question.trim();
-    const finalTopic = String(aiOutput.topic || activeTopic).toUpperCase();
+    // The planner chose the topic; never let generator output move it.
+    const finalTopic = activeTopic;
     const finalDifficulty = String(aiOutput.difficulty || targetDifficulty).toUpperCase();
     const finalConcept = aiOutput.concept || null;
 
@@ -450,6 +474,9 @@ export class QuestionService {
       competency: aiOutput.competency || (qInterviewType === "hr" ? "Culture & Professionalism" : qInterviewType === "behavioral" ? "Behavioral & Leadership" : "Technical Knowledge"),
       questionSource: aiOutput.questionSource || "ai_generated",
       questionBankId: aiOutput.questionBankId || null,
+      questionCategory: qContext.questionCategory,
+      phase: qContext.phase,
+      projectTitle: qContext.projectTitle,
       questionTimestamp: new Date(),
       processingState: "QUESTION_GENERATED",
       decisionAudit: decisionAudit || null,
@@ -574,7 +601,20 @@ export class QuestionService {
     const targetFollowUpType = options.followUpType || previousTurn.followUpType || "DEPTH_PROBE";
 
     const qFollowUpType = resolveInterviewTypeForTopic(previousTurn.topic, session.interviewTypes);
-    const projectContext = findRelevantProjectContext(session.resumeData, previousTurn.topic);
+    // Follow-ups inherit the parent's phase and category. A project
+    // follow-up stays on the parent's project; nothing else gets one.
+    const parentCategory =
+      previousTurn.questionCategory || phaseService.categoryFor(session, previousTurn.topic);
+    const fContext = buildQuestionContext(session, previousTurn.topic);
+    let projectContext = null;
+    if (parentCategory === QUESTION_CATEGORIES.PROJECT_DEEP_DIVE) {
+      const projects = session.resumeData?.extracted?.projects || [];
+      const parentProject =
+        previousTurn.projectTitle && projects.find((p) => p.title === previousTurn.projectTitle);
+      projectContext = parentProject
+        ? { title: parentProject.title, technologies: (parentProject.technologies || []).slice(0, 6) }
+        : fContext.projectContext;
+    }
     const tGenStart = performance.now();
     const aiOutput = await this.ai.generateFollowUpQuestion({
       role: session.role,
@@ -590,10 +630,13 @@ export class QuestionService {
       experienceAuthenticity: previousTurn.experienceAuthenticity || "UNPROVEN",
       contradictionDetails: previousTurn.contradictionDetails || null,
       followUpType: targetFollowUpType,
-      resumeSkills: session.resumeData?.extracted?.skills || session.techStack || [],
+      resumeSkills: fContext.resumeSkills,
       projectContext,
       interviewType: qFollowUpType,
       interviewId: session.interviewId,
+      phase: fContext.phase,
+      questionCategory: parentCategory,
+      experienceProfile: fContext.experienceProfile,
     });
     const questionGenerationMs = Math.round(performance.now() - tGenStart);
 
@@ -638,6 +681,10 @@ export class QuestionService {
       followUp: true,
       isFollowUp: true,
       subIndex: nextSubIndex,
+      // Inherit the parent's place in the interview: same phase, same category.
+      questionCategory: previousTurn.questionCategory || phaseService.categoryFor(session, previousTurn.topic),
+      phase: previousTurn.phase || normalizePhase(phaseService.phaseOfTopic(session, previousTurn.topic)),
+      projectTitle: previousTurn.projectTitle || null,
       parentTurnId: rootParentId,
       followUpReason: options?.followUpReason || previousTurn?.followUpReason || null,
       missingConcept: options?.missingConcept || previousTurn?.missingConcept || null,
@@ -731,7 +778,7 @@ export class QuestionService {
       sessionId: session._id,
       interviewId: session.interviewId,
       turnNumber: nextTurnNumber,
-      topic: probe.topic || previousTurn.topic,
+      topic: previousTurn.topic || probe.topic,
       question: probe.questionText,
       concept: probe.concept || previousTurn.concept || null,
       questionType: probe.questionType || "DEPTH_PROBE",
@@ -743,6 +790,10 @@ export class QuestionService {
       followUp: true,
       isFollowUp: true,
       subIndex: nextSubIndex,
+      // Inherit the parent's place in the interview: same phase, same category.
+      questionCategory: previousTurn.questionCategory || phaseService.categoryFor(session, previousTurn.topic),
+      phase: previousTurn.phase || normalizePhase(phaseService.phaseOfTopic(session, previousTurn.topic)),
+      projectTitle: previousTurn.projectTitle || null,
       parentTurnId: rootParentId,
       followUpReason: decision?.followUpReason || previousTurn?.followUpReason || null,
       missingConcept: decision?.missingConcept || probe.concept || null,

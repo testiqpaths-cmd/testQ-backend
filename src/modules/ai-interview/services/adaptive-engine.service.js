@@ -3,6 +3,8 @@ import { InterviewState } from "../enums/interview-state.enum.js";
 import { AnswerStatus } from "../enums/answer-status.enum.js";
 import { Difficulty } from "../enums/difficulty.enum.js";
 import { phaseService } from "./phase.service.js";
+import { INTERVIEW_PHASES, normalizePhase } from "../constants/interview-phases.js";
+import { EXPERIENCE_BANDS, bandIndex, getBandStrategy } from "../constants/experience-bands.js";
 import logger from "../../../config/logger.js";
 
 export class AdaptiveEngineService {
@@ -116,7 +118,8 @@ export class AdaptiveEngineService {
         "TECHNICAL_FUNDAMENTALS";
 
       const nextDifficulty = this.determineBaselineDifficulty(
-        plan?.difficulty || session.difficulty
+        plan?.difficulty || session.difficulty,
+        session.experienceProfile?.band || null
       );
 
       logger.info(
@@ -189,7 +192,7 @@ export class AdaptiveEngineService {
         return {
           action: InterviewAction.SWITCH_TOPIC,
           nextTopic,
-          difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+          difficulty: this.determineSwitchDifficulty(session, plan, lastTurn, nextTopic),
           reason: `Knowledge depth established for ${session.currentTopic}; advancing to next topic ${nextTopic}.`,
           decisionAudit: {
             decision: "SWITCH_TOPIC",
@@ -255,7 +258,7 @@ export class AdaptiveEngineService {
           return {
             action: InterviewAction.SWITCH_TOPIC,
             nextTopic,
-            difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+            difficulty: this.determineSwitchDifficulty(session, plan, lastTurn, nextTopic),
             reason: `Terminal answer accepted and question ceiling reached for ${session.currentTopic}; switching to ${nextTopic}.`,
             decisionAudit: {
               decision: "SWITCH_TOPIC",
@@ -526,7 +529,7 @@ export class AdaptiveEngineService {
         return {
           action: InterviewAction.SWITCH_TOPIC,
           nextTopic,
-          difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+          difficulty: this.determineSwitchDifficulty(session, plan, lastTurn, nextTopic),
           reason: `Phase budget met; advancing to the ${phaseService.phaseOfTopic(
             session,
             nextTopic
@@ -553,7 +556,7 @@ export class AdaptiveEngineService {
         return {
           action: InterviewAction.SWITCH_TOPIC,
           nextTopic,
-          difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+          difficulty: this.determineSwitchDifficulty(session, plan, lastTurn, nextTopic),
           reason: `Repeated knowledge gaps in ${session.currentTopic}; switching to ${nextTopic} to assess candidate in other areas.`,
           decisionAudit: {
             decision: "SWITCH_TOPIC",
@@ -597,7 +600,7 @@ export class AdaptiveEngineService {
         return {
           action: InterviewAction.SWITCH_TOPIC,
           nextTopic,
-          difficulty: this.determineNextDifficulty(session, plan, lastTurn),
+          difficulty: this.determineSwitchDifficulty(session, plan, lastTurn, nextTopic),
           reason: `Target question ceiling reached for topic ${session.currentTopic}; advancing to ${nextTopic}.`,
           decisionAudit: {
             decision: "SWITCH_TOPIC",
@@ -717,6 +720,14 @@ export class AdaptiveEngineService {
     // Exclude INTRODUCTION from ever being chosen as a subsequent interview topic
     topicOrder = topicOrder.filter((t) => t && t.toUpperCase() !== "INTRODUCTION");
 
+    // Phase layer: never go back to an earlier phase, and never into one
+    // the planner closed or skipped (e.g. advanced questions after weak
+    // fundamentals). Without this the "any unvisited topic" sweep below
+    // would revisit them at the end of the interview.
+    if (phaseService.hasPlan(session)) {
+      topicOrder = topicOrder.filter((t) => phaseService.isTopicReachable(session, t));
+    }
+
     if (topicOrder.length === 0) return null;
 
     // Phase layer: once the current phase is done, restrict selection to
@@ -829,10 +840,66 @@ export class AdaptiveEngineService {
   /**
    * Baseline difficulty for topic initialization.
    */
-  determineBaselineDifficulty(planDifficulty) {
+  determineBaselineDifficulty(planDifficulty, band = null) {
     const norm = (planDifficulty || Difficulty.ADAPTIVE).toUpperCase();
-    if (norm === Difficulty.ADAPTIVE) return Difficulty.EASY;
+    if (norm === Difficulty.ADAPTIVE) {
+      // Experience sets where adaptive interviews start; answers move it.
+      return band ? getBandStrategy(band).baselineDifficulty : Difficulty.EASY;
+    }
     return norm;
+  }
+
+  /**
+   * Difficulty for the first question after a SWITCH_TOPIC. Within a phase
+   * this is the usual performance-driven step. Crossing into a new phase of
+   * an experience-aware plan (adaptive difficulty only):
+   *  - ADVANCED_TECHNICAL steps up one notch for mid-level and above;
+   *  - experience / behavioral / closing phases restart from the band's
+   *    baseline, since a hard React answer says nothing about how hard an
+   *    ownership question should be.
+   * Steps are always one notch, never EASY -> HARD.
+   */
+  determineSwitchDifficulty(session, plan, lastTurn, nextTopic) {
+    const perf = this.determineNextDifficulty(session, plan, lastTurn);
+    const band = session?.experienceProfile?.band;
+    const planDifficulty = (plan?.difficulty || session?.difficulty || Difficulty.ADAPTIVE).toUpperCase();
+    if (!band || planDifficulty !== Difficulty.ADAPTIVE || !phaseService.hasPlan(session) || !nextTopic) {
+      return perf;
+    }
+
+    const phase = normalizePhase(phaseService.phaseOfTopic(session, nextTopic));
+    const current = normalizePhase(session.currentPhase);
+    if (phase === current) return perf;
+
+    const baseline = getBandStrategy(band).baselineDifficulty;
+    const NON_TECHNICAL = [
+      INTERVIEW_PHASES.INTRODUCTION,
+      INTERVIEW_PHASES.PROFESSIONAL_EXPERIENCE,
+      INTERVIEW_PHASES.EXPERIENCE_EVALUATION,
+      INTERVIEW_PHASES.CLOSING,
+    ];
+    // Coming out of a non-technical phase, the last answers say nothing
+    // about technical depth: start from the band's baseline instead.
+    if (NON_TECHNICAL.includes(current) && !NON_TECHNICAL.includes(phase)) {
+      if (phase === INTERVIEW_PHASES.ADVANCED_TECHNICAL && bandIndex(band) >= bandIndex(EXPERIENCE_BANDS.MID)) {
+        return baseline === Difficulty.EASY ? Difficulty.MEDIUM : Difficulty.HARD;
+      }
+      return baseline;
+    }
+
+    if (phase === INTERVIEW_PHASES.ADVANCED_TECHNICAL && bandIndex(band) >= bandIndex(EXPERIENCE_BANDS.MID)) {
+      return perf === Difficulty.EASY ? Difficulty.MEDIUM : Difficulty.HARD;
+    }
+    if (
+      [
+        INTERVIEW_PHASES.PROFESSIONAL_EXPERIENCE,
+        INTERVIEW_PHASES.EXPERIENCE_EVALUATION,
+        INTERVIEW_PHASES.CLOSING,
+      ].includes(phase)
+    ) {
+      return baseline;
+    }
+    return perf;
   }
 
   /**
