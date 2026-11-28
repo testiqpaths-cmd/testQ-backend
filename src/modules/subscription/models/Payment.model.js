@@ -17,10 +17,26 @@ const paymentSchema = new mongoose.Schema(
       required: true,
     },
 
+    // RAZORPAY: self-service checkout by a student / organization.
+    // CASH: recorded by an IQPATH_ADMIN when assigning a plan offline —
+    // never reachable from the self-service checkout endpoints.
+    mode: {
+      type: String,
+      enum: ["RAZORPAY", "CASH"],
+      default: "RAZORPAY",
+    },
+
+    // Only Razorpay payments have an order id. Sparse for the same reason as
+    // razorpayPaymentId below — CASH payments leave it unset. Existing
+    // databases need src/database/migrations/migrate-payment-cash-mode.js to
+    // rebuild the old non-sparse unique index.
     razorpayOrderId: {
       type: String,
-      required: true,
+      required: function () {
+        return this.mode !== "CASH";
+      },
       unique: true,
+      sparse: true,
     },
     // Deliberately NO `default: null` here — a sparse index only excludes
     // documents where the field is truly ABSENT, not documents where it's
@@ -61,7 +77,20 @@ const paymentSchema = new mongoose.Schema(
     // or the async webhook (whichever wins the idempotent update race).
     verifiedVia: {
       type: String,
-      enum: ["CLIENT", "WEBHOOK", null],
+      enum: ["CLIENT", "WEBHOOK", "ADMIN", null],
+      default: null,
+    },
+
+    // CASH only: the admin who recorded it, and their receipt / remark.
+    recordedBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+      default: null,
+    },
+    note: {
+      type: String,
+      trim: true,
+      maxlength: 500,
       default: null,
     },
   },
