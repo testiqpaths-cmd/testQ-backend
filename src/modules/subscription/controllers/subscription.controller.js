@@ -5,6 +5,7 @@ import {
   createRazorpayOrder,
   verifyRazorpayPayment,
   processRazorpayWebhookEvent,
+  assignPlanByAdmin,
 } from "../services/subscription.service.js";
 import logger from "../../../config/logger.js";
 import Role from "../models/Role.model.js";
@@ -12,7 +13,29 @@ import Feature from "../models/Feature.model.js";
 import Plan from "../models/Plan.model.js";
 import PlanFeature from "../models/PlanFeature.model.js";
 import UserSubscription from "../models/UserSubscription.model.js";
-import User from "../../../modules/auth/models/User.model.js";
+
+/**
+ * Normalises a plan-feature config from the admin UI. limit: null means
+ * unlimited; a disabled feature keeps limit 0 only if explicitly 0.
+ * student* fields only matter on ORGANIZATION plans (each student's own
+ * allowance) and are left untouched when the request doesn't send them.
+ */
+const normaliseLimit = (enabled, limit) =>
+  enabled ? (limit !== undefined && limit !== "" ? limit : null) : limit === 0 ? 0 : null;
+
+const toPlanFeatureUpdate = (f = {}) => {
+  const update = {
+    enabled: Boolean(f.enabled),
+    limit: normaliseLimit(Boolean(f.enabled), f.limit),
+    resetType: f.resetType || "LIFETIME",
+  };
+  if (f.studentEnabled !== undefined) {
+    update.studentEnabled = Boolean(f.studentEnabled);
+    update.studentLimit = normaliseLimit(Boolean(f.studentEnabled), f.studentLimit);
+    update.studentResetType = f.studentResetType || "LIFETIME";
+  }
+  return update;
+};
 
 // --- USER APIs ---
 
@@ -104,33 +127,25 @@ export const handleRazorpayWebhook = async (req, res) => {
   }
 };
 
+// IQPATH_ADMIN only (see routes). Body: { planId, paymentMode?: "CASH",
+// amount?: number (rupees, defaults to plan price), note?: string }
 export const assignUserPlanController = async (req, res, next) => {
   try {
     const { userId } = req.params;
-    const { planId } = req.body;
-    
+    const { planId, paymentMode, amount, note } = req.body;
+
     if (!planId) {
       return res.status(400).json({ success: false, message: "planId is required" });
     }
 
-    const targetUser = await User.findById(userId);
-    if (!targetUser) {
-      return res.status(404).json({ success: false, message: "Target user not found" });
-    }
-
-    // Role-based validations
-    if (req.user.role === "ORGANIZATION") {
-      if (targetUser.organizationId?.toString() !== req.user._id.toString()) {
-        return res.status(403).json({ success: false, message: "You can only manage plans for students in your organization." });
-      }
-      
-      const targetPlan = await Plan.findById(planId).populate("roleId");
-      if (!targetPlan || targetPlan.roleId.name !== "STUDENT") {
-        return res.status(403).json({ success: false, message: "Organizations can only assign STUDENT plans." });
-      }
-    }
-
-    const newSub = await upgradeUserPlan(userId, planId);
+    const newSub = await assignPlanByAdmin({
+      adminId: req.user._id,
+      userId,
+      planId,
+      paymentMode: paymentMode ? String(paymentMode).toUpperCase() : null,
+      amount,
+      note,
+    });
     res.json({ success: true, message: "Plan assigned successfully", data: newSub });
   } catch (error) {
     next(error);
@@ -166,6 +181,15 @@ export const getAvailablePlansForMyRole = async (req, res, next) => {
             enabled: pf.enabled,
             limit: pf.limit,
             resetType: pf.resetType,
+            ...(roleName === "ORGANIZATION"
+              ? {
+                  studentAllowance: {
+                    enabled: Boolean(pf.studentEnabled),
+                    limit: pf.studentLimit ?? null,
+                    resetType: pf.studentResetType || "LIFETIME",
+                  },
+                }
+              : {}),
           }));
         return {
           ...plan,
@@ -287,11 +311,7 @@ export const createPlan = async (req, res, next) => {
         features.map((f) =>
           PlanFeature.findOneAndUpdate(
             { planId: plan._id, featureId: f.featureId },
-            {
-              enabled: Boolean(f.enabled),
-              limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
-              resetType: f.resetType || "LIFETIME",
-            },
+            toPlanFeatureUpdate(f),
             { new: true, upsert: true }
           )
         )
@@ -313,11 +333,7 @@ export const updatePlan = async (req, res, next) => {
         features.map((f) =>
           PlanFeature.findOneAndUpdate(
             { planId: plan._id, featureId: f.featureId },
-            {
-              enabled: Boolean(f.enabled),
-              limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
-              resetType: f.resetType || "LIFETIME",
-            },
+            toPlanFeatureUpdate(f),
             { new: true, upsert: true }
           )
         )
@@ -368,11 +384,9 @@ export const getPlanFeatures = async (req, res, next) => {
 export const updatePlanFeature = async (req, res, next) => {
   try {
     const { planId, featureId } = req.params;
-    const { enabled, limit, resetType } = req.body;
-    
     const pf = await PlanFeature.findOneAndUpdate(
       { planId, featureId },
-      { enabled, limit, resetType },
+      toPlanFeatureUpdate(req.body),
       { new: true, upsert: true }
     );
     
@@ -394,11 +408,7 @@ export const bulkUpdatePlanFeatures = async (req, res, next) => {
       features.map((f) =>
         PlanFeature.findOneAndUpdate(
           { planId, featureId: f.featureId },
-          {
-            enabled: Boolean(f.enabled),
-            limit: f.enabled ? (f.limit !== undefined ? f.limit : null) : (f.limit === 0 ? 0 : null),
-            resetType: f.resetType || "LIFETIME",
-          },
+          toPlanFeatureUpdate(f),
           { new: true, upsert: true }
         )
       )

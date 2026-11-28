@@ -14,6 +14,8 @@ import { answerAnalysisService } from "./answer-analysis.service.js";
 import { interviewResultsService } from "./interview-results.service.js";
 import { questionPlannerService } from "./interview-question-planner.service.js";
 import { followUpProbePlannerService } from "./follow-up-probe-planner.service.js";
+import { experienceLevelResolverService } from "./experience-level-resolver.service.js";
+import { interviewStrategyService } from "./interview-strategy.service.js";
 import { assertCanViewSession } from "../utils/authorize.js";
 import { ApiError } from "../../../common/exceptions/ApiError.js";
 import logger from "../../../config/logger.js";
@@ -54,6 +56,79 @@ export class InterviewSessionService {
    */
   generateInterviewId() {
     return `int-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+  }
+
+  /**
+   * Creates the InterviewPlan and phase plan for a new session.
+   *
+   * Technical interviews (useStrategy) get an experience-aware plan: the
+   * candidate's band is resolved from the selected level and the resume,
+   * and interview-strategy.service decides the phases, their order and
+   * question/time budgets. Everything else keeps the keyword-grouped plan
+   * built from `topics`.
+   *
+   * @returns {Promise<{ plan, phasePlan, orderedTopics, experienceProfile }>}
+   */
+  async #planInterview({
+    useStrategy,
+    topics,
+    role,
+    interviewTypes,
+    experienceLevel,
+    extracted = null,
+    candidateSkills = [],
+    focusTopics = [],
+    duration,
+    difficulty,
+    questionCount,
+  }) {
+    const experienceProfile = experienceLevelResolverService.resolve({
+      selectedLevel: experienceLevel,
+      extracted,
+    });
+
+    if (useStrategy) {
+      const globalQuestionLimit = interviewPlanService.computeGlobalQuestionLimit(duration, questionCount);
+      const strategy = interviewStrategyService.buildStrategy({
+        role,
+        interviewTypes,
+        profile: experienceProfile,
+        candidateSkills,
+        primarySkills: extracted?.primarySkills || null,
+        secondarySkills: extracted?.secondarySkills || null,
+        extracted,
+        focusTopics,
+        duration,
+        globalQuestionLimit,
+      });
+      const plan = await interviewPlanService.createPlan({
+        topics: strategy.orderedTopics,
+        duration,
+        difficulty,
+        userQuestionLimit: globalQuestionLimit,
+        topicBudgetOverrides: strategy.topicBudgets,
+      });
+      return {
+        plan,
+        phasePlan: strategy.phasePlan,
+        orderedTopics: strategy.orderedTopics,
+        experienceProfile,
+      };
+    }
+
+    const plan = await interviewPlanService.createPlan({
+      topics,
+      duration,
+      difficulty,
+      userQuestionLimit: questionCount,
+    });
+    const phasePlan = phaseService.build(topics, {
+      globalQuestionLimit: plan.globalQuestionLimit,
+    });
+    const orderedTopics = phasePlan.length
+      ? phasePlan.flatMap((p) => p.topics)
+      : topics.map((t) => String(t).toUpperCase());
+    return { plan, phasePlan, orderedTopics, experienceProfile };
   }
 
   /**
@@ -114,23 +189,21 @@ export class InterviewSessionService {
 
     const interviewId = this.generateInterviewId();
 
-    // 1. Create Internal Backend InterviewPlan
-    const plan = await interviewPlanService.createPlan({
+    // 1. Plan + ordered phases. topicOrder follows phase order so the flat
+    // engine walks phases in sequence. Explicitly configured topics (company
+    // tracks, user focus topics) keep the keyword-grouped plan; otherwise a
+    // technical interview gets the experience-aware strategy.
+    const { plan, phasePlan, orderedTopics, experienceProfile } = await this.#planInterview({
+      useStrategy: configuredTopics.length === 0 && interviewStrategyService.appliesTo(interviewTypes),
       topics,
+      role,
+      interviewTypes,
+      experienceLevel,
+      candidateSkills: techStack,
       duration,
       difficulty,
-      userQuestionLimit: payload.questionCount,
+      questionCount: payload.questionCount,
     });
-
-    // 1b. Group the topics into ordered phases (INTRO -> ... -> SCENARIO).
-    // topicOrder follows phase order so the flat engine walks phases in
-    // sequence; an empty phasePlan leaves the engine's behaviour unchanged.
-    const phasePlan = phaseService.build(topics, {
-      globalQuestionLimit: plan.globalQuestionLimit,
-    });
-    const orderedTopics = phasePlan.length
-      ? phasePlan.flatMap((p) => p.topics)
-      : topics.map((t) => String(t).toUpperCase());
 
     // 2. Initialize Topic Coverage State
     const coverageState = orderedTopics.map((topic) => ({
@@ -165,6 +238,7 @@ export class InterviewSessionService {
       coverageState,
       phasePlan,
       currentPhase: phasePlan[0]?.phase || null,
+      experienceProfile,
       candidatePerformance: {
         baselineEstablished: false,
         baselineScore: 0,
@@ -269,6 +343,8 @@ export class InterviewSessionService {
       scopedTopics = resumeTopicService.selectInterviewTopics({
         role,
         candidateSkills: saved.extracted?.skills || [],
+        primarySkills: saved.extracted?.primarySkills || null,
+        secondarySkills: saved.extracted?.secondarySkills || null,
         duration,
         experienceLevel,
         interviewTypes,
@@ -302,21 +378,25 @@ export class InterviewSessionService {
 
     const interviewId = this.generateInterviewId();
 
-    // 1. Create Internal Backend InterviewPlan
-    const plan = await interviewPlanService.createPlan({
+    // 1. Plan + ordered phases. Technical resume interviews get the
+    // experience-aware strategy (intro -> experience -> core technical ->
+    // advanced -> projects -> scenarios -> evaluation, sized to the
+    // candidate's band and the duration). Pure HR / behavioral / coding
+    // etc. interviews keep the keyword-grouped plan over scopedTopics.
+    const extracted = resumeData?.extracted || payload.resumeData || null;
+    const { plan, phasePlan, orderedTopics, experienceProfile } = await this.#planInterview({
+      useStrategy: interviewStrategyService.appliesTo(interviewTypes),
       topics: scopedTopics,
+      role,
+      interviewTypes,
+      experienceLevel,
+      extracted,
+      candidateSkills: extracted?.skills || [],
+      focusTopics: additionalTopics.map((t) => String(t).toUpperCase()),
       duration,
       difficulty,
-      userQuestionLimit: payload.questionCount,
+      questionCount: payload.questionCount,
     });
-
-    // 1b. Group the scoped topics into ordered phases.
-    const phasePlan = phaseService.build(scopedTopics, {
-      globalQuestionLimit: plan.globalQuestionLimit,
-    });
-    const orderedTopics = phasePlan.length
-      ? phasePlan.flatMap((p) => p.topics)
-      : scopedTopics.map((t) => String(t).toUpperCase());
 
     // 2. Initialize Topic Coverage
     const coverageState = orderedTopics.map((topic) => ({
@@ -357,6 +437,7 @@ export class InterviewSessionService {
       coverageState,
       phasePlan,
       currentPhase: phasePlan[0]?.phase || null,
+      experienceProfile,
       candidatePerformance: {
         baselineEstablished: false,
         baselineScore: 0,
@@ -1046,6 +1127,7 @@ export class InterviewSessionService {
 
     // 6. Execute Determined Action
     if (decision.action === InterviewAction.COMPLETE_INTERVIEW) {
+      phaseService.closePlan(session);
       session.interviewState = InterviewState.COMPLETED;
       session.endTime = session.endTime || new Date();
       session.timeRemaining = 0;
@@ -1155,6 +1237,10 @@ export class InterviewSessionService {
         timeRemaining: session.timeRemaining,
         topic: session.currentTopic,
         questionCount: session.questionCount,
+        // Follow-ups never change phase; reported for parity with the
+        // ASK_QUESTION / SWITCH_TOPIC responses.
+        phase: session.currentPhase,
+        phaseProgress: phaseService.progress(session),
         decisionAudit: decision.decisionAudit || null,
         latencyMetrics: turnMetrics,
         questionSource: newQuestion.questionSource || "ai_generated",
@@ -1178,8 +1264,11 @@ export class InterviewSessionService {
       session.topicQuestionCount = 1;
       session.followUpCount = 0;
       session.topicFollowUpCount = 0;
-      // Roll the phase forward if this topic belongs to a later phase.
-      phaseService.enterPhaseForTopic(session, decision.nextTopic);
+      // Roll the phase forward if this topic belongs to a later phase, and
+      // drop buffered questions from phases now behind us.
+      if (phaseService.enterPhaseForTopic(session, decision.nextTopic)) {
+        await questionPlannerService.discardOutOfPhaseQuestions(session);
+      }
       if (session.candidatePerformance) {
         session.candidatePerformance.consecutiveKnowledgeGapsInTopic = 0;
       }
@@ -1327,6 +1416,7 @@ export class InterviewSessionService {
             if (c.status === "IN_PROGRESS") c.status = "EVALUATED";
           });
         }
+        phaseService.closePlan(reloaded);
         reloaded.interviewState = InterviewState.COMPLETED;
         reloaded.endTime = reloaded.endTime || new Date();
         reloaded.currentQuestion = null;

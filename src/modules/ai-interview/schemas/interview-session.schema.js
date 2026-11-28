@@ -82,9 +82,15 @@ const phasePlanItemSchema = new Schema(
     questionsAsked: { type: Number, default: 0 },
     status: {
       type: String,
-      enum: ["PENDING", "IN_PROGRESS", "COMPLETED"],
+      // SKIPPED: the planner passed over this phase (e.g. advanced questions
+      // after weak fundamentals). Optional fields below are only set on
+      // experience-aware plans; older plans simply lack them.
+      enum: ["PENDING", "IN_PROGRESS", "COMPLETED", "SKIPPED"],
       default: "PENDING",
     },
+    priority: { type: Number, default: null },
+    timeBudgetSeconds: { type: Number, default: null },
+    startedAt: { type: Date, default: null },
   },
   { _id: false }
 );
@@ -99,6 +105,10 @@ const preparedQuestionSchema = new Schema(
       default: "MEDIUM",
     },
     questionType: { type: String, default: "TECHNICAL" },
+    // See QUESTION_CATEGORIES in constants/interview-phases.js.
+    questionCategory: { type: String, default: null },
+    // Title of the resume project a PROJECT_DEEP_DIVE question is about.
+    projectTitle: { type: String, default: null },
     competency: { type: String, default: "Technical Knowledge" },
     question: { type: String, required: true, trim: true },
     concept: { type: String, default: "", trim: true },
@@ -273,6 +283,10 @@ const interviewSessionSchema = new Schema(
     // adaptive engine runs flat, exactly as before.
     phasePlan: { type: [phasePlanItemSchema], default: [] },
     currentPhase: { type: String, default: null },
+    // Effective experience band and the raw inputs it was reconciled from
+    // (see services/experience-level-resolver.service.js). Null on sessions
+    // created before experience-aware planning.
+    experienceProfile: { type: Schema.Types.Mixed, default: null },
     candidatePerformance: {
       baselineEstablished: { type: Boolean, default: false },
       baselineScore: { type: Number, default: 0 },

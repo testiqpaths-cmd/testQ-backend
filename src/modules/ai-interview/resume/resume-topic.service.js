@@ -1,4 +1,37 @@
 import { TYPE_TOPICS, INTERVIEW_TYPES } from "../constants/interview-types.js";
+import {
+  EXPERIENCE_BANDS,
+  bandForYears,
+  parseExperienceLevel,
+} from "../constants/experience-bands.js";
+
+// General engineering competencies used ONLY when the resume doesn't
+// provide enough technical skills. Never specific technologies.
+const GENERAL_COMPETENCIES = ["PROBLEM_SOLVING", "SYSTEM_DESIGN", "TECHNICAL_FUNDAMENTALS"];
+
+// Backfill order per band: freshers fill gaps with fundamentals first,
+// seniors with design. Every entry is one of GENERAL_COMPETENCIES.
+const BACKFILL_ORDER = {
+  [EXPERIENCE_BANDS.FRESHER]: ["TECHNICAL_FUNDAMENTALS", "PROBLEM_SOLVING", "SYSTEM_DESIGN"],
+  // JUNIOR is also the band of the "1-3 Years" default, so it keeps the
+  // original backfill order.
+  [EXPERIENCE_BANDS.JUNIOR]: GENERAL_COMPETENCIES,
+  [EXPERIENCE_BANDS.MID]: GENERAL_COMPETENCIES,
+  [EXPERIENCE_BANDS.SENIOR]: ["SYSTEM_DESIGN", "PROBLEM_SOLVING", "TECHNICAL_FUNDAMENTALS"],
+  [EXPERIENCE_BANDS.LEAD]: ["SYSTEM_DESIGN", "PROBLEM_SOLVING", "TECHNICAL_FUNDAMENTALS"],
+};
+
+// Ranking scores. Evidence (used in a project/job) and role relevance both
+// count; a role-relevant skill that's only listed can still beat an
+// irrelevant one that was used, but never a relevant one that was used.
+const SCORE = {
+  PRIMARY_CORE: 10,
+  SECONDARY_CORE: 6,
+  PRIMARY_OTHER: 5,
+  SECONDARY_OTHER: 2,
+  UNCLASSIFIED_CORE: 10,
+  UNCLASSIFIED_OTHER: 3,
+};
 
 export class ResumeTopicService {
   /**
@@ -13,6 +46,96 @@ export class ResumeTopicService {
     data: ["Python", "PyTorch", "TensorFlow", "SQL", "PostgreSQL", "Pandas", "Machine Learning", "FastAPI"],
   };
 
+  static roleCategory(role = "") {
+    const normRole = String(role || "").toLowerCase();
+    if (normRole.includes("front") || normRole.includes("react") || normRole.includes("ui")) return "frontend";
+    if (normRole.includes("back") || normRole.includes("node") || normRole.includes("api") || normRole.includes("java")) {
+      return "backend";
+    }
+    if (normRole.includes("devops") || normRole.includes("cloud") || normRole.includes("infra")) return "devops";
+    if (
+      normRole.includes("mobile") ||
+      normRole.includes("flutter") ||
+      normRole.includes("android") ||
+      normRole.includes("ios")
+    ) {
+      return "mobile";
+    }
+    if (normRole.includes("data") || normRole.includes("ml") || normRole.includes("ai") || normRole.includes("learning")) {
+      return "data";
+    }
+    return "fullstack";
+  }
+
+  /**
+   * Ranks the candidate's own skills for the role. Primary skills (used in
+   * projects/experience) outrank secondary ones (only listed) at equal role
+   * relevance. When the caller has no primary/secondary split (custom
+   * interviews, legacy resumes), every skill is unclassified and only role
+   * relevance counts — the previous behaviour.
+   *
+   * @returns {Array<{ name: string, topic: string, score: number, evidence: "PRIMARY"|"SECONDARY"|"UNCLASSIFIED", roleCore: boolean }>}
+   */
+  static rankSkills({ role, candidateSkills = [], primarySkills = null, secondarySkills = null }) {
+    const roleCoreSkills =
+      ResumeTopicService.ROLE_RELEVANCE[ResumeTopicService.roleCategory(role)] ||
+      ResumeTopicService.ROLE_RELEVANCE.fullstack;
+    const isCore = (skill) => roleCoreSkills.some((s) => s.toLowerCase() === skill.toLowerCase());
+
+    const primarySet = new Set((primarySkills || []).map((s) => String(s || "").trim().toLowerCase()).filter(Boolean));
+    const secondarySet = new Set((secondarySkills || []).map((s) => String(s || "").trim().toLowerCase()).filter(Boolean));
+    const hasSplit = primarySet.size > 0 || secondarySet.size > 0;
+
+    // Union, primary first, preserving original casing and order.
+    const seen = new Set();
+    const unique = [];
+    for (const raw of [...(primarySkills || []), ...(candidateSkills || []), ...(secondarySkills || [])]) {
+      const cleaned = String(raw || "").trim();
+      if (!cleaned) continue;
+      const lower = cleaned.toLowerCase();
+      if (seen.has(lower)) continue;
+      seen.add(lower);
+      unique.push(cleaned);
+    }
+
+    const ranked = unique.map((name, order) => {
+      const lower = name.toLowerCase();
+      const roleCore = isCore(name);
+      let evidence = "UNCLASSIFIED";
+      let score = roleCore ? SCORE.UNCLASSIFIED_CORE : SCORE.UNCLASSIFIED_OTHER;
+      if (hasSplit) {
+        if (primarySet.has(lower)) {
+          evidence = "PRIMARY";
+          score = roleCore ? SCORE.PRIMARY_CORE : SCORE.PRIMARY_OTHER;
+        } else {
+          // Listed only (or not in either list): treat as secondary evidence.
+          evidence = "SECONDARY";
+          score = roleCore ? SCORE.SECONDARY_CORE : SCORE.SECONDARY_OTHER;
+        }
+      }
+      return { name, topic: name.toUpperCase(), score, evidence, roleCore, order };
+    });
+
+    // Stable sort: score desc, then original order.
+    ranked.sort((a, b) => b.score - a.score || a.order - b.order);
+    return ranked.map(({ order, ...rest }) => rest);
+  }
+
+  /**
+   * Fills `count` technical slots from ranked skill topics, backfilling
+   * with general competencies in band order. Never invents technologies.
+   */
+  static fillTechnicalSlots(rankedTopics, count, band = EXPERIENCE_BANDS.JUNIOR) {
+    const selected = rankedTopics.slice(0, count);
+    const backfill = BACKFILL_ORDER[band] || GENERAL_COMPETENCIES;
+    if (selected.length === 0) return backfill.slice(0, count);
+    for (const comp of backfill) {
+      if (selected.length >= count) break;
+      if (!selected.includes(comp)) selected.push(comp);
+    }
+    return selected;
+  }
+
   /**
    * Intelligently selects interview topics based on target role, candidate skills,
    * experience level, session duration, and selected interview type(s).
@@ -23,6 +146,8 @@ export class ResumeTopicService {
    * @param {number} [params.duration=30] - Duration in minutes
    * @param {string} [params.experienceLevel="1-3 Years"] - Experience level
    * @param {string[]} [params.interviewTypes=["technical"]] - Array of interview types
+   * @param {string[]} [params.primarySkills] - Resume skills backed by projects/experience
+   * @param {string[]} [params.secondarySkills] - Resume skills only listed
    * @returns {string[]} Selected scoped interview topics (ordered)
    */
   selectInterviewTopics({
@@ -31,7 +156,11 @@ export class ResumeTopicService {
     duration = 30,
     experienceLevel = "1-3 Years",
     interviewTypes = ["technical"],
+    primarySkills = null,
+    secondarySkills = null,
   }) {
+    const band = bandForYears(parseExperienceLevel(experienceLevel)) || EXPERIENCE_BANDS.JUNIOR;
+
     // 1. Determine max topics based on duration (do not overwhelm candidate)
     let maxTopics = 3;
     if (duration <= 15) maxTopics = 2;
@@ -53,85 +182,15 @@ export class ResumeTopicService {
       ];
     }
 
-    // 3. Helper to get technical skills for this role
-    const getTechnicalSkills = (count) => {
-      const normRole = (role || "").toLowerCase();
-      let roleCategory = "fullstack";
-
-      if (normRole.includes("front") || normRole.includes("react") || normRole.includes("ui")) {
-        roleCategory = "frontend";
-      } else if (
-        normRole.includes("back") ||
-        normRole.includes("node") ||
-        normRole.includes("api") ||
-        normRole.includes("java")
-      ) {
-        roleCategory = "backend";
-      } else if (normRole.includes("devops") || normRole.includes("cloud") || normRole.includes("infra")) {
-        roleCategory = "devops";
-      } else if (normRole.includes("mobile") || normRole.includes("flutter") || normRole.includes("android") || normRole.includes("ios")) {
-        roleCategory = "mobile";
-      } else if (normRole.includes("data") || normRole.includes("ml") || normRole.includes("ai") || normRole.includes("learning")) {
-        roleCategory = "data";
-      }
-
-      const roleCoreSkills =
-        ResumeTopicService.ROLE_RELEVANCE[roleCategory] ||
-        ResumeTopicService.ROLE_RELEVANCE.fullstack;
-
-      // Deduplicate candidate skills case-insensitively while preserving original casing
-      const seen = new Set();
-      const uniqueCandidateSkills = [];
-      for (const raw of candidateSkills || []) {
-        const cleaned = String(raw || "").trim();
-        if (!cleaned) continue;
-        const lower = cleaned.toLowerCase();
-        if (!seen.has(lower)) {
-          seen.add(lower);
-          uniqueCandidateSkills.push(cleaned);
-        }
-      }
-
-      // Score and rank candidate's actual skills by role relevance (prioritization only)
-      const scoredSkills = uniqueCandidateSkills.map((skill) => {
-        const isCore = roleCoreSkills.some(
-          (s) => s.toLowerCase() === skill.toLowerCase()
-        );
-        return {
-          name: skill,
-          score: isCore ? 10 : 3,
-        };
-      });
-
-      scoredSkills.sort((a, b) => b.score - a.score);
-      const selected = scoredSkills.map((s) => s.name.toUpperCase()).slice(0, count);
-
-      // Explicit general engineering competencies used ONLY when candidate's
-      // resume does not provide enough technical skills. Never invent specific technologies.
-      const GENERAL_COMPETENCIES = [
-        "PROBLEM_SOLVING",
-        "SYSTEM_DESIGN",
-        "TECHNICAL_FUNDAMENTALS",
-      ];
-
-      // If candidate has no technical skills extracted, assess general competencies
-      if (selected.length === 0) {
-        return GENERAL_COMPETENCIES.slice(0, count);
-      }
-
-      // If candidate has fewer skills than the duration slot budget, backfill with
-      // explicitly labeled general engineering competencies — NEVER fabricate unverified technologies.
-      if (selected.length < count) {
-        for (const comp of GENERAL_COMPETENCIES) {
-          if (!selected.includes(comp)) {
-            selected.push(comp);
-            if (selected.length >= count) break;
-          }
-        }
-      }
-
-      return selected;
-    };
+    // 3. Technical skills for this role: ranked by evidence + role relevance,
+    // backfilled with general competencies in an experience-appropriate order.
+    const rankedTopics = ResumeTopicService.rankSkills({
+      role,
+      candidateSkills,
+      primarySkills,
+      secondarySkills,
+    }).map((s) => s.topic);
+    const getTechnicalSkills = (count) => ResumeTopicService.fillTechnicalSlots(rankedTopics, count, band);
 
     // 4. Single-type selection
     if (normTypes.length === 1) {

@@ -40,8 +40,10 @@ router.post("/checkout/verify", authMiddleware, verifyCheckoutPayment);
 // user JWT; auth is the HMAC signature check inside the handler instead.
 router.post("/webhook/razorpay", handleRazorpayWebhook);
 
-// Admin / Organization Routes
-router.patch("/users/:userId/plan", authMiddleware, roleMiddleware("IQPATH_ADMIN", "ORGANIZATION"), assignUserPlanController);
+// Admin assigns a plan to a student or organization (cash for paid plans).
+// Organizations no longer assign plans to their students — those students
+// follow the organization's own plan.
+router.patch("/users/:userId/plan", authMiddleware, roleMiddleware("IQPATH_ADMIN"), assignUserPlanController);
 
 // Admin Routes
 const adminOnly = [authMiddleware, roleMiddleware("IQPATH_ADMIN")];

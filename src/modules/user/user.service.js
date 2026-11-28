@@ -116,7 +116,9 @@ export const softDeleteUser = async (id, deletedBy = null) => {
 	return UserModel.findByIdAndUpdate(id, { isDeleted: true, deletedAt: new Date(), deletedBy }, { new: true });
 };
 
-export const listStudents = async (query = {}) => {
+const escapeRegex = (value) => String(value ?? "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+const buildStudentFilter = async (query = {}) => {
 	const q = { role: "STUDENT", isDeleted: false };
 	if (query.organizationId) q.organizationId = query.organizationId;
 	if (query.planId) {
@@ -127,13 +129,43 @@ export const listStudents = async (query = {}) => {
 	if (query.qualification) q["education.qualification"] = query.qualification;
 	if (query.stream) q["education.stream"] = query.stream;
 	if (query.college) q["education.college"] = query.college;
-	if (query.search) {
-		const search = new RegExp(query.search, "i");
+	const term = String(query.search ?? "").trim();
+	if (term) {
+		const search = new RegExp(escapeRegex(term), "i");
 		q.$or = [{ firstName: search }, { lastName: search }, { email: search }];
 	}
+	return q;
+};
 
-	// Used unpaginated everywhere today (org/admin rosters, the test-visibility
-	// student picker) — capped defensively so a very large org/admin roster
+const SELECTION_FIELDS = "_id firstName lastName email education.qualification education.stream education.college";
+const SELECTION_MAX_LIMIT = 1000;
+
+// Paginated, slim lookup for the test/series "Select Student" picker: only the
+// fields the picker renders, no subscription lookup, and a total for paging.
+// "Select All" asks for up to SELECTION_MAX_LIMIT rows in one page.
+export const listStudentsForSelection = async (query = {}) => {
+	const q = await buildStudentFilter(query);
+	const limit = Math.min(Math.max(parseInt(query.limit, 10) || 20, 1), SELECTION_MAX_LIMIT);
+	const page = Math.max(parseInt(query.page, 10) || 1, 1);
+
+	const [users, total] = await Promise.all([
+		UserModel.find(q)
+			.select(SELECTION_FIELDS)
+			.sort({ firstName: 1, lastName: 1, _id: 1 })
+			.skip((page - 1) * limit)
+			.limit(limit)
+			.lean(),
+		UserModel.countDocuments(q),
+	]);
+
+	return { users, total, page, limit, totalPages: Math.ceil(total / limit) || 1 };
+};
+
+export const listStudents = async (query = {}) => {
+	const q = await buildStudentFilter(query);
+
+	// Unpaginated callers (org/admin rosters, notifications; the test-visibility
+	// picker uses listStudentsForSelection) — capped defensively so a very large roster
 	// can't return an unbounded result set.
 	const users = await UserModel.find(q).limit(1000).lean();
 	const activeSubs = await UserSubscription.find({ userId: { $in: users.map((u) => u._id) }, status: "ACTIVE" })

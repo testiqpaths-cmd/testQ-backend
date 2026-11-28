@@ -3,7 +3,70 @@ import { aiService } from "./ai.service.js";
 import { getFallbackQuestion } from "./fallback-questions.js";
 import { questionBankService } from "../services/question-bank.service.js";
 import { resolveInterviewTypeForTopic, getTypePersonaAndConfig } from "../constants/interview-types.js";
+import {
+  QUESTION_CATEGORIES,
+  CATEGORY_QUESTION_TYPE,
+  categoryAllowsProjectContext,
+  categoryUsesWorkHistory,
+  topicLabel,
+} from "../constants/interview-phases.js";
+import { describeBandForPrompt } from "../constants/experience-bands.js";
 import logger from "../../../config/logger.js";
+
+/**
+ * Per-category instructions. Each tells the model what this question is
+ * for and, crucially, whether resume projects belong in it at all.
+ */
+export const CATEGORY_INSTRUCTIONS = Object.freeze({
+  [QUESTION_CATEGORIES.EXPERIENCE]:
+    "Understand the candidate's professional experience: responsibilities, technologies used at work, their actual contribution, level of ownership and how long they did it. If work history is provided, ask about one specific role from it. Do not quiz technical concepts and do not ask about resume projects here.",
+  [QUESTION_CATEGORIES.TECHNICAL_CONCEPT]:
+    "Evaluate the candidate's actual technical understanding. Ask a standalone technical question about concepts, internals or how something works. Do not mention resume projects or force the question into a project scenario.",
+  [QUESTION_CATEGORIES.TECHNICAL_IMPLEMENTATION]:
+    "Evaluate implementation knowledge: how the technology is applied, its internals, debugging, performance and trade-offs. Ask a standalone technical question. Do not mention resume projects or force the question into a project scenario.",
+  [QUESTION_CATEGORIES.PROJECT_DEEP_DIVE]:
+    "Evaluate the candidate's practical experience and ownership. Use only project information supported by the resume. Ask one focused question about implementation, architecture, technology choices, challenges, data design, security, performance or trade-offs, and about what the candidate personally did. Never invent details, metrics or technologies the resume does not state.",
+  [QUESTION_CATEGORIES.SCENARIO_BASED]:
+    "Present a realistic technical situation for this role (for example a slow endpoint, unexpected re-renders, a database slowing under load) and evaluate the candidate's problem-solving approach. Describe the situation in the question itself; do not reference the candidate's resume projects.",
+  [QUESTION_CATEGORIES.BEHAVIORAL]:
+    "Evaluate ownership, decision-making, independent problem-solving and technical responsibility through a specific past situation. Ask for what they did, why, and the outcome.",
+  [QUESTION_CATEGORIES.CLOSING]:
+    "Close the interview naturally with one short reflective question.",
+});
+
+const RECENT_ANSWER_CHARS = 200;
+
+function formatWorkHistory(workHistory) {
+  if (!Array.isArray(workHistory) || workHistory.length === 0) return "";
+  const lines = workHistory.map((w) => {
+    const head = [w.role, w.company && `at ${w.company}`, w.duration && `(${w.duration})`].filter(Boolean).join(" ");
+    const tech = w.technologies?.length ? `; technologies: ${w.technologies.join(", ")}` : "";
+    const resp = w.responsibilities?.length ? `; e.g. "${w.responsibilities[0]}"` : "";
+    return `- ${head}${tech}${resp}`;
+  });
+  return `\nCandidate Work History (from resume):\n${lines.join("\n")}`;
+}
+
+function formatRecentAnswers(recentAnswers) {
+  if (!Array.isArray(recentAnswers) || recentAnswers.length === 0) return "";
+  const lines = recentAnswers
+    .filter((a) => a && a.answer)
+    .slice(-2)
+    .map((a) => `- Q: ${String(a.question || "").slice(0, 120)}\n  A: ${String(a.answer).slice(0, RECENT_ANSWER_CHARS)}`);
+  return lines.length ? `\nRecent candidate answers (for continuity; do not repeat these questions):\n${lines.join("\n")}` : "";
+}
+
+function formatProject(projectContext) {
+  if (!projectContext || typeof projectContext !== "object") return "";
+  const parts = [];
+  if (projectContext.title) parts.push(`- Project: ${projectContext.title}`);
+  if (projectContext.description) parts.push(`- Description: ${projectContext.description}`);
+  if (projectContext.technologies?.length) parts.push(`- Technologies: ${projectContext.technologies.join(", ")}`);
+  if (projectContext.architecture) parts.push(`- Architecture: ${projectContext.architecture}`);
+  if (projectContext.contributions?.length) parts.push(`- Claimed Contributions: ${projectContext.contributions.join("; ")}`);
+  if (projectContext.evidenceSnippet) parts.push(`- Resume Evidence: "${projectContext.evidenceSnippet}"`);
+  return parts.length ? `\nCandidate Claimed Project Context:\n${parts.join("\n")}` : "";
+}
 
 const aiQuestionResponseSchema = z.object({
   question: z.string().trim().min(5),
@@ -62,30 +125,46 @@ export class AiQuestionService {
       projectContext = null,
       interviewType = "technical",
       interviewId = null,
+      questionCategory = null,
+      phase = null,
+      experienceProfile = null,
+      workHistory = null,
+      recentAnswers = [],
     } = context || {};
 
     const resolvedType = resolveInterviewTypeForTopic(topic, [interviewType]);
     const typeConfig = getTypePersonaAndConfig(resolvedType, role, experienceLevel);
 
-    let projectContextPrompt = "";
-    if (projectContext && typeof projectContext === "object") {
-      const parts = [];
-      if (projectContext.title) parts.push(`- Project: ${projectContext.title}`);
-      if (projectContext.technologies?.length) parts.push(`- Technologies: ${projectContext.technologies.join(", ")}`);
-      if (projectContext.architecture) parts.push(`- Architecture: ${projectContext.architecture}`);
-      if (projectContext.contributions?.length) parts.push(`- Claimed Contributions: ${projectContext.contributions.join("; ")}`);
-      if (projectContext.evidenceSnippet) parts.push(`- Resume Evidence: "${projectContext.evidenceSnippet}"`);
-      if (parts.length > 0) {
-        projectContextPrompt = `\nCandidate Claimed Project Context:\n${parts.join("\n")}`;
-      }
-    }
+    // Without a category (older callers) keep the previous behaviour:
+    // project grounding when a project is supplied.
+    const category = questionCategory || null;
+    const projectAllowed = category ? categoryAllowsProjectContext(category) : Boolean(projectContext);
+    const projectContextPrompt = projectAllowed ? formatProject(projectContext) : "";
+    // Project questions for candidates whose resume lists jobs but no
+    // projects fall back to work history as their evidence.
+    const workHistoryPrompt =
+      category &&
+      (categoryUsesWorkHistory(category) ||
+        (category === QUESTION_CATEGORIES.PROJECT_DEEP_DIVE && !projectContextPrompt))
+        ? formatWorkHistory(workHistory)
+        : "";
+    const recentAnswersPrompt =
+      category && category !== QUESTION_CATEGORIES.TECHNICAL_CONCEPT ? formatRecentAnswers(recentAnswers) : "";
+    const bandPrompt = describeBandForPrompt(experienceProfile);
+    const questionType =
+      (category && CATEGORY_QUESTION_TYPE[category]) || typeConfig.defaultQuestionType;
+    const label = topicLabel(topic);
+
+    const groundingRule = category
+      ? `8. Question category: ${category}${phase ? ` (interview phase: ${phase})` : ""}. ${CATEGORY_INSTRUCTIONS[category] || CATEGORY_INSTRUCTIONS[QUESTION_CATEGORIES.TECHNICAL_CONCEPT]}`
+      : "8. If candidate claimed project context is provided, GROUND the question in what the candidate explicitly claims to have built or contributed, WITHOUT assuming or fabricating unstated implementation details, metrics, or frameworks. Ask about their claimed contribution, design trade-offs, architecture decisions, or implementation choices based strictly on what is stated. If no project is provided, ground the question in their claimed skills.";
 
     const systemPrompt = `${typeConfig.persona}
 ${typeConfig.goal}
 Your task is to generate ONE single focused interview question.
-
+${bandPrompt ? `\n${bandPrompt}\nPitch the question at this level and the requested difficulty: the same topic is asked differently of a fresher and of a senior engineer.\n` : ""}
 STRICT RULES:
-1. Topic MUST be: ${topic}.
+1. Topic MUST be: ${label} (key: ${topic}).
 2. Target difficulty: ${difficulty}.
 3. The question must be clear, concise, direct, and appropriate for ${experienceLevel}.
 4. Target competency: ${typeConfig.defaultCompetency}.
@@ -94,19 +173,22 @@ STRICT RULES:
 ${conceptsAlreadyTested.filter(Boolean).map((c) => `   - ${c}`).join("\n") || "   (None yet)"}
 7. DO NOT repeat or ask variations of these previously asked questions:
 ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (None yet)"}
-8. If candidate claimed project context is provided, GROUND the question in what the candidate explicitly claims to have built or contributed, WITHOUT assuming or fabricating unstated implementation details, metrics, or frameworks. Ask about their claimed contribution, design trade-offs, architecture decisions, or implementation choices based strictly on what is stated. If no project is provided, ground the question in their claimed skills.
+${groundingRule}
 9. You MUST return ONLY valid JSON matching this exact structure:
 {
   "question": "Your question here",
   "concept": "Specific concept tested (e.g. STAR leadership, event delegation, system scalability)",
   "topic": "${topic.toUpperCase()}",
   "difficulty": "${difficulty.toUpperCase()}",
-  "questionType": "${typeConfig.defaultQuestionType}",
+  "questionType": "${questionType}",
   "competency": "${typeConfig.defaultCompetency}"
 }`;
 
-    const userPrompt = `Generate a ${difficulty} ${resolvedType.toUpperCase()} interview question on topic "${topic}" for a ${role} candidate (${experienceLevel}).
-Candidate background / skills: ${resumeSkills.join(", ") || "Standard role background"}.${projectContextPrompt ? `\n${projectContextPrompt}` : ""}`;
+    const skillsLine =
+      category === QUESTION_CATEGORIES.PROJECT_DEEP_DIVE || category === QUESTION_CATEGORIES.EXPERIENCE
+        ? ""
+        : `\nCandidate background / skills: ${resumeSkills.join(", ") || "Standard role background"}.`;
+    const userPrompt = `Generate a ${difficulty} ${(category || resolvedType).toUpperCase()} interview question on "${label}" for a ${role} candidate (${experienceLevel}).${skillsLine}${projectContextPrompt ? `\n${projectContextPrompt}` : ""}${workHistoryPrompt}${recentAnswersPrompt}`;
 
     try {
       const rawAiResponse = await this.llm.generateStructuredJson({
@@ -120,9 +202,11 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
         const normalized = {
           ...rawAiResponse,
           concept: String(rawAiResponse.concept || "").trim(),
-          topic: String(rawAiResponse.topic || topic).toUpperCase(),
+          // The planner owns the topic: a different topic from the model
+          // would silently move the session to another topic or phase.
+          topic: String(topic).toUpperCase(),
           difficulty: String(rawAiResponse.difficulty || difficulty).toUpperCase(),
-          questionType: rawAiResponse.questionType || typeConfig.defaultQuestionType,
+          questionType: category ? questionType : rawAiResponse.questionType || typeConfig.defaultQuestionType,
           competency: rawAiResponse.competency || typeConfig.defaultCompetency,
         };
 
@@ -137,7 +221,7 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
             experienceLevel,
             model: this.llm?.geminiModel || this.llm?.openaiModel || null,
           });
-          return { ...validated.data, questionSource: "ai_generated" };
+          return { ...validated.data, questionCategory: category, questionSource: "ai_generated" };
         } else {
           logger.warn(
             `AI response schema validation failed: ${validated.error.message}. Using fallback.`
@@ -158,15 +242,23 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
     if (bankQ) {
       return {
         ...bankQ,
-        questionType: bankQ.questionType || typeConfig.defaultQuestionType,
+        topic: String(topic).toUpperCase(),
+        questionType: category ? questionType : bankQ.questionType || typeConfig.defaultQuestionType,
         competency: bankQ.competency || typeConfig.defaultCompetency,
+        questionCategory: category,
         questionSource: "bank",
       };
     }
 
     // 2nd fallback: the curated fallback set matching topic & interview type.
     logger.info(`Using verified fallback question for topic: ${topic} (${difficulty}, type: ${resolvedType})`);
-    return { ...getFallbackQuestion(topic, difficulty, previousQuestions, resolvedType), questionSource: "fallback" };
+    const curated = getFallbackQuestion(topic, difficulty, previousQuestions, resolvedType);
+    return {
+      ...curated,
+      ...(category ? { questionType } : {}),
+      questionCategory: category,
+      questionSource: "fallback",
+    };
   }
 
   /**
@@ -204,10 +296,23 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
       projectContext = null,
       interviewType = "technical",
       interviewId = null,
+      phase = null,
+      questionCategory = null,
+      experienceProfile = null,
     } = context || {};
 
     const resolvedType = resolveInterviewTypeForTopic(topic, [interviewType]);
     const typeConfig = getTypePersonaAndConfig(resolvedType, role, experienceLevel);
+    const label = topicLabel(topic);
+    // A follow-up may reference a project only when its parent question was
+    // a project question. Older callers (no category) keep prior behaviour.
+    const projectAllowed = questionCategory
+      ? categoryAllowsProjectContext(questionCategory)
+      : Boolean(projectContext);
+    const isTechnicalCategory =
+      questionCategory === QUESTION_CATEGORIES.TECHNICAL_CONCEPT ||
+      questionCategory === QUESTION_CATEGORIES.TECHNICAL_IMPLEMENTATION;
+    const projectTitle = projectAllowed && projectContext?.title ? projectContext.title : null;
 
     let targetQuestionType = "DEPTH_PROBE";
     if (followUpType === "CLARIFICATION" || followUpType === "EASY") {
@@ -236,7 +341,11 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
       experienceAuthenticity === "THEORETICAL_TEXTBOOK"
         ? resolvedType === "hr" || resolvedType === "behavioral"
           ? "\n- Candidate gave a generic/theoretical answer without concrete personal context: Ask for a specific real-world example from their actual experience."
-          : `\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario from their claimed project context (${projectContext?.title ? `'${projectContext.title}'` : "hands-on experience"}).`
+          : !questionCategory
+          ? `\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario from their claimed project context (${projectContext?.title ? `'${projectContext.title}'` : "hands-on experience"}).`
+          : projectTitle
+          ? `\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario from their claimed project context ('${projectTitle}').`
+          : `\n- Candidate gave a textbook/AI-sounding answer without hands-on context: Challenge them with a practical production/debugging scenario about ${label} itself, without referring to their resume projects.`
         : "";
 
     const contradictionStr = contradictionDetails
@@ -248,10 +357,28 @@ Candidate background / skills: ${resumeSkills.join(", ") || "Standard role backg
         ? `\n- Candidate Background: ${resumeSkills.join(", ")}`
         : "";
 
-    const projectContextStr =
-      projectContext && typeof projectContext === "object" && projectContext.title
-        ? `\n- Candidate Project: ${projectContext.title} (${(projectContext.technologies || []).join(", ")})`
-        : "";
+    const projectContextStr = projectTitle
+      ? `\n- Candidate Project: ${projectTitle} (${(projectContext.technologies || []).join(", ")})`
+      : "";
+
+    const PHASE_FOLLOW_UP_GUIDANCE = {
+      [QUESTION_CATEGORIES.TECHNICAL_CONCEPT]:
+        "Go deeper into the same concept: mechanics, implementation details or debugging. Do not switch to the candidate's projects.",
+      [QUESTION_CATEGORIES.TECHNICAL_IMPLEMENTATION]:
+        "Go deeper into implementation, internals, performance or failure handling of the same technology. Do not switch to the candidate's projects.",
+      [QUESTION_CATEGORIES.PROJECT_DEEP_DIVE]:
+        "Probe the same project: architecture, the candidate's own contribution, technical decisions and challenges. Verify ownership without inventing details.",
+      [QUESTION_CATEGORIES.SCENARIO_BASED]:
+        "Extend the same scenario: further troubleshooting steps, what they would check next, or how they would redesign to prevent it.",
+      [QUESTION_CATEGORIES.EXPERIENCE]:
+        "Ask for specifics of the same role: their exact responsibilities, decisions and outcomes.",
+      [QUESTION_CATEGORIES.BEHAVIORAL]:
+        "Ask for specifics of the same situation: their actions, reasoning and the result.",
+    };
+    const phaseRule = questionCategory
+      ? `\n0. Stay in the current interview phase${phase ? ` (${phase})` : ""} and on the same topic (${label}). ${PHASE_FOLLOW_UP_GUIDANCE[questionCategory] || ""} You may make it easier or harder, but do not move to a different topic or phase.`
+      : "";
+    const bandPrompt = describeBandForPrompt(experienceProfile);
 
     const systemPrompt = `${typeConfig.persona}
 The candidate was asked: "${previousQuestion}"
@@ -262,13 +389,14 @@ Evaluation Notes:
 - Probe type requested: ${targetQuestionType} (${difficulty})
 - Interview format: ${resolvedType} (${typeConfig.focusSummary})
 
+${bandPrompt ? `${bandPrompt}\n` : ""}
 Your task is to generate ONE single focused follow-up question.
-STRICT RULES:
+STRICT RULES:${phaseRule}
 1. Ground the follow-up question directly in what the candidate said and probe deeper into:
    - For HR / Behavioral: probe the STAR framework (specific actions, team dynamics, measurable impact, or what they would do differently).
    - For Technical / System Design / Coding: probe mechanics, failure handling, scalability trade-offs, or hands-on implementation details.
    - If candidate voiced a misconception, constructively challenge it without sounding condescending.
-   - If answer sounded textbook, ask how they handled this in their actual project (${projectContext?.title ? `specifically in '${projectContext.title}'` : "or workplace experience"}).
+   - If answer sounded textbook, ${projectTitle ? `ask how they handled this in their actual project (specifically in '${projectTitle}')` : isTechnicalCategory ? "ask a concrete implementation or debugging question about the same concept" : "ask how they handled this in their actual workplace experience"}.
 2. Question Types:
    - If CLARIFICATION: ask a constructive clarifying question addressing the core concepts they touched on.
    - If DEPTH_PROBE: probe internal mechanics, execution details, or specific decision steps.
@@ -303,7 +431,8 @@ ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (No
         const normalized = {
           ...rawAiResponse,
           concept: String(rawAiResponse.concept || `${topic.toLowerCase()} follow-up`).trim(),
-          topic: String(rawAiResponse.topic || topic).toUpperCase(),
+          // Follow-ups never change topic, so they can never change phase.
+          topic: String(topic).toUpperCase(),
           difficulty: String(rawAiResponse.difficulty || difficulty).toUpperCase(),
           questionType: rawAiResponse.questionType || targetQuestionType,
           competency: rawAiResponse.competency || typeConfig.defaultCompetency,
@@ -349,7 +478,7 @@ ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (No
       (conceptsDemonstrated[0] ? `applying ${conceptsDemonstrated[0]}` : null) ||
       (resolvedType === "hr" || resolvedType === "behavioral"
         ? `your specific actions and the measurable result`
-        : `${topic.toLowerCase()} production trade-offs and implementation details`);
+        : `${label} trade-offs and implementation details`);
 
     let fallbackQuestion;
     if (resolvedType === "hr" || resolvedType === "behavioral") {
@@ -366,9 +495,11 @@ ${previousQuestions.map((q, idx) => `   ${idx + 1}. ${q}`).join("\n") || "   (No
       if (targetQuestionType === "CLARIFICATION") {
         fallbackQuestion = `Could you clarify how you would handle ${focusArea} in a real-world scenario?`;
       } else if (targetQuestionType === "DEPTH_PROBE") {
-        fallbackQuestion = `How does ${topic} handle ${focusArea} under the hood, and what are the main architectural trade-offs?`;
+        fallbackQuestion = `How does ${label} handle ${focusArea} under the hood, and what are the main trade-offs?`;
       } else if (targetQuestionType === "PRACTICAL") {
-        fallbackQuestion = `In a production environment, how have you configured, tested, or optimized ${focusArea}?`;
+        fallbackQuestion = isTechnicalCategory
+          ? `How would you implement, test, or optimize ${focusArea} in a real application?`
+          : `In a production environment, how have you configured, tested, or optimized ${focusArea}?`;
       } else if (targetQuestionType === "SCENARIO" || targetQuestionType === "VALIDATION") {
         fallbackQuestion = `Could you walk through a concrete technical problem you encountered with ${focusArea} and how you resolved it?`;
       } else {

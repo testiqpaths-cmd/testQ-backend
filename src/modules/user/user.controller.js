@@ -14,6 +14,7 @@ import {
 	softDeleteUser,
 	listUsers,
 	listStudents,
+	listStudentsForSelection,
 	getStudentEducationFilterOptions,
 	createStudent,
 	createUsersFromArray,
@@ -295,6 +296,13 @@ export const listStudentsController = async (req, res) => {
 			orgId = dbUser?.organizationId ?? null;
 		}
 		query.organizationId = orgId;
+	}
+
+	// The student picker opts into paging with `paginate=true`; every other
+	// caller keeps the original unpaginated response.
+	if (query.paginate === "true") {
+		const result = await listStudentsForSelection(query);
+		return res.json({ success: true, ...result });
 	}
 
 	const users = await listStudents(query);

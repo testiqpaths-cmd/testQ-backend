@@ -41,62 +41,180 @@ export const withSubscriptionTransaction = async (workFn) => {
   }
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const isPastExpiry = (sub) => Boolean(sub?.expiresAt && sub.expiresAt <= new Date());
+
 /**
- * Gets the user's active subscription or assigns a default one if missing.
+ * The login account that owns an organization's subscription. Students and
+ * the org account both point at the same Organization document via
+ * user.organizationId; the org's plan is stored on that ORGANIZATION user
+ * (the oldest one, should an organization ever have more than one login).
+ */
+export const getOrganizationAccount = async (organizationId) => {
+  if (!organizationId) return null;
+  // Legacy accounts may share the Organization document's _id instead of
+  // pointing at it through organizationId.
+  return User.findOne({
+    role: "ORGANIZATION",
+    $or: [{ organizationId }, { _id: organizationId }],
+  })
+    .sort({ createdAt: 1 })
+    .select("_id role organizationId status")
+    .lean();
+};
+
+/**
+ * Gets the subscription that governs `userId` (an independent STUDENT or an
+ * ORGANIZATION account), assigning that role's default plan when the user
+ * has none or their plan is no longer usable (expired / cancelled).
  *
- * The plan/subscription system only governs independent students — an
- * ORGANIZATION account and any STUDENT who belongs to one (user.organizationId
- * set) are unrestricted by it entirely. Organizations get a dedicated,
- * separate cap instead (Organization.studentLimit, enforced in
- * user.service.js's assertStudentLimitNotExceeded). Returning null here
- * (rather than only skipping *future* auto-creation) means any pre-existing
- * subscription docs for such users are also ignored going forward, and it
- * cascades cleanly: checkFeatureAccess() and getUserUsageDetails() below
- * both already fail-open/return null when this returns null.
+ * Returns:
+ *  - an ACTIVE subscription, or
+ *  - the user's non-active subscription when there's no default plan to fall
+ *    back to (callers treat it as "subscription expired / required"), or
+ *  - null when the user has never had a subscription and their role has no
+ *    default plan. For ORGANIZATION accounts that means "plans aren't set up
+ *    for organizations yet" and they keep legacy unrestricted access.
+ *
+ * Org-affiliated students never own a subscription — they're governed by
+ * their organization's plan; see resolveAccessPolicy(). IQPATH_ADMIN is
+ * unrestricted. Both return null here.
  */
 export const getUserSubscription = async (userId) => {
   const user = await User.findById(userId).select("role organizationId");
   if (!user) throw new ApiError(404, "User not found");
 
-  const isOrganization = user.role === "ORGANIZATION";
   const isOrgAffiliatedStudent = user.role === "STUDENT" && Boolean(user.organizationId);
-  if (isOrganization || isOrgAffiliatedStudent) {
+  if (isOrgAffiliatedStudent || !["STUDENT", "ORGANIZATION"].includes(user.role)) {
     return null;
   }
 
-  let sub = await UserSubscription.findOne({ userId, status: "ACTIVE" }).populate("planId");
+  // One subscription document per user (unique userId), whatever its status.
+  let sub = await UserSubscription.findOne({ userId }).populate("planId");
+  if (sub && sub.status === "ACTIVE" && sub.planId && !isPastExpiry(sub)) {
+    return sub;
+  }
 
-  if (!sub || !sub.planId) {
-    // Map user.role string to Role document
-    const roleDoc = await Role.findOne({ name: user.role.toUpperCase() });
+  const roleDoc = await Role.findOne({ name: user.role.toUpperCase() });
+  const defaultPlan = roleDoc
+    ? await Plan.findOne({ roleId: roleDoc._id, isDefault: true, active: { $ne: false } })
+    : null;
+
+  if (!defaultPlan) {
     if (!roleDoc) {
-      console.warn(`[SubscriptionService] User ${userId} has unknown role: ${user.role}`);
-      return null; // Cannot assign default
+      logger.warn(`[SubscriptionService] User ${userId} has unknown role: ${user.role}`);
+    } else if (!sub) {
+      logger.debug?.(`[SubscriptionService] No default plan for role: ${roleDoc.name}`);
     }
+    return sub || null;
+  }
 
-    const defaultPlan = await Plan.findOne({ roleId: roleDoc._id, isDefault: true });
-    if (!defaultPlan) {
-      console.warn(`[SubscriptionService] No default plan found for role: ${roleDoc.name}`);
-      return null;
-    }
+  // Missing, expired or cancelled plan -> fall back to the role's default
+  // plan. Usage counters are kept, so the default plan's limits apply to
+  // what was already consumed.
+  const defaultExpiry = defaultPlan.durationDays
+    ? new Date(Date.now() + defaultPlan.durationDays * DAY_MS)
+    : null;
 
-    if (sub) {
-      sub.planId = defaultPlan._id;
-      await sub.save();
-      sub = await UserSubscription.findById(sub._id).populate("planId");
-    } else {
-      sub = new UserSubscription({
+  if (sub) {
+    sub.planId = defaultPlan._id;
+    sub.status = "ACTIVE";
+    sub.startsAt = new Date();
+    sub.expiresAt = defaultExpiry;
+    await sub.save();
+  } else {
+    try {
+      sub = await UserSubscription.create({
         userId: user._id,
         planId: defaultPlan._id,
         status: "ACTIVE",
+        expiresAt: defaultExpiry,
       });
-      await sub.save();
-      sub = await UserSubscription.findById(sub._id).populate("planId");
+    } catch (err) {
+      // Concurrent first request created it already.
+      if (err.code !== 11000) throw err;
     }
   }
 
-  return sub;
+  return UserSubscription.findOne({ userId }).populate("planId");
 };
+
+/**
+ * Decides which plan (if any) governs a user and which allowance applies.
+ *
+ *   { mode: "BYPASS" }  — unrestricted (admins; organizations — and their
+ *                         students — while no organization plan exists)
+ *   { mode: "PLAN", sub, scope, user }
+ *       scope "SELF"        — independent student or organization account:
+ *                             PlanFeature.enabled/limit/resetType
+ *       scope "ORG_STUDENT" — student of an organization: the org's plan,
+ *                             PlanFeature.studentEnabled/studentLimit/
+ *                             studentResetType, counted per student
+ *   { mode: "NONE", user } — independent student with no subscription
+ */
+export const resolveAccessPolicy = async (userOrId) => {
+  const user =
+    userOrId && userOrId.role
+      ? userOrId
+      : await User.findById(userOrId).select("role organizationId status");
+  if (!user || user.status === "SUSPENDED") {
+    throw new ApiError(403, "Account suspended or not found.");
+  }
+
+  if (user.role === "IQPATH_ADMIN") return { mode: "BYPASS", user };
+
+  if (user.role === "STUDENT" && user.organizationId) {
+    const orgAccount = await getOrganizationAccount(user.organizationId);
+    if (!orgAccount) return { mode: "BYPASS", user };
+    const sub = await getUserSubscription(orgAccount._id);
+    if (!sub) return { mode: "BYPASS", user };
+    return { mode: "PLAN", sub, scope: "ORG_STUDENT", user };
+  }
+
+  if (user.role === "ORGANIZATION") {
+    const sub = await getUserSubscription(user._id);
+    if (!sub) return { mode: "BYPASS", user };
+    return { mode: "PLAN", sub, scope: "SELF", user };
+  }
+
+  if (user.role === "STUDENT") {
+    const sub = await getUserSubscription(user._id);
+    if (!sub) return { mode: "NONE", user };
+    return { mode: "PLAN", sub, scope: "SELF", user };
+  }
+
+  return { mode: "BYPASS", user };
+};
+
+/** The allowance a PlanFeature grants for a given policy scope. */
+export const getFeatureRule = (planFeature, scope) => {
+  if (!planFeature) return null;
+  if (scope === "ORG_STUDENT") {
+    return {
+      enabled: Boolean(planFeature.studentEnabled),
+      limit: planFeature.studentLimit ?? null,
+      resetType: planFeature.studentResetType || "LIFETIME",
+    };
+  }
+  return {
+    enabled: Boolean(planFeature.enabled),
+    limit: planFeature.limit ?? null,
+    resetType: planFeature.resetType || "LIFETIME",
+  };
+};
+
+/**
+ * The Organization document an ORGANIZATION account manages: normally
+ * user.organizationId; older accounts were created sharing its _id.
+ */
+const getManagedOrganizationId = (orgUser) => orgUser?.organizationId || orgUser?._id || null;
+
+/** Active students of the given Organization document. */
+const countOrganizationStudents = (organizationId) =>
+  organizationId
+    ? User.countDocuments({ organizationId, role: "STUDENT", status: "ACTIVE" })
+    : Promise.resolve(0);
 
 /**
  * Single source of truth for "does this user have paid access" — shared by
@@ -105,9 +223,9 @@ export const getUserSubscription = async (userId) => {
  * name/expiry alongside the boolean since callers that need to reject also
  * want to explain why (e.g. "renew your plan" vs "you're not logged in").
  *
- * Org accounts and org-affiliated students are treated as having access,
- * same "unmetered, not unpaid" rule getUserSubscription already applies to
- * them elsewhere — an org seat is a paid seat, just not metered per-student.
+ * Org accounts and their students follow the organization's plan (students
+ * via its per-student allowance); until organization plans exist they keep
+ * legacy full access — see resolveAccessPolicy().
  */
 export const getPaidAccessStatus = async (userId) => {
   const user = await User.findById(userId).select("role organizationId status");
@@ -115,36 +233,33 @@ export const getPaidAccessStatus = async (userId) => {
     return { hasActivePaidAccess: false, planName: null, subscriptionExpiresAt: null };
   }
 
-  const isOrganization = user.role === "ORGANIZATION";
-  const isOrgAffiliatedStudent = user.role === "STUDENT" && Boolean(user.organizationId);
-  if (isOrganization || isOrgAffiliatedStudent) {
-    return { hasActivePaidAccess: true, planName: "Organization", subscriptionExpiresAt: null };
+  const policy = await resolveAccessPolicy(user);
+  // Organizations (and their students) with no organization plan set up yet
+  // keep the legacy "an org seat is a paid seat" access.
+  if (policy.mode === "BYPASS") {
+    const isOrgSide = user.role === "ORGANIZATION" || Boolean(user.organizationId);
+    return { hasActivePaidAccess: true, planName: isOrgSide ? "Organization" : null, subscriptionExpiresAt: null };
   }
 
-  const sub = await getUserSubscription(userId);
-  if (!sub || sub.status !== "ACTIVE" || !sub.planId) {
+  const { sub } = policy;
+  if (policy.mode === "NONE" || !sub || sub.status !== "ACTIVE" || !sub.planId) {
     return { hasActivePaidAccess: false, planName: sub?.planId?.name ?? null, subscriptionExpiresAt: sub?.expiresAt ?? null };
   }
-  if (sub.expiresAt && sub.expiresAt <= new Date()) {
+  if (isPastExpiry(sub)) {
     return { hasActivePaidAccess: false, planName: sub.planId?.name, subscriptionExpiresAt: sub.expiresAt };
   }
 
   // Access is governed purely by the RESUME_BUILDER PlanFeature toggle
   // (Subscriptions > Plans > Features in the admin panel) — an admin can
   // grant it to any plan, including the free tier, or revoke it from a paid
-  // one. There is deliberately no "isPaidPlan" pre-condition gating this:
-  // an earlier version required the plan to be non-default/priced>0 before
-  // even checking the feature flag, which silently ignored an admin
-  // enabling RESUME_BUILDER on the free plan. Fails CLOSED (unlike
-  // checkFeatureAccess's fail-open default elsewhere in this file) if the
-  // feature or its plan mapping doesn't exist — this gate protects paid
-  // content, so "not configured" must mean "no access", not "unlimited
-  // access".
+  // one. For an organization's students it's the plan's per-student toggle.
+  // Fails CLOSED if the feature or its plan mapping doesn't exist — this
+  // gate protects paid content, so "not configured" must mean "no access".
   const feature = await Feature.findOne({ key: "RESUME_BUILDER", active: true });
   let resumeBuilderEnabled = false;
   if (feature) {
     const planFeature = await PlanFeature.findOne({ planId: sub.planId._id, featureId: feature._id });
-    resumeBuilderEnabled = Boolean(planFeature?.enabled);
+    resumeBuilderEnabled = Boolean(getFeatureRule(planFeature, policy.scope)?.enabled);
   }
 
   return {
@@ -209,14 +324,16 @@ export const validatePlanEligibility = async (userId, planId) => {
     throw new ApiError(403, "Account suspended or not found");
   }
 
-  // Only independent students are eligible to subscribe to individual plans
-  if (user.role !== "STUDENT" || user.organizationId) {
+  // Independent students buy STUDENT plans, organization accounts buy
+  // ORGANIZATION plans. Org students are governed by their org's plan.
+  if (user.role === "STUDENT" && user.organizationId) {
     throw new ApiError(
       403,
-      user.organizationId
-        ? "Organization students have full access and do not need individual subscriptions."
-        : "Only independent students can subscribe to individual plans."
+      "Your plan is managed by your organization. Please contact your organization to upgrade."
     );
+  }
+  if (!["STUDENT", "ORGANIZATION"].includes(user.role)) {
+    throw new ApiError(403, "Only students and organizations can subscribe to plans.");
   }
 
   const plan = await Plan.findById(planId).populate("roleId");
@@ -224,12 +341,46 @@ export const validatePlanEligibility = async (userId, planId) => {
     throw new ApiError(404, "Plan not found or inactive");
   }
 
-  // Plan must belong to STUDENT role
-  if (plan.roleId?.name !== "STUDENT") {
-    throw new ApiError(403, "This plan is not available for students.");
+  if (plan.roleId?.name !== user.role) {
+    throw new ApiError(
+      403,
+      user.role === "ORGANIZATION"
+        ? "This plan is not available for organizations."
+        : "This plan is not available for students."
+    );
   }
 
   return { user, plan };
+};
+
+/**
+ * Organization.studentLimit — the per-organization student cap set at
+ * creation time. Only enforced here for organizations without a plan
+ * (user.service.js also enforces it when students are created).
+ */
+const assertLegacyStudentLimit = async (organizationId, incrementBy, featureKey) => {
+  if (!organizationId) return;
+  const org = await Organization.findById(organizationId).select("studentLimit name").lean();
+  if (!org || org.studentLimit === null || org.studentLimit === undefined) return;
+  const currentCount = await countOrganizationStudents(organizationId);
+  if (currentCount + incrementBy > org.studentLimit) {
+    throw new ApiError(
+      402,
+      `Student limit reached for ${org.name || "this organization"}. You can add at most ${Math.max(
+        0,
+        org.studentLimit - currentCount
+      )} more student(s) (limit: ${org.studentLimit}).`,
+      null,
+      "FEATURE_LIMIT_REACHED",
+      {
+        feature: featureKey,
+        used: currentCount,
+        limit: org.studentLimit,
+        remaining: Math.max(0, org.studentLimit - currentCount),
+        availablePlans: true,
+      }
+    );
+  }
 };
 
 /**
@@ -261,79 +412,54 @@ export const checkFeatureAccess = async (
     );
   }
 
-  // 2. Resolve User & Access Policy
-  const user = await User.findById(userId).select("role organizationId status");
-  if (!user || user.status === "SUSPENDED") {
-    throw new ApiError(403, "Account suspended or not found.");
-  }
+  // 2. Resolve which plan governs this user (own plan, the organization's
+  // plan for org students, or unrestricted)
+  const policy = await resolveAccessPolicy(userId);
+  const { user } = policy;
 
-  // Superuser bypass: IQPATH_ADMIN has unrestricted access
-  if (user.role === "IQPATH_ADMIN") {
-    return true;
-  }
-
-  // Organization-affiliated student bypass: students under an organization have full feature access
-  if (user.role === "STUDENT" && user.organizationId) {
-    return true;
-  }
-
-  // Organization accounts: full feature access, BUT CAPACITY limits (e.g. MAX_STUDENTS) are enforced
-  if (user.role === "ORGANIZATION") {
-    if (feature.type === "CAPACITY") {
-      let currentCount = 0;
-      if (feature.key === "MAX_STUDENTS") {
-        const org = await Organization.findById(userId).select("studentLimit name").lean();
-        if (org && org.studentLimit !== null && org.studentLimit !== undefined) {
-          currentCount = await User.countDocuments({
-            organizationId: userId,
-            role: "STUDENT",
-            status: "ACTIVE",
-          });
-          if (currentCount + incrementBy > org.studentLimit) {
-            throw new ApiError(
-              402,
-              `Student limit reached for ${org.name || "this organization"}. You can add at most ${Math.max(
-                0,
-                org.studentLimit - currentCount
-              )} more student(s) (limit: ${org.studentLimit}).`,
-              null,
-              "FEATURE_LIMIT_REACHED",
-              {
-                feature: feature.key,
-                used: currentCount,
-                limit: org.studentLimit,
-                remaining: Math.max(0, org.studentLimit - currentCount),
-                availablePlans: true,
-              }
-            );
-          }
-        }
-      }
+  if (policy.mode === "BYPASS") {
+    // Legacy organization student cap (Organization.studentLimit) still
+    // applies to organizations that have no plan yet.
+    if (user.role === "ORGANIZATION" && feature.key === "MAX_STUDENTS") {
+      await assertLegacyStudentLimit(getManagedOrganizationId(user), incrementBy, feature.key);
     }
     return true;
   }
 
-  // 3. Resolve Subscription for Independent Student
-  const sub = await getUserSubscription(userId);
-  if (!sub || sub.status !== "ACTIVE" || !sub.planId) {
-    throw new ApiError(
-      402,
-      "No active subscription found. Please subscribe to access this feature.",
-      null,
-      "SUBSCRIPTION_REQUIRED",
-      { feature: feature.key, availablePlans: true }
+  const isOrgStudent = policy.scope === "ORG_STUDENT";
+  const planLabel = isOrgStudent ? "your organization's plan" : "your current plan";
+  // Lets the client tell org students to contact their organization instead
+  // of showing them a purchase page they can't use.
+  const managedBy = isOrgStudent ? "ORGANIZATION" : null;
+  const denial = (message, code, extra = {}) =>
+    new ApiError(402, message, null, code, {
+      feature: feature.key,
+      availablePlans: !isOrgStudent,
+      managedBy,
+      ...extra,
+    });
+
+  // 3. Subscription must exist, be active and not past its expiry
+  const { sub } = policy;
+  if (policy.mode === "NONE" || !sub || !sub.planId) {
+    throw denial(
+      isOrgStudent
+        ? "Your organization has no active plan. Please contact your organization."
+        : "No active subscription found. Please subscribe to access this feature.",
+      "SUBSCRIPTION_REQUIRED"
     );
   }
 
-  if (sub.expiresAt && sub.expiresAt <= new Date()) {
-    sub.status = "EXPIRED";
-    await sub.save();
-    throw new ApiError(
-      402,
-      "Your subscription has expired. Please renew or upgrade to continue.",
-      null,
-      "SUBSCRIPTION_EXPIRED",
-      { feature: feature.key, availablePlans: true }
+  if (sub.status !== "ACTIVE" || isPastExpiry(sub)) {
+    if (sub.status === "ACTIVE") {
+      sub.status = "EXPIRED";
+      await sub.save();
+    }
+    throw denial(
+      isOrgStudent
+        ? "Your organization's plan has expired. Please contact your organization."
+        : "Your subscription has expired. Please renew or upgrade to continue.",
+      "SUBSCRIPTION_EXPIRED"
     );
   }
 
@@ -341,57 +467,34 @@ export const checkFeatureAccess = async (
 
   // 4. Resolve Plan Feature Config (FAIL-CLOSED)
   const planFeature = await PlanFeature.findOne({ planId, featureId: feature._id });
-  
-  if (!planFeature) {
-    throw new ApiError(
-      402,
-      `Access to ${feature.displayName} is not included in your current plan.`,
-      null,
+  const rule = getFeatureRule(planFeature, policy.scope);
+
+  if (!rule) {
+    throw denial(
+      `Access to ${feature.displayName} is not included in ${planLabel}.`,
       "FEATURE_NOT_INCLUDED",
-      {
-        feature: feature.key,
-        used: 0,
-        limit: 0,
-        remaining: 0,
-        availablePlans: true,
-      }
+      { used: 0, limit: 0, remaining: 0 }
     );
   }
 
-  if (!planFeature.enabled) {
-    throw new ApiError(
-      402,
-      `Access to ${feature.displayName} is disabled on your current plan.`,
-      null,
+  if (!rule.enabled) {
+    throw denial(
+      `Access to ${feature.displayName} is disabled on ${planLabel}.`,
       "FEATURE_NOT_INCLUDED",
-      {
-        feature: feature.key,
-        used: 0,
-        limit: 0,
-        remaining: 0,
-        availablePlans: true,
-      }
+      { used: 0, limit: 0, remaining: 0 }
     );
   }
 
-  const limit = planFeature.limit;
+  const limit = rule.limit;
   if (limit === null) {
     return true; // Unlimited
   }
 
   if (limit === 0) {
-    throw new ApiError(
-      402,
-      `Access to ${feature.displayName} is not available in your current plan.`,
-      null,
+    throw denial(
+      `Access to ${feature.displayName} is not available in ${planLabel}.`,
       "FEATURE_LIMIT_REACHED",
-      {
-        feature: feature.key,
-        used: 0,
-        limit: 0,
-        remaining: 0,
-        availablePlans: true,
-      }
+      { used: 0, limit: 0, remaining: 0 }
     );
   }
 
@@ -402,23 +505,15 @@ export const checkFeatureAccess = async (
 
   if (feature.type === "CAPACITY") {
     let currentCount = 0;
-    if (feature.key === "MAX_STUDENTS") {
-      currentCount = await User.countDocuments({ organizationId: userId, status: "ACTIVE" });
+    if (feature.key === "MAX_STUDENTS" && user.role === "ORGANIZATION") {
+      currentCount = await countOrganizationStudents(getManagedOrganizationId(user));
     }
-    
+
     if (currentCount + incrementBy > limit) {
-      throw new ApiError(
-        402,
-        `Limit exceeded! You can only add ${limit - currentCount} more ${feature.displayName} on your current plan. Please upgrade to continue.`,
-        null,
+      throw denial(
+        `Limit exceeded! You can only add ${Math.max(0, limit - currentCount)} more ${feature.displayName} on ${planLabel}. Please upgrade to continue.`,
         "FEATURE_LIMIT_REACHED",
-        {
-          feature: feature.key,
-          used: currentCount,
-          limit,
-          remaining: Math.max(0, limit - currentCount),
-          availablePlans: true,
-        }
+        { used: currentCount, limit, remaining: Math.max(0, limit - currentCount) }
       );
     }
     return true;
@@ -461,7 +556,7 @@ export const checkFeatureAccess = async (
   const now = new Date();
   const neededReset = (usageRecord.periodEnd && now >= usageRecord.periodEnd) || !usageRecord.periodEnd;
   if (neededReset) {
-    await handleResetLogic(usageRecord, planFeature.resetType);
+    await handleResetLogic(usageRecord, rule.resetType);
     await usageRecord.save();
   }
 
@@ -471,18 +566,10 @@ export const checkFeatureAccess = async (
   // created (e.g. an AI interview session that consumed their last slot).
   if (incrementBy === 0) {
     if (!options.skipLimitCheck && usageRecord.usedCount >= limit) {
-      throw new ApiError(
-        402,
-        `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
-        null,
+      throw denial(
+        `You have reached the maximum limit (${limit}) for ${feature.displayName} on ${planLabel}.${isOrgStudent ? " Please contact your organization." : " Please upgrade to continue."}`,
         "FEATURE_LIMIT_REACHED",
-        {
-          feature: feature.key,
-          used: usageRecord.usedCount,
-          limit,
-          remaining: 0,
-          availablePlans: true,
-        }
+        { used: usageRecord.usedCount, limit, remaining: 0 }
       );
     }
     return true;
@@ -526,19 +613,11 @@ export const checkFeatureAccess = async (
       );
 
       if (!updated) {
-        throw new ApiError(
-          402,
-          `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
-          null,
-          "FEATURE_LIMIT_REACHED",
-          {
-            feature: feature.key,
-            used: usageRecord.usedCount,
-            limit,
-            remaining: Math.max(0, limit - usageRecord.usedCount),
-            availablePlans: true,
-          }
-        );
+        throw denial(
+        `You have reached the maximum limit (${limit}) for ${feature.displayName} on ${planLabel}.${isOrgStudent ? " Please contact your organization." : " Please upgrade to continue."}`,
+        "FEATURE_LIMIT_REACHED",
+        { used: usageRecord.usedCount, limit, remaining: Math.max(0, limit - usageRecord.usedCount) }
+      );
       }
 
       await FeatureReservation.create(
@@ -572,22 +651,12 @@ export const checkFeatureAccess = async (
   );
 
   if (!updatedUsage) {
-    throw new ApiError(
-      402,
-      `You have reached the maximum limit (${limit}) for ${feature.displayName} on your current plan. Please upgrade to continue.`,
-      null,
-      "FEATURE_LIMIT_REACHED",
-      {
-        feature: feature.key,
-        used: usageRecord.usedCount,
-        limit,
-        remaining: Math.max(0, limit - usageRecord.usedCount),
-        availablePlans: true,
-      }
-    );
+    throw denial(
+        `You have reached the maximum limit (${limit}) for ${feature.displayName} on ${planLabel}.${isOrgStudent ? " Please contact your organization." : " Please upgrade to continue."}`,
+        "FEATURE_LIMIT_REACHED",
+        { used: usageRecord.usedCount, limit, remaining: Math.max(0, limit - usageRecord.usedCount) }
+      );
   }
-
-  return true;
 
   return true;
 };
@@ -810,7 +879,7 @@ export const reconcileStaleReservations = async ({
         }
       } else if (doc.featureKey === "AI_INTERVIEW") {
         const { InterviewSession } = await import(
-          "../../../ai-interview/schemas/interview-session.schema.js"
+          "../../ai-interview/schemas/interview-session.schema.js"
         );
         if (InterviewSession) {
           let session = await InterviewSession.findOne({ reservationId: doc.reservationId }).lean();
@@ -864,15 +933,38 @@ export const reconcileStaleReservations = async ({
 };
 
 /**
+ * Mirrors the deny rules of checkFeatureAccess so the client can disable a
+ * feature *before* the user hits a 402. Keep the two in sync.
+ *   SUBSCRIPTION_EXPIRED — plan's expiresAt has passed
+ *   NOT_INCLUDED         — disabled on the plan, or limit is 0
+ *   LIMIT_REACHED        — USAGE/CAPACITY quota used up for the period
+ */
+const getFeatureBlockState = ({ isExpired, enabled, limit, type, used }) => {
+  if (isExpired) return { blocked: true, blockReason: "SUBSCRIPTION_EXPIRED" };
+  if (!enabled) return { blocked: true, blockReason: "NOT_INCLUDED" };
+  if (limit === null || limit === undefined) return { blocked: false, blockReason: null };
+  if (limit === 0) return { blocked: true, blockReason: "NOT_INCLUDED" };
+  if (type !== "BOOLEAN" && used >= limit) {
+    return { blocked: true, blockReason: "LIMIT_REACHED" };
+  }
+  return { blocked: false, blockReason: null };
+};
+
+/**
  * Returns a detailed breakdown of a user's subscription and usage for the dashboard.
  */
 export const getUserUsageDetails = async (userId) => {
-  const sub = await getUserSubscription(userId);
+  const policy = await resolveAccessPolicy(userId);
+  if (policy.mode !== "PLAN") return null;
+
+  const { sub, scope, user } = policy;
   if (!sub || !sub.planId) return null;
+  const isOrgStudent = scope === "ORG_STUDENT";
 
   // usageRecords only needs userId (already known) — it doesn't depend on
   // `plan`, so fetch it in parallel instead of after. planFeatures does
-  // depend on plan._id, so it still has to wait for that one.
+  // depend on plan._id, so it still has to wait for that one. Org students
+  // are metered on their own counters against the organization's plan.
   const targetPlanId = sub.planId._id ? sub.planId._id : sub.planId;
   const [plan, usageRecords] = await Promise.all([
     Plan.findById(targetPlanId).populate("roleId"),
@@ -881,38 +973,66 @@ export const getUserUsageDetails = async (userId) => {
   if (!plan) return null;
   const planFeatures = await PlanFeature.find({ planId: plan._id }).populate("featureId");
 
+  // Expiry is only flipped to EXPIRED lazily inside checkFeatureAccess, so
+  // compute it here too — otherwise the UI would show features as usable
+  // that the API is about to reject.
+  const isExpired = sub.status !== "ACTIVE" || isPastExpiry(sub);
+  const isOrganizationPlan = plan.roleId?.name === "ORGANIZATION";
+
   const featureDetails = await Promise.all(
     planFeatures.map(async (pf) => {
       const feature = pf.featureId;
       if (!feature) return null;
-      if (feature.key === "MAX_STUDENTS" && plan.roleId.name !== "ORGANIZATION") return null;
+      // Student capacity is an organization-account concern only.
+      if (feature.key === "MAX_STUDENTS" && (!isOrganizationPlan || isOrgStudent)) return null;
 
+      const rule = getFeatureRule(pf, scope);
       const usage = usageRecords.find((u) => u.featureId.toString() === feature._id.toString());
-      
+
       let usedCount = usage ? usage.usedCount : 0;
-      
+
       if (feature.type === "CAPACITY") {
         if (feature.key === "MAX_STUDENTS") {
-          usedCount = await User.countDocuments({ organizationId: userId, status: "ACTIVE" });
+          usedCount = await countOrganizationStudents(getManagedOrganizationId(user));
         }
       } else if (usage) {
          // simulate reset logic just for display
          const simUsage = new UserFeatureUsage(usage);
-         await handleResetLogic(simUsage, pf.resetType);
+         await handleResetLogic(simUsage, rule.resetType);
          usedCount = simUsage.usedCount;
       }
+
+      const { blocked, blockReason } = getFeatureBlockState({
+        isExpired,
+        enabled: rule.enabled,
+        limit: rule.limit,
+        type: feature.type,
+        used: usedCount,
+      });
 
       return {
         key: feature.key,
         displayName: feature.displayName,
         description: feature.description,
         type: feature.type,
-        enabled: pf.enabled,
-        limit: pf.limit,
+        enabled: rule.enabled,
+        limit: rule.limit,
         used: usedCount,
-        remaining: pf.limit === null ? "Unlimited" : Math.max(0, pf.limit - usedCount),
-        resetType: pf.resetType,
+        remaining: rule.limit === null ? "Unlimited" : Math.max(0, rule.limit - usedCount),
+        resetType: rule.resetType,
         periodEnd: usage ? usage.periodEnd : null,
+        blocked,
+        blockReason,
+        // On an organization's own view: what each of its students gets.
+        ...(isOrganizationPlan && !isOrgStudent
+          ? {
+              studentAllowance: {
+                enabled: Boolean(pf.studentEnabled),
+                limit: pf.studentLimit ?? null,
+                resetType: pf.studentResetType || "LIFETIME",
+              },
+            }
+          : {}),
       };
     })
   );
@@ -930,7 +1050,12 @@ export const getUserUsageDetails = async (userId) => {
       durationDays: plan.durationDays,
       isDefault: plan.isDefault,
     },
-    status: sub.status,
+    status: isExpired ? "EXPIRED" : sub.status,
+    expiresAt: sub.expiresAt || null,
+    isExpired,
+    // true for students whose limits come from their organization's plan:
+    // they can't purchase, the client tells them to contact the org instead.
+    managedByOrganization: isOrgStudent,
     features: featureDetails.filter(f => f !== null),
   };
 };
@@ -966,8 +1091,18 @@ export const upgradeUserPlan = async (userId, newPlanId, { session } = {}) => {
     await sub.save({ session });
   }
 
-  // Clear usage when switching plans (optional, but requested for clean start)
-  await UserFeatureUsage.deleteMany({ userId }, { session });
+  // Clear usage when switching plans (optional, but requested for clean start).
+  // An organization's students are metered against its plan, so their
+  // counters restart along with the organization's.
+  const owner = await User.findById(userId).select("role organizationId").session(session);
+  const usageOwners = [userId];
+  if (owner?.role === "ORGANIZATION") {
+    const studentIds = await User.find({ organizationId: getManagedOrganizationId(owner), role: "STUDENT" })
+      .distinct("_id")
+      .session(session);
+    usageOwners.push(...studentIds);
+  }
+  await UserFeatureUsage.deleteMany({ userId: { $in: usageOwners } }, { session });
 
   return sub;
 };
@@ -981,10 +1116,87 @@ export const upgradeUserPlan = async (userId, newPlanId, { session } = {}) => {
 export const upgradeUserPlanWithPayment = async (userId, planId, paymentDoc, { session } = {}) => {
   const sub = await upgradeUserPlan(userId, planId, { session });
   sub.lastPaymentId = paymentDoc._id;
-  sub.razorpayOrderId = paymentDoc.razorpayOrderId;
-  sub.razorpayPaymentId = paymentDoc.razorpayPaymentId;
+  sub.razorpayOrderId = paymentDoc.razorpayOrderId || null;
+  sub.razorpayPaymentId = paymentDoc.razorpayPaymentId || null;
   await sub.save({ session });
   return sub;
+};
+
+/**
+ * IQPATH_ADMIN assigns a plan to an independent student or an organization.
+ * Paid plans must be settled in CASH (the only offline mode, and the only
+ * mode admins can use — students/organizations pay through Razorpay).
+ * `amount` defaults to the plan price and may be overridden (e.g. a
+ * discount); it's in major units (rupees), stored in paise like Razorpay
+ * payments. Free plans are granted without a payment record.
+ */
+export const assignPlanByAdmin = async ({
+  adminId,
+  userId,
+  planId,
+  paymentMode = null,
+  amount = undefined,
+  note = null,
+}) => {
+  const target = await User.findById(userId).select("role organizationId status");
+  if (!target) throw new ApiError(404, "Target user not found");
+
+  if (target.role === "STUDENT" && target.organizationId) {
+    throw new ApiError(
+      400,
+      "This student belongs to an organization and follows the organization's plan. Assign a plan to the organization instead."
+    );
+  }
+  if (!["STUDENT", "ORGANIZATION"].includes(target.role)) {
+    throw new ApiError(400, "Plans can only be assigned to students and organizations.");
+  }
+
+  const plan = await Plan.findById(planId).populate("roleId");
+  if (!plan || !plan.active) throw new ApiError(404, "Plan not found or inactive");
+  if (plan.roleId?.name !== target.role) {
+    throw new ApiError(
+      400,
+      `This is a ${plan.roleId?.name || "different"} plan and can't be assigned to a ${target.role.toLowerCase()}.`
+    );
+  }
+
+  const isPaidPlan = (plan.price ?? 0) > 0;
+  if (paymentMode && paymentMode !== "CASH") {
+    throw new ApiError(400, "Admins can only record CASH payments. Online payments go through Razorpay checkout.");
+  }
+  if (isPaidPlan && paymentMode !== "CASH") {
+    throw new ApiError(400, "This is a paid plan — record it with payment mode CASH.");
+  }
+
+  if (!isPaidPlan) {
+    return upgradeUserPlan(userId, planId);
+  }
+
+  const amountMajor = amount === undefined || amount === null || amount === "" ? plan.price : Number(amount);
+  if (!Number.isFinite(amountMajor) || amountMajor < 0) {
+    throw new ApiError(400, "Amount must be a non-negative number.");
+  }
+
+  return withSubscriptionTransaction(async (session) => {
+    const sessionOpt = session ? { session } : {};
+    const [payment] = await Payment.create(
+      [
+        {
+          userId,
+          planId: plan._id,
+          mode: "CASH",
+          amount: Math.round(amountMajor * 100),
+          currency: plan.currency || "INR",
+          status: "PAID",
+          verifiedVia: "ADMIN",
+          recordedBy: adminId,
+          note: note ? String(note).trim().slice(0, 500) : null,
+        },
+      ],
+      sessionOpt
+    );
+    return upgradeUserPlanWithPayment(userId, plan._id, payment, { session });
+  });
 };
 
 // Constant-time comparison guarded against a length mismatch — Node's

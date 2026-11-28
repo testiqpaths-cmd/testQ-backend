@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { aiService } from "./ai.service.js";
+import { getBandStrategy } from "../constants/experience-bands.js";
 import logger from "../../../config/logger.js";
 
 const KNOWN_LABELS = {
@@ -66,11 +67,17 @@ export class AiFeedbackService {
     weaknesses,
     turnsSummary,
     interviewId = null,
+    experienceProfile = null,
   }) {
+    const band = experienceProfile?.band ? getBandStrategy(experienceProfile.band) : null;
     const systemPrompt = `You are an expert technical interview coach reviewing a completed mock interview.
 
 STRICT TASK:
-Write an encouraging but honest overall summary, and per-question feedback for each turn provided.
+Write an encouraging but honest overall summary, and per-question feedback for each turn provided.${
+      band
+        ? `\nJudge the candidate as a ${band.label} candidate. Weigh ${band.evaluationPriorities.join(", ")} most heavily, and describe ideal answers at the depth expected for this level: ${band.expectedDepth}`
+        : ""
+    }
 
 STRICT JSON OUTPUT FORMAT:
 {

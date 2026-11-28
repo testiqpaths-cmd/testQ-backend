@@ -36,6 +36,8 @@ export class ResumeService {
     const scopedTopics = this.topicSelector.selectInterviewTopics({
       role: options.role || "Software Engineer",
       candidateSkills: parsed.extracted.skills,
+      primarySkills: parsed.extracted.primarySkills || null,
+      secondarySkills: parsed.extracted.secondarySkills || null,
       duration: options.duration || 30,
       experienceLevel: options.experienceLevel || "1-3 Years",
       interviewTypes: options.interviewTypes || ["technical"],

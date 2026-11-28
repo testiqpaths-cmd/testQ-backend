@@ -4,6 +4,18 @@ import { ApiError } from "../../../common/exceptions/ApiError.js";
 
 export class InterviewPlanService {
   /**
+   * Total questions for an interview (~3-4 min each), or the user's own
+   * count when it's within 3-30. Includes the introduction.
+   */
+  computeGlobalQuestionLimit(duration = 30, userQuestionLimit = null) {
+    const safeDuration = Math.min(120, Math.max(5, Number(duration) || 30));
+    if (userQuestionLimit && Number(userQuestionLimit) >= 3 && Number(userQuestionLimit) <= 30) {
+      return Number(userQuestionLimit);
+    }
+    return Math.min(25, Math.max(4, Math.round(safeDuration / 3.5)));
+  }
+
+  /**
    * Generates and persists an internal InterviewPlan for an interview session.
    *
    * @param {Object} params
@@ -20,6 +32,7 @@ export class InterviewPlanService {
     duration = 30,
     difficulty = Difficulty.ADAPTIVE,
     userQuestionLimit = null,
+    topicBudgetOverrides = null,
   }) {
     if (!Array.isArray(topics) || topics.length === 0) {
       throw new ApiError(400, "Interview plan requires at least one topic.");
@@ -27,16 +40,7 @@ export class InterviewPlanService {
 
     const safeDuration = Math.min(120, Math.max(5, Number(duration) || 30));
 
-    // Calculate global question limit based on duration (~3-4 min per question)
-    let globalQuestionLimit;
-    if (userQuestionLimit && Number(userQuestionLimit) >= 3 && Number(userQuestionLimit) <= 30) {
-      globalQuestionLimit = Number(userQuestionLimit);
-    } else {
-      globalQuestionLimit = Math.min(
-        25,
-        Math.max(4, Math.round(safeDuration / 3.5))
-      );
-    }
+    const globalQuestionLimit = this.computeGlobalQuestionLimit(safeDuration, userQuestionLimit);
 
     // Maximum questions per individual topic (upper bound, typically 3-5)
     const maxQuestionsPerTopic = Math.min(
@@ -63,11 +67,23 @@ export class InterviewPlanService {
       Math.floor(globalQuestionLimit / topics.length)
     );
 
-    const topicBudgets = topics.map((topic) => ({
-      topic: String(topic).toUpperCase(),
-      targetQuestions: targetQuestionsPerTopic,
-      allocatedMinutes: allocatedMinutesPerTopic,
-    }));
+    // Experience-aware plans pass per-topic targets derived from each phase's
+    // budget (services/interview-strategy.service.js); others split evenly.
+    const overrides = new Map(
+      (Array.isArray(topicBudgetOverrides) ? topicBudgetOverrides : []).map((b) => [
+        String(b.topic).toUpperCase(),
+        b,
+      ])
+    );
+    const topicBudgets = topics.map((topic) => {
+      const key = String(topic).toUpperCase();
+      const o = overrides.get(key);
+      return {
+        topic: key,
+        targetQuestions: o?.targetQuestions ?? targetQuestionsPerTopic,
+        allocatedMinutes: o?.allocatedMinutes ?? allocatedMinutesPerTopic,
+      };
+    });
 
     const plan = new InterviewPlan({
       sessionId,
